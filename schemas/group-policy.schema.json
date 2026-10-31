@@ -44,7 +44,8 @@
           "type": "string",
           "enum": [
             "when_asked",
-            "proactive"
+            "proactive",
+            "roleplay"
           ]
         },
         "personal_questions": {

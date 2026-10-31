@@ -23,3 +23,15 @@ test('unsupported concealment modes are rejected; neutral persona never inherits
   const neutral=identityInstructions({disclosure:'when_asked',personal_questions:'tactful'},'neutral');
   assert(!neutral.some(s=>s.includes('口吻可以借')));assert(neutral.some(s=>s.includes('不模仿GT')));
 });
+
+test('informed roleplay keeps character without mixing ordinary disclosure rules',()=>{
+  const identity=identityPolicySchema.parse({disclosure:'roleplay',personal_questions:'plain'});
+  const rules=identityInstructions(identity,'gt-persona');
+  assert(rules.some(s=>s.includes('所有参与者知道')));
+  assert(rules.some(s=>s.includes('角色内被问')));
+  assert(rules.some(s=>s.includes('OOC')&&s.includes('如实说明')));
+  assert(rules.some(s=>s.includes('GT的直率')));
+  assert(!rules.some(s=>s.startsWith('身份底线：')));
+  const neutral=identityInstructions(identity,'neutral');
+  assert(!neutral.some(s=>s.includes('办户口')));
+});
