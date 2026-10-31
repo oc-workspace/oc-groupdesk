@@ -286,6 +286,46 @@ test('model credentials stay write-only while text/image routes isolate groups a
   assert(!JSON.stringify((await request('/logs')).data).includes(secretA));assert(!JSON.stringify((await request('/logs')).data).includes(secretB));
 });
 
+test('provider batch imports protocols and reference models atomically while preserving existing defaults',async()=>{
+  const {importProviderBatch}=await import('../server/provider-import.js');
+  const {refreshCatalog}=await import('../server/models.js');
+  const before=(await request('/models')).data,original=before.credentials.find((c:any)=>c.id===before.defaults.routes.text.credential_id);
+  const ciphertext=(await pool.query('SELECT key_ciphertext FROM model_credentials WHERE id=$1',[original.id])).rows[0].key_ciphertext;
+  const input={rename:{id:original.id,revision:original.revision,name:'Renamed existing provider'},credentials:[
+    {name:'Gemini image fixture',base_url:'https://api.example.com',client_type:'gemini',api_key:'isolated-gemini-image-secret',configured_model:'gemini-2.0-flash'},
+    {name:'Responses fixture',base_url:'https://api.example.com/v1',client_type:'openai_responses',api_key:'isolated-responses-secret',configured_model:'gpt-5.5'},
+    {name:'Gemini text fixture',base_url:'https://api.example.com',client_type:'gemini',api_key:'isolated-gemini-text-secret',configured_model:'gemini-2.0-flash'}
+  ]};
+  const added=await importProviderBatch(input);assert.equal(added.length,3);
+  const after=(await request('/models')).data;
+  assert.equal(after.credentials.length,before.credentials.length+3);assert.deepEqual(after.defaults,before.defaults);
+  assert.equal(after.credentials.find((c:any)=>c.id===original.id).name,'Renamed existing provider');
+  assert.equal((await pool.query('SELECT key_ciphertext FROM model_credentials WHERE id=$1',[original.id])).rows[0].key_ciphertext,ciphertext);
+  assert.deepEqual(await importProviderBatch(input),added);
+  for(const item of added){
+    const row=after.credentials.find((c:any)=>c.id===item.id);let observed='';
+    await refreshCatalog(item.id,'test',async(_url,_key,protocol)=>{observed=protocol||'';return protocol==='gemini'?{models:[{name:'models/gemini-nano-banana-2.1'},{name:'models/gemini-3.8-flash'}]}:{data:[{id:'gpt-image-2',type:'image'}]};});
+    assert.equal(observed,row.client_type);
+  }
+  const gemini=(await request('/models')).data.credentials.find((c:any)=>c.id===added[0].id);
+  assert(gemini.models.some((m:any)=>m.model_id==='gemini-2.0-flash'&&m.source==='configured'&&!m.listed));
+  assert.equal((await request('/model-credentials/'+gemini.id,'PUT',{...gemini,client_type:undefined})).status,200);
+  assert.equal((await request('/models')).data.credentials.find((c:any)=>c.id===gemini.id).client_type,'gemini');
+  let group=(await request('/overview')).data.groups.find((g:any)=>g.external_id==='synthetic-route-a');
+  group=(await request('/groups/'+group.id,'PUT',{...group,model_routes:{...group.model_routes,text:{mode:'custom',credential_id:gemini.id,model_id:'gemini-2.0-flash'}}})).data;
+  assert.equal((await request('/runtime/config/synthetic-route-a','GET',undefined,true)).data.model_routing.text.client_type,'gemini');
+  const privateRoute=(await request('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision},true)).data.text_route;
+  assert.equal(privateRoute.client_type,'gemini');assert.equal(privateRoute.base_url,'https://api.example.com');assert.equal(privateRoute.api_key,input.credentials[0].api_key);
+  const publicData=JSON.stringify((await request('/overview')).data),logs=JSON.stringify((await request('/logs')).data);
+  for(const c of input.credentials){assert(!publicData.includes(c.api_key));assert(!logs.includes(c.api_key));}
+});
+test('a conflicting provider batch rolls back its rename and never overwrites an existing key',async()=>{
+  const {importProviderBatch}=await import('../server/provider-import.js');
+  const before=(await request('/models')).data,original=before.credentials.find((c:any)=>c.name==='Renamed existing provider'),existing=before.credentials.find((c:any)=>c.name==='Gemini image fixture');
+  await assert.rejects(importProviderBatch({rename:{id:original.id,revision:original.revision,name:'Must roll back'},credentials:[{name:existing.name,base_url:existing.base_url,client_type:'gemini',api_key:'different-isolated-secret'}]}));
+  assert.deepEqual((await request('/models')).data,before);
+});
+
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

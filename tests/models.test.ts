@@ -25,3 +25,22 @@ test('model catalog is bounded, deduplicated and separates text, image, video an
   assert.throws(()=>parseCatalog({data:[{id:'bad\nheader'}]}));
   assert.throws(()=>parseCatalog({unexpected:[]}));
 });
+
+test('Gemini catalogs normalize native names and keep image and text candidates separate',()=>{
+  const rows=parseCatalog({models:[{name:'models/gemini-2.0-flash',supportedGenerationMethods:['generateContent']},{name:'models/gemini-nano-banana-2.1',supportedGenerationMethods:['generateContent']},{name:'models/native-embedding',supportedGenerationMethods:['embedContent']} ]},'gemini');
+  assert.deepEqual(rows.map(r=>[r.id,r.capability]),[['gemini-2.0-flash','text'],['gemini-nano-banana-2.1','image'],['native-embedding','other']]);
+  assert.throws(()=>parseCatalog({models:[{name:'models/bad\nname'}]},'gemini'));
+});
+test('Responses supports both standard and Codex model directories without changing the supplied model ID',()=>{
+  assert.equal(parseCatalog({models:[{slug:'gpt-5.5',display_name:'Example model'}]},'openai_responses')[0].id,'gpt-5.5');
+  assert.equal(parseCatalog({data:[{id:'gpt-image-2',type:'image'}]},'openai_responses')[0].capability,'image');
+  assert.equal(inferCapability('gpt-5.5'),'text');assert.equal(inferCapability('gemini-2.0-flash'),'text');
+});
+test('Gemini catalog paths support root and versioned bases and keep credentials out of URLs',async()=>{
+  const {catalogLocation}=await import('../server/model-security.js');
+  assert.equal(catalogLocation('https://api.example.com','gemini').pathname,'/v1beta/models');
+  assert.equal(catalogLocation('https://api.example.com/v1beta','gemini').pathname,'/v1beta/models');
+  const page=catalogLocation('https://api.example.com','gemini','next + page');
+  assert.equal(page.searchParams.get('pageToken'),'next + page');assert.equal(page.searchParams.get('key'),null);
+  assert.equal(catalogLocation('https://api.example.com/v1','openai_responses').pathname,'/v1/models');
+});

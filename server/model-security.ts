@@ -36,13 +36,23 @@ export function baseUrl(value:string){
   requireCondition(host.includes('.')&&!host.endsWith('.local')&&!host.endsWith('.localhost')&&host!=='localhost'&&(!isIP(host)||publicAddress(host)),400,'API 地址必须指向公网服务');
   return url.href.replace(/\/+$/,'');
 }
-export async function fetchCatalog(endpoint:string,key:string):Promise<unknown>{
-  const url=new URL(baseUrl(endpoint)+'/models');
+export type ClientType='openai'|'openai_responses'|'gemini';
+export function catalogLocation(endpoint:string,protocol:ClientType='openai',pageToken?:string){
+  const normalized=baseUrl(endpoint);
+  const path=protocol==='gemini'&&!/\/v\d+(?:alpha|beta)?\d*$/.test(new URL(normalized).pathname)?normalized+'/v1beta':normalized;
+  const url=new URL(path+'/models');
+  if(protocol==='gemini'){
+    url.searchParams.set('pageSize','1000');
+    if(pageToken)url.searchParams.set('pageToken',pageToken);
+  }
+  return url;
+}
+async function requestCatalog(url:URL,key:string,protocol:ClientType):Promise<unknown>{
   const addresses=await lookup(url.hostname,{all:true});
   requireCondition(addresses.length&&addresses.every(r=>publicAddress(r.address)),400,'API 域名不能解析到内网或保留地址');
   return new Promise((resolve,reject)=>{
     const request=get(url,{
-      headers:{Authorization:'Bearer '+key,Accept:'application/json'},family:addresses[0].family,
+      headers:{...(protocol==='gemini'?{'x-goog-api-key':key}:{Authorization:'Bearer '+key}),Accept:'application/json'},family:addresses[0].family,
       lookup:((_host:unknown,_options:unknown,cb:Function)=>cb(null,addresses[0].address,addresses[0].family)) as any
     },response=>{
       if(response.statusCode!==200){response.resume();reject(new HttpError(502,'模型目录请求失败（HTTP '+response.statusCode+'），已保留原目录'));return;}
@@ -55,4 +65,17 @@ export async function fetchCatalog(endpoint:string,key:string):Promise<unknown>{
     request.on('close',()=>clearTimeout(timeout));
     request.on('error',()=>reject(new HttpError(502,'模型目录连接失败或超时，已保留原目录')));
   });
+}
+export async function fetchCatalog(endpoint:string,key:string,protocol:ClientType='openai'):Promise<unknown>{
+  if(protocol!=='gemini')return requestCatalog(catalogLocation(endpoint,protocol),key,protocol);
+  const models:unknown[]=[];const seen=new Set<string>();let token:string|undefined;
+  for(let page=0;page<5;page++){
+    const value=await requestCatalog(catalogLocation(endpoint,protocol,token),key,protocol) as {models?:unknown[];nextPageToken?:unknown};
+    requireCondition(value&&Array.isArray(value.models),502,'服务未返回 Gemini 模型目录，已保留原目录');
+    models.push(...value.models);requireCondition(models.length<=5000,502,'模型目录过大，已保留原目录');
+    if(!value.nextPageToken)return {models};
+    requireCondition(typeof value.nextPageToken==='string'&&value.nextPageToken.length<=2048&&!seen.has(value.nextPageToken),502,'模型目录分页无效，已保留原目录');
+    seen.add(value.nextPageToken);token=value.nextPageToken;
+  }
+  throw new HttpError(502,'模型目录分页过多，已保留原目录');
 }
