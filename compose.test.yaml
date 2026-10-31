@@ -18,6 +18,7 @@ services:
       DATABASE_URL: postgres://postgres:isolated-test-only@postgres-test:5432/groupdesk_test
       ADMIN_PASSWORD: isolated-test-admin-password
       BOT_API_TOKEN: isolated-test-bot-token-at-least-32-characters
+      MODEL_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       COOKIE_SECURE: "false"
       DATA_DIR: /tmp/groupdesk-test-data
     depends_on:

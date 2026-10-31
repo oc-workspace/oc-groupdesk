@@ -54,6 +54,7 @@ def load_profiles():
 
 def validate_bundle(bundle,external_id):
     if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')
+    if bundle.get('model_routing_contract_version') not in [None,1]:raise ValueError('Unknown model routing contract')
     if bundle.get('policy',{}).get('persona') not in ['gt-persona','neutral']:raise ValueError('Unsupported persona')
     if len(bundle.get('topics',[]))>100:raise ValueError('Too many topics')
     for t in bundle['topics']:
@@ -76,6 +77,10 @@ def sync():
     for chat,external in conf['groups'].items():
         try:
             b=api('/config/'+urllib.parse.quote(external,safe=''));validate_bundle(b,external)
+            if b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):
+                private=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']
+                from model_routing import validate_private_route
+                validate_private_route(b,private);b['private_text_route']=private
             groups[str(chat)]={**b,'valid_until':time.time()+75}
             acks.append((str(chat),b['id'],b['revision']))
         except Exception:groups[str(chat)]={'enabled':False,'valid_until':0,'revision':'unavailable'}
@@ -84,7 +89,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'model_routing_version':1})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 

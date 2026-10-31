@@ -4,6 +4,11 @@ set -euo pipefail
 backup_dir="$(realpath "$1")"
 [[ "$backup_dir" == /opt/docker/backups/groupdesk/* ]] || { echo "Use a trusted GroupDesk backup directory"; exit 1; }
 (cd "$backup_dir" && sha256sum -c SHA256SUMS)
+if [[ -f "$backup_dir/model-encryption.env" ]]; then
+  model_key_line="$(grep -E '^MODEL_ENCRYPTION_KEY=[[:xdigit:]]{64}$' /opt/persist/groupdesk/secrets/app.env || true)"
+  [[ "$model_key_line" == "$(cat "$backup_dir/model-encryption.env")" ]] || { echo "Restore the matching MODEL_ENCRYPTION_KEY from this root-only backup to external app.env first"; exit 1; }
+  unset model_key_line
+fi
 cd /opt/docker/groupdesk/current
 export RELEASE_SHA="$(cat /opt/persist/groupdesk/release-sha)"
 dc=(docker compose --env-file /opt/persist/groupdesk/secrets/app.env)
