@@ -42,3 +42,13 @@ GET /api/runtime/config/:externalId 返回完整配置和 revision，停用配�
 示例客户端支持 HTTPS/SSH loopback，具备超时和错误处理。
 
 API 不发送微信消息、不调用模型，测试不会向真实群发言。
+
+## 群聊策略契约 v1
+
+配置接口新增policy_contract_version、policy、完整topics与participation_skill。话题数据含lexicons、all组合、排除、承接和深度；实际匹配及限流由适配器执行。后台topic.policy编辑后增加关联群revision。仓库模板只首次导入；显式覆盖需带当前话题revision。
+
+policy.topic_scope=all保留原来的全部回答范围限制；proactive只限制主动参与，点名可问其他一般问题。私聊仍使用all，知识访问不扩展。语言policy包含follow/restricted/fixed、allowed、fallback和allow_requested；识别词条语言与输出语言独立。group.topic_overrides可覆盖当前群的讨论深度。
+
+可信群标识可包含适配器实例命名空间和持久会话标识，不必冒充微信官方wxid。昵称派生用户标识只用于群内会话，不授予私聊权限。专用适配器token以SHA256存数据库，限制group_external_ids，禁止私聊场景。主BOT_API_TOKEN仍用于服务端管理集成，不能交给浏览器。
+
+MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤销停止该群处理，发送前复核服务端revision。ack表示已应用对应版本，不代表已发送实测。测试预览不调用模型或微信。

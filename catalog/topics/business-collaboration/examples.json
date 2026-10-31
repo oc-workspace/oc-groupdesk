@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "positive": [
+    "RFQ is the topic we are discussing."
+  ],
+  "negative": [
+    "The weather is pleasant today."
+  ]
+}

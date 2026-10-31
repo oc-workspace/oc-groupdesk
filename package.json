@@ -1,6 +1,11 @@
 {
-  "name": "oc-groupdesk", "version": "0.1.0", "private": true, "type": "module",
-  "engines": {"node": ">=22.13"},
+  "name": "oc-groupdesk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
@@ -9,18 +14,33 @@
     "test": "tsx --test tests/*.test.ts",
     "test:integration": "tsx --test tests/integration.ts",
     "migrate": "tsx server/migrate.ts",
-    "admin:reset": "tsx server/reset-admin.ts"
+    "admin:reset": "tsx server/reset-admin.ts",
+    "catalog:check": "tsx scripts/export-schemas.ts"
   },
   "dependencies": {
-    "cookie-parser": "^1.4.7", "express": "^5.1.0", "express-rate-limit": "^8.2.0",
-    "helmet": "^8.1.0", "lucide-react": "^0.468.0", "multer": "^2.0.2",
-    "pdf-parse": "^2.4.5", "pg": "^8.16.3", "react": "^19.2.0", "react-dom": "^19.2.0",
-    "tsx": "^4.20.6", "zod": "^4.1.12"
+    "cookie-parser": "^1.4.7",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.2.0",
+    "helmet": "^8.1.0",
+    "lucide-react": "^0.468.0",
+    "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.16.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.20.6",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.9", "@types/express": "^5.0.5", "@types/multer": "^2.0.0",
-    "@types/node": "^22.19.0", "@types/pg": "^8.15.6", "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0", "@vitejs/plugin-react": "^5.1.0",
-    "typescript": "^5.9.3", "vite": "^7.2.2"
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^5.0.5",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.19.0",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
   }
 }

@@ -1,0 +1,12 @@
+{
+  "key": "business-collaboration",
+  "version": 1,
+  "name": "商业合作与资源交流",
+  "description": "商业合作、资源互补、渠道与供应链。",
+  "instructions": "围绕当前讨论给出有用补充；不虚构本人经历或最新事实。自然简短，避免没有新信息的重复。",
+  "color": "green",
+  "policy": {
+    "schema_version": 1,
+    "reply_depth": "brief"
+  }
+}

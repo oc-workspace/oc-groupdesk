@@ -13,6 +13,9 @@ RUN npm ci --omit=dev --no-fund && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY migrations ./migrations
+COPY catalog ./catalog
+COPY skills ./skills
+COPY integration ./integration
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3110

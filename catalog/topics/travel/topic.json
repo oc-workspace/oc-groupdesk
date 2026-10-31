@@ -1,0 +1,12 @@
+{
+  "key": "travel",
+  "version": 1,
+  "name": "旅游见闻",
+  "description": "旅游见闻、路线、风土人情和旅途观察。",
+  "instructions": "围绕当前讨论给出有用补充；不虚构本人经历或最新事实。自然简短，避免没有新信息的重复。",
+  "color": "amber",
+  "policy": {
+    "schema_version": 1,
+    "reply_depth": "brief"
+  }
+}

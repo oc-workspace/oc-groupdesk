@@ -1,0 +1,12 @@
+{
+  "key": "language-learning",
+  "version": 1,
+  "name": "各国语言学习和交流",
+  "description": "各国语言学习、交流、发音、语法和表达。",
+  "instructions": "围绕当前讨论给出有用补充；不虚构本人经历或最新事实。实质问题允许具体解释、举例或追问必要条件；简单接话仍简短。",
+  "color": "amber",
+  "policy": {
+    "schema_version": 1,
+    "reply_depth": "detailed"
+  }
+}

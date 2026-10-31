@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {pool,transaction} from './db.js';
 import {passwordHash} from './security.js';
+import {catalog} from './policies.js';
 
 export async function migrate(){
   await transaction(async db=>{
@@ -36,6 +37,14 @@ export async function migrate(){
         await db.query('INSERT INTO groups(id,name,language) VALUES($1,$2,$3)',[id,name,language]);
         for(const i of indices)await db.query('INSERT INTO group_topics(group_id,topic_id) VALUES($1,$2)',[id,ids[i]]);
       }
+    }
+    if(!(await db.query("SELECT 1 FROM catalog_imports WHERE name='builtin-v1'")).rowCount){
+      for(const item of await catalog()){
+        const existing=(await db.query('SELECT id FROM topics WHERE name=$1',[item.name])).rows[0];
+        if(existing)await db.query('UPDATE topics SET policy=$1,catalog_key=$2,catalog_version=$3,catalog_hash=$4 WHERE id=$5',[item.policy,item.key,item.version,item.hash,existing.id]);
+        else await db.query('INSERT INTO topics(id,name,description,instructions,color,policy,catalog_key,catalog_version,catalog_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),item.name,item.description,item.instructions,item.color,item.policy,item.key,item.version,item.hash]);
+      }
+      await db.query("INSERT INTO catalog_imports(name) VALUES('builtin-v1')");
     }
   });
 }

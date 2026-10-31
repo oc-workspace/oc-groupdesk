@@ -1,0 +1,345 @@
+--- a/limits/policy.py
++++ b/limits/policy.py
+@@ -14,6 +14,7 @@
+ import sqlite3
+ import time
+ import uuid
++import groupdesk_runtime as gd
+ from food_participation import FOOD_TOPIC, authored_text, combination, continuation, rules_for, validate_rules, EXIT
+ 
+ # Keep the original name and share aliases with the transport mention marker.
+@@ -99,6 +100,7 @@
+ 
+ def priority_topics(config,chat_id,text):
+     """Cheap group-scoped eligibility, not a promise or quota bypass."""
++    if gd.profile(config,chat_id) is not None:return gd.topics(config,chat_id,text)
+     topics=config.get('group_priority_topics',{}).get(str(chat_id),[])
+     if not topics:return []
+     visible=re.sub(r'https?://\S+','',text,flags=re.I)
+@@ -134,7 +136,10 @@
+ 
+ 
+ def settings():
+-    return json.loads(Path(__file__).with_name('policy.json').read_text())
++    result=json.loads(Path(__file__).with_name('policy.json').read_text())
++    managed=gd.load_profiles()
++    if managed is not None:result['managed_groups']=managed
++    return result
+ 
+ 
+ class Denied(Exception):
+@@ -179,6 +184,11 @@
+                     db.execute('ALTER TABLE '+table+' ADD COLUMN chat_id TEXT NOT NULL DEFAULT ""')
+             if 'food_anchor_seq' not in {r['name'] for r in db.execute('PRAGMA table_info(pending)')}:
+                 db.execute('ALTER TABLE pending ADD COLUMN food_anchor_seq INTEGER NOT NULL DEFAULT 0')
++            gd.init_db(db)
++            for table in ('pending','turns'):
++                cols={r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
++                for name,definition in [('policy_revision',"TEXT NOT NULL DEFAULT ''"),('topic_context_json',"TEXT NOT NULL DEFAULT '{}'"),('managed_topics',"TEXT NOT NULL DEFAULT '[]'")]:
++                    if name not in cols:db.execute('ALTER TABLE '+table+' ADD COLUMN '+name+' '+definition)
+         self.path.chmod(0o600)
+ 
+     def migrate_legacy_chat(self,chat_id):
+@@ -240,6 +250,13 @@
+         ).fetchone() is not None
+ 
+     def _quota(self, db, kind, now, table='turns', explicit=False,chat_id=''):
++        managed=gd.profile(self.cfg,chat_id)
++        if managed is not None:
++            if not gd.available(managed,now):return 'groupdesk_unavailable'
++            if not explicit and (managed.get('interaction')=='mention' or managed['policy']['participation']=='quiet'):return 'mention_only'
++            if kind=='passive' and managed['policy']['participation']=='moderate':
++                col='created' if table=='turns' else 'ts'
++                if db.execute(f'SELECT 1 FROM {table} WHERE chat_id=? AND kind="passive" AND {col}>?' if table=='turns' else 'SELECT 1 FROM sends s JOIN turns t ON s.turn_id=t.id WHERE t.chat_id=? AND s.kind="passive" AND s.ts>?',(chat_id,now-180)).fetchone():return 'group_passive_cooldown'
+         # Admission counts attempts, even if MaiBot chooses silence; the send
+         # gate independently caps actual messages. Unknown sends still count.
+         if table=='turns' and db.execute('SELECT 1 FROM circuits WHERE until>?',(now,)).fetchone():
+@@ -301,9 +318,14 @@
+             direct = bool(at_me or NAME.search(text) or followup or (existing and existing['kind']=='direct'))
+             kind = 'direct' if direct else 'passive'
+             fast = bool(direct and (fast_candidate(text,direct) or greeting_candidate(text)) and not existing)
++            managed=gd.profile(self.cfg,chat_id);topic_refs={}
+             topics=priority_topics(self.cfg,chat_id,text)
+-            topics,food_anchor=self.food_classification(db,seq,chat_id,text,display,now,timestamp,topics)
+-            eligible='topic' if topics else candidate(text)
++            if managed is not None:
++                topics,topic_refs=gd.classify(db,self.cfg,chat_id,seq,text,display,now,timestamp);food_anchor=0
++            else:topics,food_anchor=self.food_classification(db,seq,chat_id,text,display,now,timestamp,topics)
++            generic=candidate(text)
++            if managed is not None and generic and not managed['policy'].get('base_questions' if generic=='question' else 'base_social'):generic=None
++            eligible='topic' if topics else generic
+             if not text or (not direct and not existing and not eligible):
+                 self.count(db,'filtered'); return 'filtered'
+             reason = self._quota(db, kind, now, explicit=explicit,chat_id=chat_id)
+@@ -319,6 +341,11 @@
+                     db.execute('UPDATE pending SET text=?,last=?,kind=?,article=?,explicit=?,fast=0,greeting=0 WHERE id=?',(merged,now,'direct' if direct or old['kind']=='direct' else 'passive',int(bool(old['article'] or ARTICLE.search(text))),int(explicit),old['id']))
+                     merged_anchor=0 if food_signal(self.cfg,chat_id,merged) else old['food_anchor_seq'] or food_anchor
+                     db.execute('UPDATE pending SET food_anchor_seq=? WHERE id=?',(merged_anchor,old['id']))
++                    if managed is not None:
++                        refs=json.loads(old['topic_context_json']);refs.update(topic_refs)
++                        direct_keys={t['id'] for t in managed['topics'] if gd.direct_signal(t['policy'],merged)[0]}
++                        refs={k:v for k,v in refs.items() if k not in direct_keys}
++                        db.execute('UPDATE pending SET topic_context_json=?,policy_revision=? WHERE id=?',(json.dumps(refs),gd.revision(managed),old['id']))
+                     self.count(db,'merged'); return 'merged'
+                 self.count(db,'sender_queue_full'); return 'sender_queue_full'
+             if db.execute('SELECT COUNT(*) FROM pending').fetchone()[0] >= self.cfg['queue_limit']:
+@@ -328,7 +355,8 @@
+                 db.execute('DELETE FROM pending WHERE id=?',(victim['id'],)); self.count(db,'evicted_passive')
+             db.execute('INSERT INTO pending (id,sender,display,kind,first,last,text,article,explicit,fast) VALUES (?,?,?,?,?,?,?,?,?,?)',(uuid.uuid4().hex,sender,display,kind,now,now,text,int(bool(ARTICLE.search(text))),int(explicit),int(fast)))
+             db.execute('UPDATE pending SET chat_id=?,food_anchor_seq=? WHERE sender=?',(chat_id,food_anchor,sender))
+-            if explicit and fast and greeting_candidate(text):
++            if managed is not None:db.execute('UPDATE pending SET policy_revision=?,topic_context_json=? WHERE sender=?',(gd.revision(managed),json.dumps(topic_refs),sender))
++            if explicit and fast and greeting_candidate(text) and (not managed or managed['policy']['persona']=='gt-persona'):
+                 db.execute('UPDATE pending SET greeting=1 WHERE sender=?',(sender,))
+             if fast: self.count(db,'fast_eligible')
+             if eligible and not direct: self.count(db,'candidate_'+eligible)
+@@ -403,6 +431,14 @@
+                     self.count(db,'preempted_idle_passive')
+             candidates=db.execute('SELECT * FROM pending ORDER BY CASE kind WHEN "direct" THEN 0 ELSE 1 END,first').fetchall()
+             for row in candidates:
++                managed=gd.profile(self.cfg,row['chat_id']);managed_background=[]
++                if managed is not None:
++                    if row['policy_revision']!=gd.revision(managed):
++                        db.execute('DELETE FROM pending WHERE id=?',(row['id'],));self.count(db,'managed_revision_cancelled');continue
++                    refs=json.loads(row['topic_context_json'])
++                    managed_background=gd.anchor_background(db,managed,row['chat_id'],refs,now)
++                    if row['kind']=='passive' and refs and len(managed_background)!=len(refs):
++                        db.execute('DELETE FROM pending WHERE id=?',(row['id'],));self.count(db,'managed_context_cancelled');continue
+                 food_anchor=self.food_anchor(db,row['chat_id'],row['food_anchor_seq'],now)
+                 if row['kind']=='passive' and row['food_anchor_seq'] and not food_anchor:
+                     db.execute('DELETE FROM pending WHERE id=?',(row['id'],));self.count(db,'food_context_cancelled');continue
+@@ -418,7 +454,7 @@
+                     if row['kind']=='passive': db.execute('DELETE FROM pending WHERE id=?',(row['id'],))
+                     continue
+                 db.execute('INSERT INTO turns (id,sender,kind,created,expires,status,article,ended,explicit,fast) VALUES (?,?,?,?,?,?,?,?,?,?)',(row['id'],row['sender'],row['kind'],now,now+self.cfg['turn_ttl_seconds'],'active',row['article'],None,row['explicit'],row['fast']))
+-                db.execute('UPDATE turns SET greeting=?,chat_id=? WHERE id=?',(row['greeting'],row['chat_id'],row['id']))
++                db.execute('UPDATE turns SET greeting=?,chat_id=?,policy_revision=? WHERE id=?',(row['greeting'],row['chat_id'],row['policy_revision'],row['id']))
+                 db.execute('DELETE FROM pending WHERE id=?',(row['id'],))
+                 recent=db.execute('SELECT sender,ts,text FROM observed WHERE ts>? AND chat_id=? ORDER BY seq DESC',(now-self.cfg['context_age_seconds'],row['chat_id'])).fetchall()
+                 seen=set(); selected=[]
+@@ -432,6 +468,9 @@
+                 if food_anchor and not any(food_anchor['anchor_text'] in item for item in selected):
+                     selected=selected[:max(0,self.cfg['context_messages']-1)]
+                     selected.append('[近期美食话题，约'+str(max(0,round(now-food_anchor['anchor_ts'])))+'秒前，仅作背景]\n'+food_anchor['anchor_text'])
++                if managed_background:
++                    label,text=managed_background[0];selected=selected[:max(0,self.cfg['context_messages']-1)]
++                    selected.append('['+label+'近期背景，非新消息]\n'+text)
+                 context='\n'.join(reversed(selected))
+                 if food_anchor:
+                     # Keep the small food anchor even when older recent text
+@@ -441,6 +480,11 @@
+                         prefix=prefix[:self.cfg['context_chars']]
+                         remaining=self.cfg['context_chars']-len(prefix)
+                         context=prefix+(context[-remaining:] if remaining else '')
++                if managed_background:
++                    prefix='[近期话题背景]\n'+managed_background[0][1]+'\n'
++                    if len(context)>self.cfg['context_chars']:
++                        prefix=prefix[:self.cfg['context_chars']];remaining=self.cfg['context_chars']-len(prefix)
++                        context=prefix+(context[-remaining:] if remaining else '')
+                 context=context[-self.cfg['context_chars']:]
+                 self.count(db,'dispatched_'+row['kind'])
+                 if row['fast']: self.count(db,'dispatched_fast')
+@@ -448,6 +492,9 @@
+                 rounds=conversation['rounds'] if conversation and now-conversation['last']<self.cfg.get('conversation_reset_seconds',180) else 0
+                 topics=priority_topics(self.cfg,row['chat_id'],row['text']) if row['kind']=='passive' else []
+                 if food_anchor and row['kind']=='passive':topics=list(dict.fromkeys(topics+[FOOD_TOPIC]))
++                if managed is not None:
++                    topics=list(dict.fromkeys(topics+[name for name,_ in managed_background]))
++                    db.execute('UPDATE turns SET managed_topics=? WHERE id=?',(json.dumps(gd.topics(self.cfg,row['chat_id'],row['text'])+[name for name,_ in managed_background]),row['id']))
+                 if topics:self.count(db,'dispatched_topic')
+                 return dict(row,context=context,conversation_rounds=rounds,priority_topics=topics,expires=now+self.cfg['turn_ttl_seconds'])
+             return None
+@@ -472,6 +519,7 @@
+         with self.db() as db:
+             db.execute('DELETE FROM pending')
+             db.execute('DELETE FROM group_food_context')
++            db.execute('DELETE FROM managed_topic_context')
+             db.execute('UPDATE turns SET status="paused",ended=? WHERE status="active"',(self.clock(),))
+ 
+     def open_circuit(self, seconds, reason):
+@@ -485,6 +533,8 @@
+         with self.db() as db:
+             turn=db.execute('SELECT * FROM turns WHERE id=? AND status="active" AND expires>?',(turn_id,now)).fetchone()
+             if not turn: raise Denied('no_active_turn')
++            managed=gd.profile(self.cfg,turn['chat_id'])
++            if managed is not None and turn['policy_revision']!=gd.revision(managed):raise Denied('groupdesk_revision')
+             if chat_id is not None and turn['chat_id']!=str(chat_id):raise Denied('wrong_target_group')
+             if self._quota(db,turn['kind'],now,table='sends',explicit=bool(turn['explicit']),chat_id=turn['chat_id']): raise Denied('send_quota')
+             if not db.execute('INSERT OR IGNORE INTO sends VALUES (?,?,?,?,?,?)',(identifier,turn_id,now,self.day(now),turn['kind'],'reserved')).rowcount: raise Denied('duplicate_send')
+@@ -513,6 +563,7 @@
+             if db.execute('SELECT 1 FROM circuits WHERE until>?',(now,)).fetchone(): reason='provider_cooldown'
+             elif not turn: reason='no_active_turn'
+             elif expected_turn_id is not None and turn['id']!=expected_turn_id: reason='stale_turn'
++            elif gd.profile(self.cfg,turn['chat_id']) is not None and (not gd.available(gd.profile(self.cfg,turn['chat_id']),now) or turn['policy_revision']!=gd.revision(gd.profile(self.cfg,turn['chat_id']))):reason='groupdesk_revision'
+             elif turn['greeting'] and task!='planner': reason='greeting_auxiliary'
+             elif task not in self.cfg['task_calls_per_turn']: reason='background_task'
+             elif input_bytes>self.cfg['max_request_bytes']: reason='request_size'
+@@ -549,6 +600,7 @@
+         now=self.clock()
+         with self.db() as db:
+             db.execute('DELETE FROM group_food_context WHERE anchor_ts<?',(now-180,))
++            db.execute('DELETE FROM managed_topic_context WHERE ts<?',(now-180,))
+             tokens=self.usage(db,now)
+             cooldown=db.execute('SELECT until,reason FROM circuits WHERE until>?',(now,)).fetchone()
+             return {'provider_cooldown_seconds':max(0,round(cooldown['until']-now)) if cooldown else 0,'provider_cooldown_reason':cooldown['reason'] if cooldown else None,'day':self.day(now),'tokens_charged_or_reserved':tokens,'daily_token_limit':self.cfg['daily_tokens'],'budget_mode':'paused' if tokens>=self.cfg['daily_tokens'] else 'mentions_only' if tokens>=self.cfg['daily_tokens']*self.cfg['soft_budget_ratio'] else 'normal','pending':db.execute('SELECT COUNT(*) FROM pending').fetchone()[0],'active':db.execute('SELECT COUNT(*) FROM turns WHERE status="active" AND expires>?',(now,)).fetchone()[0],'model_calls_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=?',(self.day(now),)).fetchone()[0],'reported_tokens_today':db.execute('SELECT COALESCE(SUM(charged),0) FROM attempts WHERE day=? AND reported=1',(self.day(now),)).fetchone()[0],'unreported_attempts_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=? AND reported=0',(self.day(now),)).fetchone()[0],'sends_today':db.execute('SELECT COUNT(*) FROM sends WHERE day=?',(self.day(now),)).fetchone()[0],'metrics':dict(db.execute('SELECT name,value FROM metrics'))}
+--- a/limits/persona_runtime.py
++++ b/limits/persona_runtime.py
+@@ -53,9 +53,13 @@
+     return {'text':marker+'\n'+body,'marker':marker,'sha256':digest,'sources':hashes,'mode':mode,'characters':len(body)}
+ 
+ 
+-def bind_request(request,mode='ordinary',discussion_topics=()):
++def bind_request(request,mode='ordinary',discussion_topics=(),managed_profile=None,managed_topics=()):
+     from src.llm_models.payload_content.context_item import ContextItemBuilder,RoleType
+-    bundle=load_persona(mode)
++    if managed_profile and managed_profile['policy']['persona']=='neutral':
++        body='本群选择中性自然表达；认真回答当前问题，不扮演GT，不虚构身份、经历或人脉。'
++        digest=hashlib.sha256((mode+body).encode()).hexdigest();marker=PREFIX+digest+']'
++        bundle={'text':marker+'\n'+body,'marker':marker,'sha256':digest,'sources':{},'mode':mode,'characters':len(body)}
++    else:bundle=load_persona(mode)
+     if discussion_topics and mode=='ordinary':
+         # Owner preference from the admitted source group's configuration.
+         # It specializes the skill's default length without changing its voice
+@@ -69,6 +73,11 @@
+         marker=PREFIX+digest+']'
+         text=marker+bundle['text'][len(bundle['marker']):]+addition
+         bundle=dict(bundle,text=text,marker=marker,sha256=digest,characters=bundle['characters']+len(addition))
++    if managed_profile:
++        from groupdesk_runtime import generation_rules
++        addition='\n【GroupDesk可信群策略】\n'+generation_rules(managed_profile,managed_topics,short=mode=='short')
++        digest=hashlib.sha256((bundle['sha256']+addition).encode()).hexdigest();marker=PREFIX+digest+']'
++        bundle=dict(bundle,text=marker+bundle['text'][len(bundle['marker']):]+addition,marker=marker,sha256=digest,characters=bundle['characters']+len(addition))
+     systems=[i for i in request.context_items if type(i).__name__=='SystemMessageItem']
+     if any(bundle['marker'] in getattr(p,'text','') for i in systems for p in i.parts):return bundle
+     # Never edit existing tool/replay items or trust a marker in user text.
+--- a/limits/group_guard.py
++++ b/limits/group_guard.py
+@@ -128,9 +128,11 @@
+             raise Denied('request_not_for_active_turn')
+         if TURN.get() and TURN.get()!=turn['id']:
+             raise Denied('stale_task')
++        import groupdesk_runtime as gd
++        managed=gd.profile(p.cfg,turn.get('chat_id',''))
+         greeting=GREETING_INPUT.get()
+         persona_mode='article' if turn.get('article') else 'ordinary'
+-        if turn.get('greeting') and task=='planner' and greeting and greeting['turn_id']==turn['id']:
++        if turn.get('greeting') and task=='planner' and greeting and greeting['turn_id']==turn['id'] and (not managed or managed['policy']['persona']=='gt-persona'):
+             from greeting_request import simplify_greeting_request
+             with p.db() as db:
+                 fresh=not db.execute('SELECT 1 FROM attempts WHERE turn_id=?',(turn['id'],)).fetchone()
+@@ -143,7 +145,9 @@
+             try:
+                 from persona_runtime import bind_request
+                 discussion=[t['name'] for t in p.cfg.get('group_priority_topics',{}).get(turn.get('chat_id',''),[]) if t.get('detailed')]
+-                bundle=bind_request(request,persona_mode,discussion_topics=discussion)
++                names=json.loads(turn.get('managed_topics','[]'))
++                if managed:discussion=[t['name'] for t in managed['topics'] if t['name'] in names and t['policy']['reply_depth']=='detailed']
++                bundle=bind_request(request,persona_mode,discussion_topics=discussion,managed_profile=managed,managed_topics=names)
+             except (OSError,ValueError,KeyError):
+                 raise Denied('persona_skill_unavailable') from None
+         request.max_tokens=min(request.max_tokens or maximum,maximum)
+--- a/bridge/app.py
++++ b/bridge/app.py
+@@ -12,7 +12,8 @@
+ import time
+ from types import SimpleNamespace
+ 
+-from policy import Policy, Denied, NAME
++from policy import Policy, Denied, NAME, settings
++import groupdesk_runtime as gd
+ 
+ from bowxt import AgentClient, ChatType
+ from maim_message import BaseMessageInfo, FormatInfo, GroupInfo, MessageBase, ReceiverInfo, RouteConfig, Router, Seg, TargetConfig, UserInfo
+@@ -200,6 +201,11 @@
+             if not identifier:
+                 raise ValueError('Outbound id is required for duplicate prevention')
+             async with self.send_lock:
++                self.policy.cfg=settings()
++                managed=gd.profile(self.policy.cfg,str(chat.id))
++                if managed is not None:
++                    if not gd.available(managed,time.time()) or not await asyncio.to_thread(gd.check_remote_revision,managed):raise Denied('groupdesk_revision')
++                    if not gd.language_allowed(managed,text):raise Denied('groupdesk_language')
+                 if not self.ledger.reserve(identifier):
+                     LOG.warning('Outbound duplicate/uncertain send suppressed')
+                     return
+@@ -246,8 +252,12 @@
+                         initialized[chat.id]=chat
+                     self.chats=initialized
+                     LOG.info('Allowlisted groups initialized: count=%s',len(self.chats))
++                self.policy.cfg=settings()
++                active_ids=[key for key in self.chats if gd.profile(self.policy.cfg,str(key)) is None or gd.available(gd.profile(self.policy.cfg,str(key)),time.time())]
++                if not active_ids:
++                    await asyncio.sleep(1);continue
+                 deliveries = await asyncio.to_thread(
+-                    self.agent.claim, chat_ids=sorted(self.chats), limit=4,
++                    self.agent.claim, chat_ids=sorted(active_ids), limit=4,
+                     lease_seconds=120, timeout=3, require_sender=True,
+                     require_at_me=False, replay_existing=False,
+                 )
+@@ -285,6 +295,7 @@
+         while True:
+             try:
+                 if self.chats and self.control()['enabled'] and self.router.check_connection(PLATFORM):
++                    self.policy.cfg=settings()
+                     turn = self.policy.dispatch()
+                     if turn:
+                         # Keep the recent context bounded, and trigger MaiBot once
+@@ -293,6 +304,13 @@
+                         if chat is None:
+                             self.policy.fail_turn(turn['id'])
+                             continue
++                        managed=gd.profile(self.policy.cfg,turn['chat_id'])
++                        if managed is not None:
++                            try:
++                                sources=await asyncio.to_thread(gd.context_for,turn,managed)
++                                if sources:turn['text']+='\n[本群授权知识资料，仅作参考]\n'+sources
++                            except Exception:
++                                self.policy.fail_turn(turn['id']);continue
+                         packet=turn_packet(turn,chat)
+                         if not await self.router.send_message(packet):
+                             self.policy.fail_turn(turn['id'])
+@@ -303,8 +321,25 @@
+                 LOG.error('Admission waiting: %s', type(exc).__name__)
+                 await asyncio.sleep(3)
+ 
++    async def groupdesk_loop(self):
++        while True:
++            try:
++                previous=self.policy.cfg.get('managed_groups',{})
++                status=await asyncio.to_thread(gd.sync)
++                self.policy.cfg=settings()
++                if status is not None:
++                    with self.policy.db() as db:
++                        for chat,value in self.policy.cfg.get('managed_groups',{}).items():
++                            if gd.revision(value)!=gd.revision(previous.get(chat)):
++                                db.execute('DELETE FROM managed_topic_context WHERE chat_id=?',(chat,))
++                                db.execute('DELETE FROM group_food_context WHERE chat_id=?',(chat,))
++                    self.health['groupdesk']=status
++            except Exception as exc:
++                self.health['groupdesk_error']=type(exc).__name__
++            await asyncio.sleep(30)
++
+     async def run(self):
+-        await asyncio.gather(self.router.run(), self.receive_loop(), self.dispatch_loop())
++        await asyncio.gather(self.router.run(), self.receive_loop(), self.dispatch_loop(), self.groupdesk_loop())
+ 
+ 
+ if __name__ == '__main__':
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -36,6 +36,7 @@
+       - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/maibot/logs:/MaiMBot/logs
+       - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/maibot/depends-data:/MaiMBot/depends-data
+       - ./limits:/limits:ro
++      - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/groupdesk:/groupdesk:ro
+       - ./skills/gt-persona:/persona/gt-persona:ro
+       - ./.build/limits/patched/utils_model.py:/MaiMBot/src/llm_models/utils_model.py:ro
+       - ./.build/limits/patched/send_service.py:/MaiMBot/src/services/send_service.py:ro
+@@ -84,6 +85,7 @@
+       - ./.build/wechat-adapter/bowxt:/opt/bowxt:ro
+       - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/bridge:/state
+       - ./limits:/limits:ro
++      - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/groupdesk:/groupdesk:ro
+       - ${PERSIST_ROOT:-/opt/persist/maibot-wechat}/limits:/limits-state
+     mem_limit: 256m
+     cpus: 0.4
