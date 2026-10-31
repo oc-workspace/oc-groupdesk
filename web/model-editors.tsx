@@ -41,3 +41,5 @@ export function Models({data,api,reload,notify}:{data:ModelData;api:Api;reload:(
     {manual&&<div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="手动登记模型"><h2>手动登记模型</h2><p className="hint">用于目录缺失或功能分类待确认的模型。登记不发起模型调用。</p><form onSubmit={e=>{e.preventDefault();void run(async()=>{await api('/model-credentials/'+manual.id+'/models','POST',manual);setManual(null);await reload();notify('模型已登记');});}}><label>模型 ID<input autoFocus required maxLength={200} value={manual.model_id} onChange={e=>setManual({...manual,model_id:e.target.value})}/></label><label>功能类型<select value={manual.capability} onChange={e=>setManual({...manual,capability:e.target.value as 'text'|'image'})}><option value="text">文字</option><option value="image">生图</option></select></label><div className="modal-actions"><button type="button" className="button" disabled={busy} onClick={()=>setManual(null)}>取消</button><button className="button primary" disabled={busy}>登记模型</button></div></form></section></div>}
   </>;
 }
+
+export {Choice as ModelChoice};
