@@ -122,6 +122,9 @@ export function createApp(){
       stats:(await pool.query("SELECT (SELECT count(*)::int FROM memberships WHERE revoked_at IS NULL) members,(SELECT count(*)::int FROM documents) documents")).rows[0]
     });
   });
+  app.get('/api/groups/status',async(_req,res)=>{
+    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled FROM groups ORDER BY id')).rows);
+  });
   app.post('/api/groups',async(req,res)=>{
     const body=z.object({name:text(120).min(1)}).parse(req.body),groupId=randomUUID();
     await transaction(async db=>{

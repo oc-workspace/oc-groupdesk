@@ -25,6 +25,7 @@ before(async()=>{
 after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();});
 test('authentication, CSRF and source validation prevent unauthorized administration',async()=>{
   assert.equal((await request('/overview')).status,401);
+  assert.equal((await request('/groups/status')).status,401);
   assert.equal((await request('/auth/login','POST',{username:'admin',password:'wrong-password'})).status,401);
   const login=await request('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD});
   assert.equal(login.status,200);cookie=login.response.headers.get('set-cookie')!.split(';')[0];csrf=login.data.csrf;
@@ -199,6 +200,26 @@ test('scoped adapter tokens cannot access other groups or DM scenes',async()=>{
   assert.equal((await scopedGet('/scenes?user_id=stable-user-1')).status,403);
   await pool.query('DELETE FROM runtime_adapters WHERE token_hash=$1',[digest(scoped)]);
   assert.equal((await scopedGet('/config/synthetic-policy-room')).status,401);
+});
+test('status endpoint reports save-to-ack transitions without exposing or changing configuration',async()=>{
+  const before=(await request('/overview')).data;
+  let selected=before.groups.find((g:any)=>g.external_id==='synthetic-policy-room');
+  const others=before.groups.filter((g:any)=>g.id!==selected.id);
+  selected=(await request('/groups/'+selected.id,'PUT',{...selected,name:'Synthetic confirmation test'})).data;
+  const pending=await request('/groups/status');
+  assert.equal(pending.status,200);assert.equal(pending.response.headers.get('cache-control'),'no-store');
+  const pendingRow=pending.data.find((g:any)=>g.id===selected.id);
+  assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision']);
+  assert.equal(pendingRow.revision,selected.revision);assert(pendingRow.applied_revision<selected.revision);
+  assert.equal((await request('/runtime/ack','POST',{group_id:selected.id,revision:selected.revision-1},true)).status,409);
+  assert.deepEqual((await request('/groups/status')).data.find((g:any)=>g.id===selected.id),pendingRow);
+  assert.equal((await request('/runtime/ack','POST',{group_id:selected.id,revision:selected.revision},true)).status,200);
+  const confirmed=(await request('/groups/status')).data.find((g:any)=>g.id===selected.id);
+  assert.equal(confirmed.revision,selected.revision);assert.equal(confirmed.applied_revision,selected.revision);
+  assert(Number.isFinite(Date.parse(confirmed.bot_seen_at)));
+  const after=(await request('/overview')).data;
+  assert.deepEqual(after.groups.find((g:any)=>g.id===selected.id).policy,selected.policy);
+  assert.deepEqual(after.groups.filter((g:any)=>g.id!==selected.id),others);
 });
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
