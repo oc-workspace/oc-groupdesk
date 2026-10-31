@@ -34,6 +34,15 @@ class IdentityContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'identity instructions'):
             validate_bundle(p, 'example-room')
 
+    def test_informed_roleplay_contract_and_fallback_do_not_force_an_ordinary_disclaimer(self):
+        p = bundle()
+        p['policy']['identity'] = {'disclosure': 'roleplay', 'personal_questions': 'plain'}
+        validate_bundle(p, 'example-room')
+        text = generation_rules(p)
+        self.assertIn('已知情', text)
+        self.assertIn('角色外身份确认', text)
+        self.assertNotIn('直接问是否AI、机器人或真人时简短如实回答', text)
+
 
 try:
     from src.llm_models.model_client.base_client import ResponseRequest
@@ -45,6 +54,22 @@ except ModuleNotFoundError:
 
 @unittest.skipUnless(NATIVE, 'MaiBot native request classes required')
 class IdentityBindingTests(unittest.TestCase):
+    def test_roleplay_selects_a_different_skill_guide_without_normal_identity_rule(self):
+        from persona_runtime import bind_request, load_persona
+        p = bundle()
+        p['policy']['identity'] = {'disclosure': 'roleplay', 'personal_questions': 'plain'}
+        p['identity_instructions'] = ['Synthetic informed roleplay instructions.']
+        r = ResponseRequest(model_info=ModelInfo(name='test', model_identifier='test', api_provider='test', model_type='llm'), context_items=[], max_tokens=100)
+        result = bind_request(r, managed_profile=p)
+        self.assertIn('参与者已知情', result['text'])
+        self.assertIn('Synthetic informed roleplay instructions.', result['text'])
+        self.assertIn('跳出角色', result['text'])
+        self.assertNotIn('直接问是否AI时简短如实说明', result['text'])
+        normal = load_persona(identity_mode='when_asked')
+        self.assertNotEqual(result['sha256'], normal['sha256'])
+        self.assertNotIn('角色内问来历', normal['text'])
+        self.assertLess(load_persona('short', identity_mode='roleplay')['characters'], 1800)
+
     def test_identity_setting_changes_native_system_binding_and_digest(self):
         from persona_runtime import bind_request
         def request():

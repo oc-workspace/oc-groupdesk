@@ -172,6 +172,23 @@ test('identity policy persists per group, reaches runtime and cannot be overridd
   assert.deepEqual(after.groups.find((g:any)=>g.id===selected.id).policy.identity,{disclosure:'proactive',personal_questions:'plain'});
   assert.deepEqual(after.groups.find((g:any)=>g.id===other.id).policy.identity,other.policy.identity);
 });
+test('informed roleplay survives save and reaches runtime without overriding another group',async()=>{
+  const before=(await request('/overview')).data;
+  let selected=before.groups.find((g:any)=>g.external_id==='synthetic-policy-room');
+  const other=before.groups.find((g:any)=>g.id!==selected.id);
+  selected=(await request('/groups/'+selected.id,'PUT',{...selected,policy:{...selected.policy,identity:{disclosure:'roleplay',personal_questions:'plain'}}})).data;
+  assert.equal(selected.policy.identity.disclosure,'roleplay');
+  const config=(await request('/runtime/config/synthetic-policy-room','GET',undefined,true)).data;
+  assert(config.identity_instructions.some((s:string)=>s.includes('所有参与者知道')));
+  assert(config.identity_instructions.some((s:string)=>s.includes('OOC')&&s.includes('如实说明')));
+  const output=(await request('/runtime/context','POST',{user_id:'synthetic-user',channel:'group',group_external_id:'synthetic-policy-room',mentioned:true,query:'Who are you?'},true)).data;
+  assert.equal(output.policy.identity.disclosure,'roleplay');assert(output.policy_instructions.some((s:string)=>s.includes('角色内持续')));
+  assert(!output.policy_instructions.some((s:string)=>s.startsWith('身份底线：')));
+  await migrate();
+  const after=(await request('/overview')).data;
+  assert.equal(after.groups.find((g:any)=>g.id===selected.id).policy.identity.disclosure,'roleplay');
+  assert.deepEqual(after.groups.find((g:any)=>g.id===other.id).policy.identity,other.policy.identity);
+});
 test('scoped adapter tokens cannot access other groups or DM scenes',async()=>{
   const {digest}=await import('../server/security.js');
   const scoped='scoped_adapter_test_token_000000000000';
