@@ -1,0 +1,10 @@
+[Unit]
+Description=Consistent GroupDesk database and attachment backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/docker/groupdesk/current/scripts/backup.sh
+User=root
+UMask=0077

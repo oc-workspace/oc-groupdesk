@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily GroupDesk backup at 04:15 Asia/Singapore
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 Asia/Singapore
+Persistent=true
+RandomizedDelaySec=120
+Unit=groupdesk-backup.service
+
+[Install]
+WantedBy=timers.target

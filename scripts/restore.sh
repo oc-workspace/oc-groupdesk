@@ -15,5 +15,5 @@ tar -xzf "$backup_dir/files.tar.gz" -C "$restore_dir"
 chown -R 1000:1000 "$restore_dir"
 mv /opt/persist/groupdesk/files "/opt/persist/groupdesk/files.before-restore-$(date +%s)"
 mv "$restore_dir" /opt/persist/groupdesk/files
-"${dc[@]}" up -d --no-build --wait --wait-timeout 150
+"${dc[@]}" up -d --no-build --force-recreate --no-deps --wait --wait-timeout 150 app worker
 echo "Restore complete. Previous files remain in files.before-restore-*."
