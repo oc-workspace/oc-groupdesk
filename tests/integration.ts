@@ -326,6 +326,79 @@ test('a conflicting provider batch rolls back its rename and never overwrites an
   assert.deepEqual((await request('/models')).data,before);
 });
 
+const personaFixture:any={};
+async function uploadPersona(collection:string,records:unknown,name='history.jsonl'){
+ const form=new FormData();form.append('file',new Blob([typeof records==='string'?records:JSON.stringify(records)]),name);
+ const response=await fetch(base+'/api/persona-collections/'+collection+'/import',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf},body:form});return {status:response.status,data:await response.json()};
+}
+test('persona archives authenticate, preserve source identity and incrementally update exact senders',async()=>{
+ assert.equal((await fetch(base+'/api/persona-studio')).status,401);
+ assert.equal((await request('/persona-collections','POST',{},false,'wrong')).status,403);
+ const group=(await request('/overview')).data.groups.find((g:any)=>g.external_id==='synthetic-route-a');personaFixture.group=group;
+ const collection=(await request('/persona-collections','POST',{name:'Source archive A',group_id:group.id})).data.id;personaFixture.collection=collection;
+ const row={id:'shard:1',group_id:group.external_id,sender_id:'exact-speaker',sender_display_name:'Same display',timestamp:1700000000,authored_text:'private-authored-A',message_type:'text'};
+ const records=[row,{...row,id:'shard:2',authored_text:'same speech'},{...row,id:'shard:3',sender_id:'different-speaker',authored_text:'quote-is-not-authorship',quoted_context:{speaker_id:'exact-speaker',text:'private-authored-A'}}];
+ let imported=await uploadPersona(collection,records.map(r=>JSON.stringify(r)).join('\n'));assert.equal(imported.status,200);assert.equal(imported.data.added,3);
+ const next=[{...row,authored_text:'private-authored-A revised'},records[1],records[2],{...row,id:'shard:4',authored_text:'same speech'}].map(r=>JSON.stringify(r)).join('\n');
+ imported=await uploadPersona(collection,next);assert.equal(imported.data.added,1);assert.equal(imported.data.updated,1);assert.equal(imported.data.unchanged,2);
+ assert.equal((await uploadPersona(collection,next)).data.reused,true);
+ const invalid=await uploadPersona(collection,[row,{...row,id:'shard:new',group_id:'foreign-room'}].map(r=>JSON.stringify(r)).join('\n'));assert.equal(invalid.status,400);
+ const overview=(await request('/persona-studio')).data;assert.equal(overview.collections.find((c:any)=>c.id===collection).message_count,4);assert(!JSON.stringify(overview).includes('private-authored-A'));
+ const dataset=(await request('/persona-datasets','POST',{name:'Exact speaker only',collection_id:collection,sender_ids:['exact-speaker'],since:null,until_time:null})).data.id;personaFixture.dataset=dataset;
+ const result=await fetch(base+'/api/persona-datasets/'+dataset+'/export',{headers:{Cookie:cookie}});const rows=(await result.text()).trim().split('\n').map(r=>JSON.parse(r));assert.equal(rows.length,3);assert(rows.every(r=>r.sender_id==='exact-speaker'&&r.group_id===group.external_id));assert(!JSON.stringify(rows).includes('quote-is-not-authorship'));
+ const docCollection=(await request('/persona-collections','POST',{name:'General reference files',group_id:null})).data.id;
+ assert.equal((await uploadPersona(docCollection,'Reference body','notes.md')).data.added,1);
+ assert.equal((await uploadPersona(docCollection,'Revised reference body','notes.md')).data.updated,1);
+ assert.equal((await uploadPersona(docCollection,JSON.stringify(row))).status,400);
+});
+test('personas publish immutable versions and groups pin independent skills with verified acknowledgements',async()=>{
+ const {makeSkill}=await import('../server/persona-generation.js');
+ const persona=(await request('/personas','POST',{name:'Voice A',skill_name:'voice-a',description:'Independent voice A',goal:'Concise natural replies',dataset_ids:[personaFixture.dataset]})).data.id;personaFixture.persona=persona;
+ let p=(await request('/personas/'+persona)).data;
+ const skill=makeSkill('voice-a','Independent voice A','A concise natural style with a specific voice and source-grounded claims; do not invent experiences or copy quotations as speaker words.');
+ assert.equal((await request('/personas/'+persona,'PUT',{...p,draft_skill:skill})).status,200);
+ assert.equal((await request('/personas/'+persona,'PUT',{...p,draft_skill:skill+'stale'})).status,409);
+ p=(await request('/personas/'+persona)).data;const v1=(await request('/personas/'+persona+'/publish','POST',{revision:p.revision})).data;personaFixture.version=v1.id;
+ const group=(await request('/overview')).data.groups.find((g:any)=>g.id===personaFixture.group.id);
+ assert.equal((await request('/persona-bindings/'+group.id,'PUT',{revision:group.revision,version_id:v1.id})).status,200);
+ const a=(await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data;assert.equal(a.persona_skill.skill_md,skill);assert.equal(a.persona_skill.version_id,v1.id);assert(!JSON.stringify(a).includes('private-authored-A'));
+ const other=(await request('/overview')).data.groups.find((g:any)=>g.id!==group.id);
+ assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill,null);
+ assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1},true)).status,409);
+ assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:'0'.repeat(64)},true)).status,409);
+ assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:a.persona_skill.sha256},true)).status,200);
+ p=(await request('/personas/'+persona)).data;await request('/personas/'+persona,'PUT',{...p,draft_skill:skill+'\nNew manually edited rule.'});
+ assert.equal((await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data.persona_skill.skill_md,skill);
+ p=(await request('/personas/'+persona)).data;const v2=(await request('/personas/'+persona+'/publish','POST',{revision:p.revision})).data;
+ assert.equal((await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data.persona_skill.version,1);
+ assert.equal((await request('/persona-bindings/'+other.id,'PUT',{revision:other.revision,version_id:v2.id})).status,200);
+ assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill.version,2);
+ assert.equal((await request('/personas/'+persona+'/archive','POST',{revision:p.revision,archived:true})).status,409);
+ const packageResponse=await fetch(base+'/api/persona-versions/'+v1.id+'/export',{headers:{Cookie:cookie}});assert.equal(packageResponse.status,200);assert.equal(packageResponse.headers.get('content-type'),'application/gzip');
+});
+test('persona generation uses a frozen sample, preserves manual conflicts and never auto-publishes',async()=>{
+ const {processPersonaJob}=await import('../server/persona-generation.js');
+ const key=(await request('/model-credentials','POST',{name:'Persona generator fixture',base_url:'https://api.example.com/v1',api_key:'isolated-persona-only-key',client_type:'openai'})).data.id;
+ await request('/model-credentials/'+key+'/models','POST',{model_id:'text-persona',capability:'text'});
+ const p=(await request('/personas/'+personaFixture.persona)).data;
+ const job=(await request('/personas/'+p.id+'/generate','POST',{revision:p.revision,credential_id:key,model_id:'text-persona'}));assert.equal(job.status,202);assert.equal(job.data.provenance.sampled_records,3);
+ assert.equal((await request('/personas/'+p.id+'/generate','POST',{revision:p.revision,credential_id:key,model_id:'text-persona'})).status,409);
+ // The frozen input was created before this curation change.
+ await request('/persona-collections/'+personaFixture.collection+'/exclusion','POST',{source_id:'shard:2',excluded:true});
+ let observed:any,calls=0;
+ await processPersonaJob(async(_c,_m,_system,input)=>{calls++;observed=JSON.parse(input);return {choices:[{message:{content:'Updated voice guidance with practical, concise, respectful language and grounded facts. Follow current group rules and disclose identity under its policy.'}}]};});
+ assert.equal(calls,1);assert.equal(observed.samples.length,3);assert(!JSON.stringify(observed.samples).includes('quote-is-not-authorship'));
+ let updated=(await request('/personas/'+p.id)).data;assert.equal(updated.jobs[0].status,'ready');assert(updated.draft_skill.includes('Updated voice'));assert.equal(updated.versions.length,p.versions.length);
+ await request('/personas/'+p.id+'/generate','POST',{revision:updated.revision,credential_id:key,model_id:'text-persona'});
+ await request('/personas/'+p.id,'PUT',{...updated,draft_skill:updated.draft_skill+'\nKeep this manual edit.'});
+ await processPersonaJob(async()=>({choices:[{message:{content:'Another generated candidate with enough useful rules for concise natural writing, without overwriting the editor who is currently working.'}}]}));
+ updated=(await request('/personas/'+p.id)).data;assert.equal(updated.jobs[0].status,'conflict');assert(updated.draft_skill.includes('Keep this manual edit'));assert(updated.jobs[0].output_skill.includes('Another generated candidate'));
+ await request('/personas/'+p.id+'/generate','POST',{revision:updated.revision,credential_id:key,model_id:'text-persona'});
+ const c=(await request('/models')).data.credentials.find((c:any)=>c.id===key);await request('/model-credentials/'+key,'PUT',{...c,enabled:false});
+ await processPersonaJob(async()=>{throw new Error('must not call a disabled provider');});assert.equal((await request('/personas/'+p.id)).data.jobs[0].status,'failed');
+ const logs=JSON.stringify((await request('/logs')).data);assert(!logs.includes('private-authored-A'));assert(!logs.includes('isolated-persona-only-key'));
+});
+
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

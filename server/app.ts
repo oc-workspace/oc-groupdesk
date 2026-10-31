@@ -12,6 +12,7 @@ import {token,digest,passwordValid,passwordHash,secureEqual,HttpError,requireCon
 import {searchKnowledge} from './search.js';
 import {identityInstructions} from './identity.js';
 import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute} from './models.js';
+import {registerPersonaAdmin,runtimePersona} from './personas-api.js';
 import {registerModelAdmin} from './models-api.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
@@ -320,6 +321,7 @@ export function createApp(){
     });res.json({ok:true});
   });
   registerModelAdmin(app);
+  registerPersonaAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
     version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
@@ -423,14 +425,18 @@ function registerRuntime(app:express.Express){
     config.policy_contract_version=1;
     config.model_routing_contract_version=1;
     config.model_routing=await effectiveModelRoutes(config);
-    config.identity_instructions=identityInstructions(config.policy.identity,config.policy.persona);
+    config.persona_contract_version=1;
+    config.persona_skill=await runtimePersona(config.persona_version_id);
+    config.identity_instructions=identityInstructions(config.policy.identity,config.persona_skill?'custom':config.policy.persona);
     config.participation_skill=await readFile(new URL('../skills/group-participation/SKILL.md',import.meta.url),'utf8');
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),model_routing_version:z.literal(1).optional()}).parse(req.body);
-    const routingGroup=(await pool.query('SELECT id,model_routes FROM groups WHERE id=$1',[body.group_id])).rows[0];
+    const body=z.object({group_id:id,revision:z.number().int().positive(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const routingGroup=(await pool.query('SELECT id,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
+    const persona=await runtimePersona(routingGroup.persona_version_id);
+    if(persona)requireCondition(body.persona_skill_version===1&&body.persona_skill_sha256===persona.sha256,409,'请更新机器人并应用正确的 Persona 版本后再确认');
     const routes=await effectiveModelRoutes(routingGroup) as any;
     if(routes.text.source!=='legacy'||routes.image.source!=='disabled')requireCondition(body.model_routing_version===1,409,'请更新机器人以应用模型路由后再确认');
     if(req.runtimeGroups){

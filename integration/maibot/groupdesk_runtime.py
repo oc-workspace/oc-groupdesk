@@ -52,10 +52,27 @@ def load_profiles():
     except (OSError,ValueError,TypeError):pass
     return groups
 
+def validate_persona_bundle(bundle):
+    selected=bundle.get('persona_version_id')
+    skill=bundle.get('persona_skill')
+    if not selected:
+        if skill is not None:raise ValueError('Unexpected published persona')
+        return None
+    if bundle.get('persona_contract_version')!=1 or not isinstance(skill,dict):raise ValueError('Unknown persona contract')
+    text=skill.get('skill_md')
+    if skill.get('version_id')!=selected or not isinstance(text,str) or not 30<=len(text)<=30000:raise ValueError('Invalid published persona')
+    if hashlib.sha256(text.encode()).hexdigest()!=skill.get('sha256'):raise ValueError('Published persona digest mismatch')
+    return skill
+
 def validate_bundle(bundle,external_id):
+    validate_persona_bundle(bundle)
     if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')
     if bundle.get('model_routing_contract_version') not in [None,1]:raise ValueError('Unknown model routing contract')
     if bundle.get('policy',{}).get('persona') not in ['gt-persona','neutral']:raise ValueError('Unsupported persona')
+    identity=bundle.get('policy',{}).get('identity',{'disclosure':'when_asked','personal_questions':'tactful'})
+    if identity.get('disclosure') not in ['when_asked','proactive','roleplay'] or identity.get('personal_questions') not in ['tactful','plain']:raise ValueError('Unsupported identity policy')
+    instructions=bundle.get('identity_instructions',[])
+    if not isinstance(instructions,list) or len(instructions)>10 or any(not isinstance(v,str) or len(v)>2000 for v in instructions):raise ValueError('Invalid identity instructions')
     if len(bundle.get('topics',[]))>100:raise ValueError('Too many topics')
     for t in bundle['topics']:
         p=t['policy'];words=[w for v in p.get('lexicons',{}).values() for w in v]
@@ -89,7 +106,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'model_routing_version':1})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'model_routing_version':1,'persona_skill_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 
@@ -136,6 +153,16 @@ def generation_rules(p,names=(),short=False):
     else:pieces.append('主动插话按已选话题及启用的基础提问/社交；明确点名可回答其他一般问题。')
     pieces.append('输出语言策略：'+json.dumps(lang,ensure_ascii=False)+'。follow跟随当前成员；restricted仅使用allowed，其他语言回退fallback；fixed默认使用fixed。用户指定语言仅在allow_requested且允许范围内有效。不将昵称、代码、引用当作原消息主语言。')
     pieces.append('所选话题范围：'+ '、'.join(t['name'] for t in p['topics']))
+    identity=policy.get('identity',{'disclosure':'when_asked','personal_questions':'tactful'})
+    boundary='已知情的虚构Cosplay，角色内保持设定；明确跳出角色确认系统身份时如实说明AI身份，不冒充GT真人。' if identity['disclosure']=='roleplay' else '直接问是否AI、机器人或真人时简短如实回答；不能否认AI或冒充GT真人。'
+    pieces.append('身份策略：'+json.dumps(identity,ensure_ascii=False)+'。'+boundary)
+    if p.get('identity_instructions'):
+        pieces.extend(p['identity_instructions'])
+    elif identity['disclosure']=='roleplay':
+        pieces.append('参与者知道是AI虚构角色：不主动跳出角色，籍贯、性别或角色内机器人玩笑按当前persona接话；明确要求退出或角色外身份确认时如实说明。遵守群语言、话题与知识权限。')
+    else:
+        pieces.append('首次交流或容易误解时简短主动说明AI身份，不每条重复。' if identity['disclosure']=='proactive' else '日常不主动介绍AI身份，不用固定自我介绍开场。')
+        pieces.append('一般籍贯、性别问题直接说明没有真人籍贯或生理性别，不编造个人经历。' if identity['personal_questions']=='plain' else '一般籍贯、性别问题按当前persona礼貌带过，不虚构真人背景。')
     if not short:pieces.append('本轮话题指导：'+json.dumps([{'name':t['name'],'description':t['description'],'instructions':t['instructions'],'reply_depth':t['policy']['reply_depth']} for t in p['topics'] if t['name'] in names],ensure_ascii=False))
     return '\n'.join(pieces)
 
