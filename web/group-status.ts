@@ -27,3 +27,9 @@ export function confirmationFor(savedRevision:number,status:GroupStatus|undefine
   if(now-seen>=180000)return {kind:'offline',label:'版本已确认，机器人连接待检查'};
   return {kind:'confirmed',label:'机器人已确认'};
 }
+
+export function clearCheckedRevisions(required:Record<string,number>,checked:readonly GroupStatus[]){
+  const remaining={...required};
+  for(const status of checked)if(status.revision>=remaining[status.id])delete remaining[status.id];
+  return remaining;
+}
