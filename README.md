@@ -83,3 +83,15 @@ docs/runtime-api.md 和 integration/groupdesk-client.mjs 描述接入协议。�
 ## 日志
 
 [当前进度](docs/progress/README.md)
+
+### 已验证的部署约定
+
+应用同时连接私有数据库网络和现有Nginx网络。现有网络已有名为postgres的DNS别名，
+因此DATABASE_URL必须使用本项目唯一的groupdesk-postgres-1，不能使用通用postgres名称。
+Compose项目名保持groupdesk。
+
+每日备份使用scripts/groupdesk-backup.service与.timer，时间为Asia/Singapore 04:15。
+备份前短暂停止应用写入。当前仅在服务器本地保存备份；加密异地备份需另行配置。
+
+浏览器验收创建的GroupDesk使用指南包含后台操作说明与适配器接入说明，未关联任何群，
+不含真实群聊天记录或个人资料。
