@@ -15,3 +15,5 @@ GroupDesk在数据库中仅保存适配器token的SHA256，并限制授权群。
 测试使用临时数据库和无网络容器，不向真实微信群发送测试消息。`test_groupdesk_runtime.py`可在MaiBot测试镜像中运行。
 
 原生测试时需把仓库catalog目录只读挂载为/catalog，用于验证实际发布词表的排除与承接；测试使用临时SQLite，不能指向运行账本。
+
+Unified diff context lines for empty source lines contain a required single space. The scoped .gitattributes rule preserves that patch syntax while leaving source-code whitespace checks enabled.
