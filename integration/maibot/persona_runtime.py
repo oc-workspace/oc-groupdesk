@@ -88,6 +88,8 @@ def bind_request(request,mode='ordinary',discussion_topics=(),managed_profile=No
                   '允许给出必要的原理、例子、操作细节或语言用法比较，不必压成一句寒暄；'
                   '细节不足时追问一个关键条件。按当前问题需要展开，简单话题仍简短；'
                   '每次只发一条、最多约450字，不拆成多条，不罗列与问题无关的教程。保持GT原有口吻和语言规则。')
+        if managed_profile and (managed_profile.get('persona_version_id') or managed_profile.get('policy',{}).get('persona')=='neutral'):
+            addition=addition.replace('保持GT原有口吻和语言规则','保持当前Persona口吻和本群语言规则')
         digest=hashlib.sha256((bundle['sha256']+addition).encode()).hexdigest()
         marker=PREFIX+digest+']'
         text=marker+bundle['text'][len(bundle['marker']):]+addition

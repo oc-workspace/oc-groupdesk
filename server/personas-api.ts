@@ -95,10 +95,11 @@ export function registerPersonaAdmin(app:express.Express){
    jobs:(await pool.query('SELECT id,status,model_id,provenance,output_skill,error,created_at,finished_at FROM persona_jobs WHERE persona_id=$1 ORDER BY created_at DESC LIMIT 10',[id])).rows});
  });
  app.put('/api/personas/:id',async(req,res)=>{
-  const b=personaBody.extend({revision}).parse(req.body),id=uuid(req.params.id);
+  const b=personaBody.extend({revision,source_version_id:z.uuid().nullable().optional()}).parse(req.body),id=uuid(req.params.id);
   await transaction(async db=>{
    for(const datasetId of b.dataset_ids)requireCondition((await db.query('SELECT 1 FROM persona_datasets WHERE id=$1',[datasetId])).rowCount,400,'关联数据集不存在');
-   const r=await db.query('UPDATE personas SET name=$1,description=$2,goal=$3,dataset_ids=$4,draft_skill=$5,revision=revision+1 WHERE id=$6 AND revision=$7 AND NOT archived',[b.name,b.description,b.goal,b.dataset_ids,b.draft_skill,id,b.revision]);requireCondition(r.rowCount,409,'草稿已更新或已归档，请保留本地修改后载入最新版本');
+   if(b.source_version_id)requireCondition((await db.query('SELECT 1 FROM persona_versions WHERE id=$1 AND persona_id=$2',[b.source_version_id,id])).rowCount,400,'历史版本不属于此 Persona');
+   const r=await db.query('UPDATE personas SET name=$1,description=$2,goal=$3,dataset_ids=$4,draft_skill=$5,draft_provenance=COALESCE((SELECT provenance FROM persona_versions WHERE id=$8 AND persona_id=$6),draft_provenance),revision=revision+1 WHERE id=$6 AND revision=$7 AND NOT archived',[b.name,b.description,b.goal,b.dataset_ids,b.draft_skill,id,b.revision,b.source_version_id||null]);requireCondition(r.rowCount,409,'草稿已更新或已归档，请保留本地修改后载入最新版本');
    await audit(req.admin!.username,'persona.draft_saved',id,{},db);
   });res.json({ok:true});
  });

@@ -399,6 +399,28 @@ test('persona generation uses a frozen sample, preserves manual conflicts and ne
  const logs=JSON.stringify((await request('/logs')).data);assert(!logs.includes('private-authored-A'));assert(!logs.includes('isolated-persona-only-key'));
 });
 
+test('different groups select different personas; archive, restore and unbinding preserve history',async()=>{
+ const b=(await request('/personas','POST',{name:'Voice B',skill_name:'voice-b',description:'Another independent persona',goal:'',dataset_ids:[]})).data.id;
+ let p=(await request('/personas/'+b)).data;
+ const version=(await request('/personas/'+b+'/publish','POST',{revision:p.revision})).data;
+ assert.equal((await request('/personas/'+b+'/archive','POST',{revision:p.revision,archived:true})).status,200);
+ p=(await request('/personas/'+b)).data;assert(p.archived);assert.equal(p.versions.length,1);
+ let groups=(await request('/overview')).data.groups,other=groups.find((g:any)=>g.id!==personaFixture.group.id);
+ assert.equal((await request('/persona-bindings/'+other.id,'PUT',{revision:other.revision,version_id:version.id})).status,400);
+ assert.equal((await request('/personas/'+b+'/archive','POST',{revision:p.revision,archived:false})).status,200);
+ assert.equal((await request('/persona-bindings/'+other.id,'PUT',{revision:other.revision,version_id:version.id})).status,200);
+ const a=groups.find((g:any)=>g.id===personaFixture.group.id);
+ assert.equal((await request('/runtime/config/'+a.external_id,'GET',undefined,true)).data.persona_skill.persona_id,personaFixture.persona);
+ assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill.persona_id,b);
+ other=(await request('/overview')).data.groups.find((g:any)=>g.id===other.id);
+ assert.equal((await request('/persona-bindings/'+other.id,'PUT',{revision:other.revision,version_id:null})).status,200);
+ assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill,null);
+ p=(await request('/personas/'+personaFixture.persona)).data;
+ assert.equal((await request('/personas/'+p.id,'PUT',{...p,source_version_id:version.id})).status,400);
+ assert.equal((await request('/personas/'+p.id,'PUT',{...p,source_version_id:personaFixture.version})).status,200);
+ assert.deepEqual((await request('/personas/'+p.id)).data.draft_provenance,{});
+});
+
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

@@ -36,6 +36,7 @@ export async function queuePersonaJob(personaId:string,revision:number,selection
  return transaction(async db=>{
   const p=(await db.query('SELECT * FROM personas WHERE id=$1 FOR UPDATE',[personaId])).rows[0];
   requireCondition(p&&!p.archived,404,'Persona 不存在或已归档');requireCondition(p.revision===revision,409,'草稿版本已变化，请先载入最新版本');
+  requireCondition(!(await db.query("SELECT 1 FROM persona_jobs WHERE persona_id=$1 AND status IN ('pending','processing')",[personaId])).rowCount,409,'已有生成任务，请先等待完成并手动刷新状态');
   await validateSelection(selection,'text',db);
   const c=(await db.query('SELECT revision FROM model_credentials WHERE id=$1 FOR SHARE',[selection.credential_id])).rows[0];
   const records=new Map<string,any>(),datasets=[];

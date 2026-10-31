@@ -54,3 +54,6 @@ class NativeBindingTests(unittest.TestCase):
   p=published();p['persona_skill']['sha256']='0'*64
   with patch('persona_runtime.load_persona',side_effect=AssertionError('No fallback')):
    with self.assertRaises(ValueError):bind_request(self.request(),managed_profile=p)
+ def test_detailed_topics_preserve_custom_voice_instead_of_adding_gt_voice(self):
+  r=self.request();b=bind_request(r,managed_profile=published(),discussion_topics=['Technical details'])
+  self.assertIn('保持当前Persona口吻',b['text']);self.assertNotIn('保持GT原有口吻',b['text'])
