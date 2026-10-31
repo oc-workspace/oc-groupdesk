@@ -32,6 +32,36 @@
         "neutral"
       ]
     },
+    "identity": {
+      "default": {
+        "disclosure": "when_asked",
+        "personal_questions": "tactful"
+      },
+      "type": "object",
+      "properties": {
+        "disclosure": {
+          "default": "when_asked",
+          "type": "string",
+          "enum": [
+            "when_asked",
+            "proactive"
+          ]
+        },
+        "personal_questions": {
+          "default": "tactful",
+          "type": "string",
+          "enum": [
+            "tactful",
+            "plain"
+          ]
+        }
+      },
+      "required": [
+        "disclosure",
+        "personal_questions"
+      ],
+      "additionalProperties": false
+    },
     "base_questions": {
       "default": false,
       "type": "boolean"
@@ -114,6 +144,7 @@
     "topic_scope",
     "participation",
     "persona",
+    "identity",
     "base_questions",
     "base_social",
     "topic_overrides",

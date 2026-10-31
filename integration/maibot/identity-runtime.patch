@@ -1,0 +1,55 @@
+--- a/limits/persona_runtime.py
++++ b/limits/persona_runtime.py
+@@ -4,7 +4,7 @@
+ import os
+ import re
+ 
+-REVISION='gt-persona-runtime-v2'
++REVISION='gt-persona-runtime-v3-identity'
+ PREFIX='[GT_PERSONA_SKILL_BINDING:'
+ 
+ 
+@@ -42,10 +42,14 @@
+     examples=re.findall(r'^> (.+)$',scenarios,re.M)
+     if len(examples)<6:raise ValueError('persona_examples_missing')
+     selected=[examples[0],examples[2]] if mode=='short' else examples[:4]
+-    identity='你以GT persona skill的表达方式作为「GT小跟班／小T／小GT」参与群聊。你不是GT真人，不虚构他的经历、资产、人脉或承诺；被问真实身份时坦诚。普通接话无需反复介绍AI身份。'
++    identity='你以GT persona skill的表达方式作为「GT小跟班／小T／小GT」参与群聊。你不是GT真人，不虚构他的经历、资产、人脉或承诺；直接问是否AI时简短如实说明。日常不主动自我介绍AI身份，一般私人问题礼貌带过。'
+     calibration='风格校准：活泼可爱体现为有分寸的机智、反转和亲切，不写成撒娇陪聊、客服或讨好型新人。不要用“继续调教我”“小可爱报到”等口吻；不每句加“呀／呢～”或emoji。不因旧助手回复采用了某种口癖就沿用；旧回复只作事实背景。认真问题先完成任务，不强行商业化或抖机灵。'
+     body='\n'.join([identity,'【原始SKILL：表达规则】',voice,'【原始SKILL：语言选择】',language,'【表达画像校准】',reference_style,'【场景参考：合成示例，不是GT历史原话，学习写法而不照抄】',*selected,calibration])
+-    if mode!='article':body+='\n【原始SKILL：群聊场景】'+scene_rule+'\n普通群聊只给最终短答；认真问题通常50至150字，闲聊10至60字。不自动列多步教程、练习清单或逐句双语示范；对方明确要求详细展开时再展开。'
++    if mode!='article':
++        identity_guide=section(skill,'## 身份问题与礼貌回应\n','## 来源与身份边界')
++        if mode=='short':identity_guide=identity_guide.split('### 合成语气示例',1)[0].strip()
++        body+='\n【原始SKILL：身份问题】'+identity_guide
++        body+='\n【原始SKILL：群聊场景】'+scene_rule+'\n普通群聊只给最终短答；认真问题通常50至150字，闲聊10至60字。不自动列多步教程、练习清单或逐句双语示范；对方明确要求详细展开时再展开。'
+     if mode=='article':body+='\n'+section(portrait,'## 长文如何迁移\n','## 保持真实的限度')
+     hashes={name:hashlib.sha256(text.encode()).hexdigest() for name,text in sources.items()}
+     digest=hashlib.sha256((REVISION+mode+body+''.join(hashes.values())).encode()).hexdigest()
+--- a/limits/groupdesk_runtime.py
++++ b/limits/groupdesk_runtime.py
+@@ -55,6 +55,10 @@
+ def validate_bundle(bundle,external_id):
+     if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')
+     if bundle.get('policy',{}).get('persona') not in ['gt-persona','neutral']:raise ValueError('Unsupported persona')
++    identity=bundle.get('policy',{}).get('identity',{'disclosure':'when_asked','personal_questions':'tactful'})
++    if identity.get('disclosure') not in ['when_asked','proactive'] or identity.get('personal_questions') not in ['tactful','plain']:raise ValueError('Unsupported identity policy')
++    instructions=bundle.get('identity_instructions',[])
++    if not isinstance(instructions,list) or len(instructions)>10 or any(not isinstance(v,str) or len(v)>2000 for v in instructions):raise ValueError('Invalid identity instructions')
+     if len(bundle.get('topics',[]))>100:raise ValueError('Too many topics')
+     for t in bundle['topics']:
+         p=t['policy'];words=[w for v in p.get('lexicons',{}).values() for w in v]
+@@ -131,6 +135,13 @@
+     else:pieces.append('主动插话按已选话题及启用的基础提问/社交；明确点名可回答其他一般问题。')
+     pieces.append('输出语言策略：'+json.dumps(lang,ensure_ascii=False)+'。follow跟随当前成员；restricted仅使用allowed，其他语言回退fallback；fixed默认使用fixed。用户指定语言仅在allow_requested且允许范围内有效。不将昵称、代码、引用当作原消息主语言。')
+     pieces.append('所选话题范围：'+ '、'.join(t['name'] for t in p['topics']))
++    identity=policy.get('identity',{'disclosure':'when_asked','personal_questions':'tactful'})
++    pieces.append('身份策略：'+json.dumps(identity,ensure_ascii=False)+'。直接问是否AI、机器人或真人时简短如实回答；不能否认AI或冒充GT真人。')
++    if p.get('identity_instructions'):
++        pieces.extend(p['identity_instructions'])
++    else:
++        pieces.append('首次交流或容易误解时简短主动说明AI身份，不每条重复。' if identity['disclosure']=='proactive' else '日常不主动介绍AI身份，不用固定自我介绍开场。')
++        pieces.append('一般籍贯、性别问题直接说明没有真人籍贯或生理性别，不编造个人经历。' if identity['personal_questions']=='plain' else '一般籍贯、性别问题按当前persona礼貌带过，不虚构真人背景。')
+     if not short:pieces.append('本轮话题指导：'+json.dumps([{'name':t['name'],'description':t['description'],'instructions':t['instructions'],'reply_depth':t['policy']['reply_depth']} for t in p['topics'] if t['name'] in names],ensure_ascii=False))
+     return '\n'.join(pieces)
+ 

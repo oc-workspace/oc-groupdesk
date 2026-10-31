@@ -10,6 +10,7 @@ import {z} from 'zod';
 import {pool,transaction,audit} from './db.js';
 import {token,digest,passwordValid,passwordHash,secureEqual,HttpError,requireCondition} from './security.js';
 import {searchKnowledge} from './search.js';
+import {identityInstructions} from './identity.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
 declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];}}}
@@ -404,6 +405,7 @@ function registerRuntime(app:express.Express){
     const config=await groupDetail(group.id);
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
+    config.identity_instructions=identityInstructions(config.policy.identity,config.policy.persona);
     config.participation_skill=await readFile(new URL('../skills/group-participation/SKILL.md',import.meta.url),'utf8');
     res.json(config);
   });
