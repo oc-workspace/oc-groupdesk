@@ -8,3 +8,5 @@ backups/
 coverage/
 *.log
 .DS_Store
+
+._*
