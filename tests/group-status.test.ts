@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mergeStatuses,confirmationFor,type GroupStatus} from '../web/group-status.js';
+import {mergeStatuses,confirmationFor,clearCheckedRevisions,type GroupStatus} from '../web/group-status.js';
 const now=Date.parse('2026-10-31T13:00:00Z');
 const row=(patch:Partial<GroupStatus>={}):GroupStatus=>({id:'group-a',revision:4,applied_revision:3,bot_seen_at:'2026-10-31T12:59:00Z',enabled:true,...patch});
 
@@ -34,4 +34,13 @@ test('status updates remain isolated between groups',()=>{
   const updated=mergeStatuses(values,[row({applied_revision:4})]);
   assert.deepEqual(updated['group-b'],values['group-b']);
   assert.equal(updated['group-a'].applied_revision,4);
+});
+
+test('an older manual check cannot dismiss the reminder for a newly saved revision',()=>{
+  const required={'group-a':5,'group-b':7};
+  const stale=clearCheckedRevisions(required,[row({revision:4})]);
+  assert.deepEqual(stale,required);
+  const checked=clearCheckedRevisions(stale,[row({revision:5})]);
+  assert.deepEqual(checked,{'group-b':7});
+  assert.deepEqual(required,{'group-a':5,'group-b':7});
 });
