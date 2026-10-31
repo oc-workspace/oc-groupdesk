@@ -223,6 +223,19 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   assert.deepEqual(after.groups.find((g:any)=>g.id===selected.id).policy,selected.policy);
   assert.deepEqual(after.groups.filter((g:any)=>g.id!==selected.id),others);
 });
+test('existing credential import is atomic and repeatable without overriding a later model choice',async()=>{
+  const {importExistingCredential}=await import('../server/models.js');
+  const input={name:'Existing isolated key',base_url:'https://api.example.com/v1',api_key:'existing-isolated-key-not-production',model_id:'existing-text-model'};
+  const id=await importExistingCredential(input),first=(await request('/overview')).data;
+  assert.equal(first.model_config.defaults.routes.text.credential_id,id);
+  assert.equal(await importExistingCredential(input),id);
+  const second=(await request('/overview')).data;
+  assert.deepEqual(second.model_config.defaults,first.model_config.defaults);
+  assert.deepEqual(second.groups,first.groups);
+  await assert.rejects(importExistingCredential({...input,name:'Different existing key',api_key:'different-isolated-key',model_id:'other-model'}));
+  assert.deepEqual((await request('/overview')).data.model_config,second.model_config);
+});
+
 test('model credentials stay write-only while text/image routes isolate groups and rotate safely',async()=>{
   const secretA='isolated-model-credential-A-only',secretB='isolated-model-credential-B-only';
   const makeKey=async(name:string,api_key:string)=>(await request('/model-credentials','POST',{name,base_url:'https://api.example.com/v1',api_key})).data.id;

@@ -13,8 +13,11 @@ ast.parse(s);(a.destination/'utils_model.py').write_text(s)
 s=(a.source/'groupdesk_runtime.py').read_text()
 anchor="            b=api('/config/'+urllib.parse.quote(external,safe=''));validate_bundle(b,external)\n"
 assert s.count(anchor)==1,'Unexpected GroupDesk sync source'
-if "b['private_text_route']=api('/model-credentials'" not in s:
- s=s.replace(anchor,anchor+"            if b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):\n                b['private_text_route']=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']\n")
+if 'validate_private_route(b,' not in s:
+ s=s.replace(anchor,anchor+"            if b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):\n                private=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']\n                from model_routing import validate_private_route\n                validate_private_route(b,private);b['private_text_route']=private\n")
+validation="    if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')\n"
+assert validation in s,'Unexpected contract validation source'
+if 'Unknown model routing contract' not in s:s=s.replace(validation,validation+"    if bundle.get('model_routing_contract_version') not in [None,1]:raise ValueError('Unknown model routing contract')\n")
 ack="api('/ack',{'group_id':group_id,'revision':rev})"
 new_ack="api('/ack',{'group_id':group_id,'revision':rev,'model_routing_version':1})"
 assert s.count(ack)==1 or s.count(new_ack)==1,'Unexpected GroupDesk ack source'

@@ -11,3 +11,5 @@
 MaiBot 使用请求级 ModelInfo/APIProvider，不修改共享任务配置。原有任务槽名用于内部配额结算，实际 model_identifier 和 provider 用于真实请求；文字路由覆盖当前群规划/回复等获准的文字任务。全局预算、任务输出上限、来源绑定、发送前版本检查和 Persona 继续有效。install-model-routing.py 在已确认的 1.3.18 / GT v4 生产文件副本上检查并生成补丁，不直接覆盖源文件。测试镜像无网络、不挂载真实账本，不产生模型调用或微信群发送。
 
 首次导入只在服务器间通过 SSH 标准输入传递既有 Key，运行 scripts/import-model-credential.ts；不写入 Git、日志或本机临时文件。保留既有文字模型为 configured 来源。外部加密主密钥必须与数据库备份一起恢复，保持文件 0600、目录仅 root 可访问；切勿仅恢复数据库后生成新的主密钥。
+
+每日备份在root专用备份目录中保存model-encryption.env并纳入SHA256SUMS；恢复前核对外部主密钥，避免启动无法解密的数据库。目录/文件维持0700/0600，不将该文件上传Git或公开。

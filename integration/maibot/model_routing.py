@@ -1,6 +1,11 @@
 """Select a private GroupDesk text route for the admitted source group only."""
 import time
 
+def validate_private_route(bundle,private):
+    route=bundle['model_routing']['text']
+    if not isinstance(private,dict) or any(private.get(k)!=route.get(k) for k in ['credential_id','credential_revision','model_id']):raise ValueError('Private model route mismatch')
+    if not isinstance(private.get('api_key'),str) or not private['api_key'] or not str(private.get('base_url','')).startswith('https://') or private.get('client_type')!='openai':raise ValueError('Invalid private model route')
+
 def select_route(model_info,api_provider,task):
     from group_guard import policy,TURN
     import groupdesk_runtime as gd

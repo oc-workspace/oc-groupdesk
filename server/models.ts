@@ -86,3 +86,25 @@ export async function refreshCatalog(credentialId:string,actor:string,fetcher=fe
     if(error instanceof HttpError)throw error;throw new HttpError(502,message);
   }
 }
+
+export async function importExistingCredential(input:{name:string;base_url:string;api_key:string;model_id:string}){
+  keyValue.parse(input.api_key);modelId.parse(input.model_id);
+  const endpoint=baseUrl(input.base_url);
+  return transaction(async db=>{
+    await db.query('SELECT pg_advisory_xact_lock(78511943)');
+    const existing=(await db.query('SELECT id,key_ciphertext FROM model_credentials WHERE base_url=$1 AND key_digest=$2',[endpoint,digest(input.api_key)])).rows[0];
+    const defaults=(await db.query('SELECT routes FROM model_settings WHERE singleton=true FOR UPDATE')).rows[0];
+    requireCondition(!defaults.routes.text||(defaults.routes.text.credential_id===existing?.id&&defaults.routes.text.model_id===input.model_id),409,'已有默认文字模型，请在后台明确修改，导入不会覆盖');
+    const id=existing?.id||randomUUID();
+    if(existing)requireCondition(openKey(existing.key_ciphertext)===input.api_key,503,'已有密钥无法读取，请核对加密主密钥');
+    else await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest) VALUES($1,$2,$3,$4,$5,$6)',[id,input.name,endpoint,sealKey(input.api_key),'••••'+input.api_key.slice(-4),digest(input.api_key)]);
+    await db.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source) VALUES($1,$2,$2,'text','configured') ON CONFLICT(credential_id,model_id) DO NOTHING",[id,input.model_id]);
+    await validateSelection({credential_id:id,model_id:input.model_id},'text',db);
+    if(!defaults.routes.text){
+      await db.query("UPDATE model_settings SET routes=jsonb_set(routes,'{text}',$1::jsonb),revision=revision+1 WHERE singleton=true",[JSON.stringify({credential_id:id,model_id:input.model_id})]);
+      await db.query("UPDATE groups SET revision=revision+1 WHERE model_routes->'text'->>'mode'='inherit'");
+      await audit('operator','model.existing_credential_imported',id,{},db);
+    }
+    return id;
+  });
+}

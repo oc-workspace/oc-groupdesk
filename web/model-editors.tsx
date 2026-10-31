@@ -23,7 +23,7 @@ export function GroupModelEditor({value=emptyRoutes,onChange,data}:{value?:Group
 export function Models({data,api,reload,notify}:{data:ModelData;api:Api;reload:()=>Promise<void>;notify:(s:string,error?:boolean)=>void}){
   const [defaults,setDefaults]=useState(data.defaults.routes),[busy,setBusy]=useState(false),[form,setForm]=useState<{id?:string;name:string;base_url:string;api_key:string;revision?:number;enabled:boolean}|null>(null);
   const [manual,setManual]=useState<{id:string;model_id:string;capability:'text'|'image'}|null>(null);
-  useEffect(()=>setDefaults(data.defaults.routes),[data.defaults]);
+  useEffect(()=>setDefaults(data.defaults.routes),[data.defaults.revision]);
   async function run(work:()=>Promise<void>){setBusy(true);try{await work();}catch(e){notify((e as Error).message,true);}finally{setBusy(false);}}
   async function saveCredential(e:FormEvent){e.preventDefault();if(!form)return;await run(async()=>{
     const body={...form,...(!form.api_key?{api_key:undefined}:{})};
