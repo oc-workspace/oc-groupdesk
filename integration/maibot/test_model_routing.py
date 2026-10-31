@@ -49,6 +49,17 @@ class ModelRoutingTests(unittest.TestCase):
   self.route['source']='legacy';model,provider=self.select()
   self.assertIs(model,self.model);self.assertIs(provider,self.provider)
 
+ def test_gemini_route_keeps_root_url_and_native_client_type(self):
+  self.route['client_type']='gemini';self.profile['private_text_route'].update(client_type='gemini',base_url='https://api.example.com')
+  model,provider=self.select();self.assertEqual(provider.client_type,'gemini');self.assertEqual(provider.base_url,'https://api.example.com');self.assertEqual(model.extra_params,{})
+ def test_responses_route_disables_response_storage(self):
+  self.route['client_type']='openai_responses';self.profile['private_text_route']['client_type']='openai_responses'
+  model,provider=self.select();self.assertEqual(provider.client_type,'openai_responses');self.assertIs(model.extra_params['store'],False);self.assertNotIn('store',self.model.extra_params)
+ def test_unknown_or_mismatched_protocol_is_rejected(self):
+  for public,private in [('gemini','openai'),('plugin-unknown','plugin-unknown')]:
+   self.route['client_type']=public;self.profile['private_text_route']['client_type']=private
+   with self.assertRaises(ReqAbortException):self.select()
+
 @unittest.skipUnless(NATIVE,'Native MaiBot classes required')
 class NativeSelectionRoutingTests(unittest.IsolatedAsyncioTestCase):
  def setUp(self):ModelRoutingTests.setUp(self)
@@ -73,14 +84,24 @@ class NativeSelectionRoutingTests(unittest.IsolatedAsyncioTestCase):
    with self.assertRaises(RuntimeError):await native.LLMRequest._select_model(slot)
    self.assertEqual(slot.model_usage['task-slot'],(0,0,0))
 
+ async def test_real_native_factories_construct_gemini_and_responses_without_network(self):
+  from src.llm_models.model_client.base_client import client_registry
+  for protocol,module in [('gemini','gemini_client'),('openai_responses','openai_responses_client')]:
+   self.route.update(client_type=protocol,credential_id='factory-'+protocol)
+   self.profile['private_text_route'].update(client_type=protocol,credential_id='factory-'+protocol)
+   model,provider=select_route(self.model,self.provider,'planner')
+   client=await client_registry.get_client_class_instance_async(provider)
+   self.assertTrue(type(client).__module__.endswith(module));self.assertEqual(model.api_provider,provider.name)
+
 class SyncPrivateRouteTests(unittest.TestCase):
- def exercise(self,mismatch=False):
+ def exercise(self,mismatch=False,protocol='openai'):
   import groupdesk_runtime as gd
   from test_groupdesk_runtime import bundle
   b=bundle();b['external_id']='room';b['model_routing_contract_version']=1
   route={'source':'group','available':True,'credential_id':'key-a','credential_revision':1,'model_id':'text-a'}
+  route['client_type']=protocol
   b['model_routing']={'text':route,'image':{'source':'disabled','available':False}}
-  private={**route,'api_key':'isolated-private-route-key','base_url':'https://api.example.com/v1','client_type':'openai'}
+  private={**route,'api_key':'isolated-private-route-key','base_url':'https://api.example.com/v1','client_type':protocol}
   if mismatch:private['credential_revision']=0
   acknowledgements=[]
   def api(path,body=None):
@@ -100,3 +121,6 @@ class SyncPrivateRouteTests(unittest.TestCase):
   saved,acks=self.exercise();self.assertTrue(saved['enabled']);self.assertEqual(saved['private_text_route']['api_key'],'isolated-private-route-key');self.assertEqual(acks[0]['model_routing_version'],1)
  def test_private_route_mismatch_disables_group_without_confirmation(self):
   saved,acks=self.exercise(True);self.assertFalse(saved['enabled']);self.assertNotIn('private_text_route',saved);self.assertEqual(acks,[])
+
+ def test_gemini_private_route_can_be_applied_and_confirmed(self):
+  saved,acks=self.exercise(protocol='gemini');self.assertTrue(saved['enabled']);self.assertEqual(saved['private_text_route']['client_type'],'gemini');self.assertEqual(acks[0]['model_routing_version'],1)
