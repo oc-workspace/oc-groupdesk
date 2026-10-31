@@ -10,9 +10,9 @@ import {z} from 'zod';
 import {pool,transaction,audit} from './db.js';
 import {token,digest,passwordValid,passwordHash,secureEqual,HttpError,requireCondition} from './security.js';
 import {searchKnowledge} from './search.js';
-import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode} from './policies.js';
+import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
-declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};}}}
+declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];}}}
 const id=z.uuid();
 const text=(max:number)=>z.string().trim().max(max);
 const language=z.enum(['auto','zh-CN','en','ja','ko','fr','de','es']);
@@ -67,10 +67,15 @@ export function createApp(){
     res.cookie(cookieName,session,{httpOnly:true,secure:secureCookies,sameSite:'strict',maxAge:12*3600000,path:'/'});
     res.json({username:admin.username,csrf});
   });
-  app.use('/api/runtime',(req,res,next)=>{
+  app.use('/api/runtime',async(req,res,next)=>{
     const configured=process.env.BOT_API_TOKEN||'';
-    if(configured.length<32)return res.status(503).json({error:'机器人连接密钥尚未配置'});
-    if(!secureEqual(req.headers.authorization||'','Bearer '+configured))return res.status(401).json({error:'机器人身份验证失败'});
+    if(configured.length>=32&&secureEqual(req.headers.authorization||'','Bearer '+configured))return next();
+    const bearer=/^Bearer ([A-Za-z0-9_-]{32,200})$/.exec(req.headers.authorization||'');
+    if(!bearer)return res.status(401).json({error:'机器人身份验证失败'});
+    const adapter=(await pool.query('SELECT group_external_ids FROM runtime_adapters WHERE token_hash=$1',[digest(bearer[1])])).rows[0];
+    if(!adapter)return res.status(401).json({error:'机器人身份验证失败'});
+    req.runtimeGroups=adapter.group_external_ids;
+    if(['/scenes','/select-scene'].includes(req.path))return res.status(403).json({error:'此适配器只授权群聊'});
     next();
   });
   registerRuntime(app);
@@ -312,7 +317,7 @@ export function createApp(){
     version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
     cookie_secure:secureCookies,public_origin:process.env.PUBLIC_ORIGIN||'http://localhost:3110',
     retrieval:'关键词检索 · 中文双字匹配',modules:['群配置','话题','知识库','成员授权','私聊场景','机器人接口'],
-    connector:'等待微信机器人适配器接入；网页中的配置不会自动改变已有机器人'
+    connector:'可信适配器按群同步策略并确认版本；在群配置查看已应用状态'
   }));
   app.use('/api',(_req,res)=>res.status(404).json({error:'接口不存在'}));
   app.use(express.static(resolve('dist'),{index:false,maxAge:'1h'}));
@@ -351,6 +356,7 @@ function registerRuntime(app:express.Express){
       user_id:text(200).min(1),channel:z.enum(['dm','group']),group_external_id:text(200).optional(),
       topic_id:id.optional(),query:text(500).default(''),language:z.union([languageCode,z.literal('auto')]).optional(),mentioned:z.boolean().default(false)
     }).parse(req.body);
+    if(req.runtimeGroups)requireCondition(body.channel==='group'&&!!body.group_external_id&&req.runtimeGroups.includes(body.group_external_id),403,'此适配器未授权该群或私聊');
     // A single repeatable-read snapshot ensures authorization, scene and retrieval use the same state.
     const output=await transaction(async db=>{
       await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -369,7 +375,7 @@ function registerRuntime(app:express.Express){
       if(body.channel==='dm')policy.topic_scope='all';
       requireCondition(group.enabled,403,'此群已停用');
       if(body.channel==='group'&&group.interaction==='mention')requireCondition(body.mentioned,403,'此群仅在被提及时回复');
-      const topics=(await db.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[group.topic_ids])).rows;
+      const topics=effectiveTopics(group,(await db.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[group.topic_ids])).rows);
       requireCondition(topics.length,403,'此群没有启用话题');
       if(body.topic_id)requireCondition(group.topic_ids.includes(body.topic_id)||(body.channel==='group'&&body.mentioned&&policy.topic_scope==='proactive'),403,'此话题未在当前群启用');
       // Search uses this transaction client, never a pool connection that could outlive authorization.
@@ -392,16 +398,21 @@ function registerRuntime(app:express.Express){
     });res.json(output);
   });
   app.get('/api/runtime/config/:externalId',async(req,res)=>{
+    if(req.runtimeGroups)requireCondition(req.runtimeGroups.includes(String(req.params.externalId)),403,'此适配器未授权该群');
     const group=(await pool.query('SELECT id FROM groups WHERE external_id=$1',[text(200).min(1).parse(req.params.externalId)])).rows[0];
     requireCondition(group,404,'群未绑定');
     const config=await groupDetail(group.id);
-    config.topics=(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows.map(t=>({...t,policy:topicPolicySchema.parse(t.policy)}));
+    config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
     config.participation_skill=await readFile(new URL('../skills/group-participation/SKILL.md',import.meta.url),'utf8');
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
     const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);
+    if(req.runtimeGroups){
+      const group=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
+      requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');
+    }
     const result=await pool.query('UPDATE groups SET applied_revision=$1,bot_seen_at=now() WHERE id=$2 AND revision=$1',[body.revision,body.group_id]);
     requireCondition(result.rowCount,409,'配置版本已变化，请重新获取后再确认');
     res.json({ok:true});

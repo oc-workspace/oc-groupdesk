@@ -153,6 +153,17 @@ test('editable topic policy, dry-run, template preservation and multi-language g
   const bad={...group,policy:{...group.policy,language:{mode:'restricted',allowed:['en'],fallback:'ja',allow_requested:true}}};
   assert.equal((await request('/groups/'+group.id,'PUT',bad)).status,400);
 });
+test('scoped adapter tokens cannot access other groups or DM scenes',async()=>{
+  const {digest}=await import('../server/security.js');
+  const scoped='scoped_adapter_test_token_000000000000';
+  await pool.query('INSERT INTO runtime_adapters VALUES($1,$2,$3,now())',[digest(scoped),'synthetic adapter',JSON.stringify(['synthetic-policy-room'])]);
+  async function scopedGet(path:string){return fetch(base+'/api/runtime'+path,{headers:{Authorization:'Bearer '+scoped}});}
+  assert.equal((await scopedGet('/config/synthetic-policy-room')).status,200);
+  assert.equal((await scopedGet('/config/trusted-room-A')).status,403);
+  assert.equal((await scopedGet('/scenes?user_id=stable-user-1')).status,403);
+  await pool.query('DELETE FROM runtime_adapters WHERE token_hash=$1',[digest(scoped)]);
+  assert.equal((await scopedGet('/config/synthetic-policy-room')).status,401);
+});
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

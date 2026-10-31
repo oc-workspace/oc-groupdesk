@@ -20,6 +20,7 @@ export const groupPolicySchema=z.object({
   participation:z.enum(['quiet','moderate','active']).default('moderate'),
   persona:z.enum(['gt-persona','neutral']).default('gt-persona'),
   base_questions:z.boolean().default(false),base_social:z.boolean().default(false),
+  topic_overrides:z.record(z.uuid(),z.object({reply_depth:z.enum(['default','brief','detailed'])})).default({}),
   language:z.object({mode:z.enum(['follow','restricted','fixed']),allowed:z.array(languageCode).max(30),fallback:languageCode,fixed:languageCode.optional(),allow_requested:z.boolean()})
 });
 export type TopicPolicy=z.infer<typeof topicPolicySchema>;
@@ -38,6 +39,11 @@ export function replyLanguage(policy:GroupPolicy,requested?:string):string{
   const l=policy.language;
   if(requested&&requested!=='auto'&&l.allow_requested&&(!l.allowed.length||l.allowed.includes(requested)))return requested;
   return l.mode==='fixed'?l.fixed!:l.mode==='restricted'?l.fallback:'auto';
+}
+export function effectiveTopics(group:any,topics:any[]){
+  const policy=effectivePolicy(group);
+  return topics.map(t=>{const rule=topicPolicySchema.parse(t.policy),depth=policy.topic_overrides[t.id]?.reply_depth;
+    return {...t,policy:{...rule,reply_depth:depth&&depth!=='default'?depth:rule.reply_depth}};});
 }
 export function policyInstructions(policy:GroupPolicy){
   const l=policy.language;

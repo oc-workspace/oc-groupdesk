@@ -40,6 +40,32 @@
       "default": false,
       "type": "boolean"
     },
+    "topic_overrides": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "reply_depth": {
+            "type": "string",
+            "enum": [
+              "default",
+              "brief",
+              "detailed"
+            ]
+          }
+        },
+        "required": [
+          "reply_depth"
+        ],
+        "additionalProperties": false
+      }
+    },
     "language": {
       "type": "object",
       "properties": {
@@ -90,6 +116,7 @@
     "persona",
     "base_questions",
     "base_social",
+    "topic_overrides",
     "language"
   ],
   "additionalProperties": false
