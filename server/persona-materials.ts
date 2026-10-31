@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {z} from 'zod';
 import type pg from 'pg';
 import {pool,transaction,audit} from './db.js';
-import {digest,requireCondition} from './security.js';
+import {digest,requireCondition,HttpError} from './security.js';
 
 export const materialRoot=()=>resolve(process.env.DATA_DIR||'data','persona');
 const short=z.string().max(500).min(1);
@@ -52,14 +52,23 @@ export async function importMaterial(collectionId:string,buffer:Buffer,name:stri
   const {PDFParse}=await import('pdf-parse');const parser=new PDFParse({data:buffer});
   try{decoded=Buffer.from((await parser.getText()).text);}finally{await parser.destroy();}
  }
- let rows;try{rows=parseMaterial(decoded,format,name,collection.external_group_id);}catch(e){
+ let sourceGroup=collection.source_group_id;
+ if(format==='jsonl'){
+  requireCondition(collection.group_id,400,'聊天 JSONL 请导入已选择来源群的素材库');
+  if(!sourceGroup){
+   try{const first=new TextDecoder('utf-8',{fatal:true}).decode(decoded).replace(/^\uFEFF/,'').split('\n').find(l=>l.trim());sourceGroup=short.parse(JSON.parse(first||'{}').group_id);}
+   catch{throw new HttpError(400,'JSONL 缺少有效的来源群 ID');}
+  }
+ }
+ let rows;try{rows=parseMaterial(decoded,format,name,sourceGroup);}catch(e){
   if(e instanceof z.ZodError)throw new Error('JSONL 记录字段无效，请使用标准导出格式');
   if(e instanceof TypeError)throw new Error('文件不是有效 UTF-8 文本');throw e;
  }
  const id=randomUUID(),filename=id+'.source';await mkdir(materialRoot(),{recursive:true,mode:0o700});
  await writeFile(resolve(materialRoot(),filename),buffer,{mode:0o600,flag:'wx'});
  try{return await transaction(async db=>{
-  await db.query('SELECT id FROM persona_collections WHERE id=$1 FOR UPDATE',[collectionId]);
+  const locked=(await db.query('SELECT source_group_id FROM persona_collections WHERE id=$1 FOR UPDATE',[collectionId])).rows[0];
+  if(format==='jsonl'){requireCondition(!locked.source_group_id||locked.source_group_id===sourceGroup,409,'素材库来源群已变化，请重新导入');if(!locked.source_group_id)await db.query('UPDATE persona_collections SET source_group_id=$1 WHERE id=$2',[sourceGroup,collectionId]);}
   const duplicate=(await db.query('SELECT * FROM persona_imports WHERE collection_id=$1 AND sha256=$2',[collectionId,hash])).rows[0];
   if(duplicate){await unlink(resolve(materialRoot(),filename));return {...duplicate,reused:true};}
   const old=new Map((await db.query('SELECT source_id,content_hash FROM persona_materials WHERE collection_id=$1',[collectionId])).rows.map(r=>[r.source_id,r.content_hash]));
@@ -75,7 +84,7 @@ export async function importMaterial(collectionId:string,buffer:Buffer,name:stri
 }
 export const datasetBody=z.object({name:z.string().trim().min(1).max(120),collection_id:z.uuid(),sender_ids:z.array(short).max(500).default([]),since:z.number().int().min(0).nullable().default(null),until_time:z.number().int().min(0).nullable().default(null)}).refine(v=>v.since===null||v.until_time===null||v.since<=v.until_time,'时间范围无效');
 export async function datasetRecords(datasetId:string,db:Pick<pg.PoolClient,'query'>=pool,includeExcluded=false){
- const d=(await db.query('SELECT d.*,c.external_group_id FROM persona_datasets d JOIN persona_collections c ON c.id=d.collection_id WHERE d.id=$1',[datasetId])).rows[0];requireCondition(d,404,'数据集不存在');
+ const d=(await db.query('SELECT d.*,c.source_group_id FROM persona_datasets d JOIN persona_collections c ON c.id=d.collection_id WHERE d.id=$1',[datasetId])).rows[0];requireCondition(d,404,'数据集不存在');
  const rows=(await db.query(`SELECT * FROM persona_materials WHERE collection_id=$1 AND (cardinality($2::text[])=0 OR sender_id=ANY($2::text[])) AND ($3::bigint IS NULL OR timestamp>=$3) AND ($4::bigint IS NULL OR timestamp<=$4) ${includeExcluded?'':'AND NOT excluded'} ORDER BY timestamp,source_id`,[d.collection_id,d.sender_ids,d.since,d.until_time])).rows;
  return {dataset:d,rows};
 }

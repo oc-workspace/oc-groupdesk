@@ -1,6 +1,6 @@
 CREATE TABLE persona_collections (
  id uuid PRIMARY KEY, name text NOT NULL UNIQUE,
- group_id uuid REFERENCES groups(id), external_group_id text,
+ group_id uuid REFERENCES groups(id), source_group_id text,
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE persona_imports (

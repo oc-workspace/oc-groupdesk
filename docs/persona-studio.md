@@ -4,7 +4,7 @@
 
 ## 素材与数据集
 
-创建绑定微信真实群 ID 的素材库后，导入 UTF-8 JSONL。每行至少包含 `id`、`group_id`、`sender_id`、Unix 秒数 `timestamp`；`authored_text` 是发送正文，`quoted_context` 和 `shared_content` 分开保存。与素材库群 ID 不同的记录会令整次导入取消。
+创建选择来源群的素材库后，导入 UTF-8 JSONL。每行至少包含 `id`、`group_id`、`sender_id`、Unix 秒数 `timestamp`；`authored_text` 是发送正文，`quoted_context` 和 `shared_content` 分开保存。首次导入记录文件中唯一的素材来源群 ID，后续不同的来源 ID 会令整次导入取消。素材来源 ID 与机器人传输绑定 ID 分开，不能用群列表序号代替微信历史中的群 ID。
 
 按 `(素材库, 来源 id)` 对账。相同快照 SHA-256 重复导入直接复用；新快照统计新增、更新、重复记录。相同文字的不同发送记录仍保留，快照里没有出现的历史不会被删除。原文件、校验值和每次导入结果保留在私有数据目录与数据库中。
 

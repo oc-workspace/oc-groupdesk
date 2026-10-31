@@ -5,7 +5,7 @@ import {pool,transaction,audit} from '../server/db.js';
 import {digest,requireCondition,HttpError} from '../server/security.js';
 import {validateSkill,skillName} from '../server/persona-generation.js';
 import {importMaterial} from '../server/persona-materials.js';
-const body=z.object({group_name:z.string().max(120),collection_name:z.string().max(120),sender_id:z.string().max(500),persona_name:z.string().max(120),skill_name:skillName,skill_md:z.string().max(30000),description:z.string().max(500),reference_files:z.record(z.string(),z.string().max(500000)).default({})});
+const body=z.object({group_name:z.string().max(120),source_group_id:z.string().min(1).max(500),collection_name:z.string().max(120),sender_id:z.string().max(500),persona_name:z.string().max(120),skill_name:skillName,skill_md:z.string().max(30000),description:z.string().max(500),reference_files:z.record(z.string(),z.string().max(500000)).default({})});
 try{
  const b=body.parse(JSON.parse(await readFile('/dev/stdin','utf8')));validateSkill(b.skill_md,b.skill_name);
  const out=await transaction(async db=>{
@@ -14,8 +14,8 @@ try{
   requireCondition(group.length===1&&group[0].external_id,400,'来源群不唯一或没有真实群 ID');
   async function collection(name:string,g:any=null){
    const old=(await db.query('SELECT * FROM persona_collections WHERE name=$1',[name])).rows[0];
-   if(old){requireCondition(old.group_id===(g?.id||null),409,'同名素材库绑定不同');return old.id;}
-   const id=randomUUID();await db.query('INSERT INTO persona_collections(id,name,group_id,external_group_id) VALUES($1,$2,$3,$4)',[id,name,g?.id||null,g?.external_id||null]);return id;
+   if(old){requireCondition(old.group_id===(g?.id||null)&&(!g||old.source_group_id===b.source_group_id),409,'同名素材库绑定不同');return old.id;}
+   const id=randomUUID();await db.query('INSERT INTO persona_collections(id,name,group_id,source_group_id) VALUES($1,$2,$3,$4)',[id,name,g?.id||null,g?b.source_group_id:null]);return id;
   }
   const archive=await collection(b.collection_name,group[0]),refs=await collection(b.persona_name+' · 原有 Skill 资料');
   async function dataset(collectionId:string,name:string,senders:string[]){

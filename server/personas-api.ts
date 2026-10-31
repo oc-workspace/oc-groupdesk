@@ -41,8 +41,7 @@ export function registerPersonaAdmin(app:express.Express){
   const b=z.object({name:z.string().trim().min(1).max(120),group_id:z.uuid().nullable().default(null)}).parse(req.body),id=randomUUID();
   const g=b.group_id?(await pool.query('SELECT external_id FROM groups WHERE id=$1',[b.group_id])).rows[0]:null;
   requireCondition(!b.group_id||g,404,'群不存在');
-  requireCondition(!b.group_id||g?.external_id,400,'请先在群管理绑定微信真实群 ID');
-  await pool.query('INSERT INTO persona_collections(id,name,group_id,external_group_id) VALUES($1,$2,$3,$4)',[id,b.name,b.group_id,g?.external_id||null]);
+  await pool.query('INSERT INTO persona_collections(id,name,group_id,source_group_id) VALUES($1,$2,$3,$4)',[id,b.name,b.group_id,null]);
   await audit(req.admin!.username,'persona.collection_created',id);res.status(201).json({id});
  });
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024,files:1,fields:1}});
@@ -81,7 +80,7 @@ export function registerPersonaAdmin(app:express.Express){
  });
  app.get('/api/persona-datasets/:id/export',async(req,res)=>{
   const {dataset,rows}=await datasetRecords(uuid(req.params.id));
-  const data=rows.map(r=>JSON.stringify({id:r.source_id,group_id:dataset.external_group_id||undefined,sender_id:r.sender_id,sender_display_name:r.sender_name,timestamp:Number(r.timestamp),authored_text:r.authored_text,quoted_context:r.quoted_context,shared_content:r.shared_content,message_type:r.kind,content_status:r.content_status,source:r.source})).join('\n')+'\n';
+  const data=rows.map(r=>JSON.stringify({id:r.source_id,group_id:dataset.source_group_id||undefined,sender_id:r.sender_id,sender_display_name:r.sender_name,timestamp:Number(r.timestamp),authored_text:r.authored_text,quoted_context:r.quoted_context,shared_content:r.shared_content,message_type:r.kind,content_status:r.content_status,source:r.source})).join('\n')+'\n';
   res.type('application/x-ndjson').attachment(dataset.id+'.jsonl').send(data);
  });
  app.post('/api/personas',async(req,res)=>{

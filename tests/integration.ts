@@ -338,7 +338,7 @@ test('persona archives authenticate, preserve source identity and incrementally 
  const collection=(await request('/persona-collections','POST',{name:'Source archive A',group_id:group.id})).data.id;personaFixture.collection=collection;
  const row={id:'shard:1',group_id:group.external_id,sender_id:'exact-speaker',sender_display_name:'Same display',timestamp:1700000000,authored_text:'private-authored-A',message_type:'text'};
  const records=[row,{...row,id:'shard:2',authored_text:'same speech'},{...row,id:'shard:3',sender_id:'different-speaker',authored_text:'quote-is-not-authorship',quoted_context:{speaker_id:'exact-speaker',text:'private-authored-A'}}];
- let imported=await uploadPersona(collection,records.map(r=>JSON.stringify(r)).join('\n'));assert.equal(imported.status,200);assert.equal(imported.data.added,3);
+ let imported=await uploadPersona(collection,records.map(r=>JSON.stringify(r)).join('\n'));assert.equal(imported.status,200);assert.equal(imported.data.added,3);assert.equal((await request('/persona-studio')).data.collections.find((c:any)=>c.id===collection).source_group_id,group.external_id);
  const next=[{...row,authored_text:'private-authored-A revised'},records[1],records[2],{...row,id:'shard:4',authored_text:'same speech'}].map(r=>JSON.stringify(r)).join('\n');
  imported=await uploadPersona(collection,next);assert.equal(imported.data.added,1);assert.equal(imported.data.updated,1);assert.equal(imported.data.unchanged,2);
  assert.equal((await uploadPersona(collection,next)).data.reused,true);
@@ -361,7 +361,7 @@ test('personas publish immutable versions and groups pin independent skills with
  p=(await request('/personas/'+persona)).data;const v1=(await request('/personas/'+persona+'/publish','POST',{revision:p.revision})).data;personaFixture.version=v1.id;
  const group=(await request('/overview')).data.groups.find((g:any)=>g.id===personaFixture.group.id);
  assert.equal((await request('/persona-bindings/'+group.id,'PUT',{revision:group.revision,version_id:v1.id})).status,200);
- const a=(await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data;assert.equal(a.persona_skill.skill_md,skill);assert.equal(a.persona_skill.version_id,v1.id);assert(!JSON.stringify(a).includes('private-authored-A'));
+ const a=(await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data;assert.equal(a.persona_skill.skill_md,skill);assert.equal(a.persona_skill.version_id,v1.id);assert.equal(a.persona_binding.name,'Voice A');assert(!JSON.stringify(a).includes('private-authored-A'));
  const other=(await request('/overview')).data.groups.find((g:any)=>g.id!==group.id);
  assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill,null);
  assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1},true)).status,409);
