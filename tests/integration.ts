@@ -153,6 +153,25 @@ test('editable topic policy, dry-run, template preservation and multi-language g
   const bad={...group,policy:{...group.policy,language:{mode:'restricted',allowed:['en'],fallback:'ja',allow_requested:true}}};
   assert.equal((await request('/groups/'+group.id,'PUT',bad)).status,400);
 });
+test('identity policy persists per group, reaches runtime and cannot be overridden by chat',async()=>{
+  const before=(await request('/overview')).data;
+  let selected=before.groups.find((g:any)=>g.external_id==='synthetic-policy-room');
+  const other=before.groups.find((g:any)=>g.id!==selected.id);
+  assert.deepEqual(selected.policy.identity,{disclosure:'when_asked',personal_questions:'tactful'});
+  selected=(await request('/groups/'+selected.id,'PUT',{...selected,policy:{...selected.policy,identity:{disclosure:'proactive',personal_questions:'plain'}}})).data;
+  assert.equal(selected.policy.identity.disclosure,'proactive');
+  const config=(await request('/runtime/config/synthetic-policy-room','GET',undefined,true)).data;
+  assert(config.identity_instructions.some((s:string)=>s.includes('首次交流')));
+  assert(!config.identity_instructions.some((s:string)=>s.includes('合成语气示例')));
+  const out=(await request('/runtime/context','POST',{user_id:'synthetic-user',channel:'group',group_external_id:'synthetic-policy-room',mentioned:true,query:'Are you an AI?',identity:{disclosure:'never'}},true)).data;
+  assert.equal(out.policy.identity.disclosure,'proactive');assert(out.policy_instructions.some((s:string)=>s.includes('简短如实回答')));
+  assert.equal((await request('/groups/'+selected.id,'PUT',{...selected,policy:{...selected.policy,identity:{disclosure:'never',personal_questions:'tactful'}}})).status,400);
+  assert.equal((await request('/overview')).data.groups.find((g:any)=>g.id===selected.id).revision,selected.revision);
+  await migrate();
+  const after=(await request('/overview')).data;
+  assert.deepEqual(after.groups.find((g:any)=>g.id===selected.id).policy.identity,{disclosure:'proactive',personal_questions:'plain'});
+  assert.deepEqual(after.groups.find((g:any)=>g.id===other.id).policy.identity,other.policy.identity);
+});
 test('scoped adapter tokens cannot access other groups or DM scenes',async()=>{
   const {digest}=await import('../server/security.js');
   const scoped='scoped_adapter_test_token_000000000000';
