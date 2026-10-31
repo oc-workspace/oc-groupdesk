@@ -16,6 +16,7 @@ COPY migrations ./migrations
 COPY catalog ./catalog
 COPY skills ./skills
 COPY integration ./integration
+COPY scripts/import-model-credential.ts ./scripts/import-model-credential.ts
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3110

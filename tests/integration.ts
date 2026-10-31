@@ -26,6 +26,8 @@ after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));awai
 test('authentication, CSRF and source validation prevent unauthorized administration',async()=>{
   assert.equal((await request('/overview')).status,401);
   assert.equal((await request('/groups/status')).status,401);
+  assert.equal((await request('/models')).status,401);
+  assert.equal((await request('/model-credentials','POST',{})).status,401);
   assert.equal((await request('/auth/login','POST',{username:'admin',password:'wrong-password'})).status,401);
   const login=await request('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD});
   assert.equal(login.status,200);cookie=login.response.headers.get('set-cookie')!.split(';')[0];csrf=login.data.csrf;
@@ -221,6 +223,56 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   assert.deepEqual(after.groups.find((g:any)=>g.id===selected.id).policy,selected.policy);
   assert.deepEqual(after.groups.filter((g:any)=>g.id!==selected.id),others);
 });
+test('model credentials stay write-only while text/image routes isolate groups and rotate safely',async()=>{
+  const secretA='isolated-model-credential-A-only',secretB='isolated-model-credential-B-only';
+  const makeKey=async(name:string,api_key:string)=>(await request('/model-credentials','POST',{name,base_url:'https://api.example.com/v1',api_key})).data.id;
+  const a=await makeKey('Test Key A',secretA),b=await makeKey('Test Key B',secretB);assert(a&&b);
+  for(const [id,model_id,capability] of [[a,'text-a','text'],[a,'image-a','image'],[b,'text-b','text']])assert.equal((await request('/model-credentials/'+id+'/models','POST',{model_id,capability})).status,201);
+  const publicModels=(await request('/models')).data;
+  assert(!JSON.stringify(publicModels).includes(secretA));assert(!JSON.stringify(publicModels).includes('key_ciphertext'));
+  assert.equal((await request('/runtime/model-credentials','POST',{group_id:groupA.id,revision:groupA.revision})).status,401);
+  const stored=(await pool.query('SELECT key_ciphertext FROM model_credentials WHERE id=$1',[a])).rows[0];assert(!stored.key_ciphertext.includes(secretA));
+  assert.equal((await request('/model-defaults','PUT',{revision:publicModels.defaults.revision,routes:{text:{credential_id:a,model_id:'image-a'},image:null}})).status,400);
+  assert.equal((await request('/model-defaults','PUT',{revision:publicModels.defaults.revision,routes:{text:{credential_id:a,model_id:'text-a'},image:null}})).status,200);
+  let x=(await request('/groups','POST',{name:'Synthetic routed A'})).data;
+  let y=(await request('/groups','POST',{name:'Synthetic routed B'})).data;
+  x=(await request('/groups/'+x.id,'PUT',{...x,enabled:true,external_id:'synthetic-route-a',topic_ids:[topicA.id],model_routes:{text:{mode:'custom',credential_id:b,model_id:'text-b'},image:{mode:'custom',credential_id:a,model_id:'image-a'}}})).data;
+  y=(await request('/groups/'+y.id,'PUT',{...y,enabled:true,external_id:'synthetic-route-b',topic_ids:[topicA.id]})).data;
+  const configX=(await request('/runtime/config/synthetic-route-a','GET',undefined,true)).data;
+  const configY=(await request('/runtime/config/synthetic-route-b','GET',undefined,true)).data;
+  assert.equal(configX.model_routing.text.model_id,'text-b');assert.equal(configX.model_routing.image.model_id,'image-a');
+  assert.equal(configY.model_routing.text.model_id,'text-a');assert.equal(configY.model_routing.text.source,'default');
+  assert(!JSON.stringify(configX).includes(secretB));assert(!JSON.stringify((await request('/overview')).data).includes(secretA));
+  assert.equal((await request('/runtime/ack','POST',{group_id:x.id,revision:x.revision},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{group_id:x.id,revision:x.revision,model_routing_version:1},true)).status,200);
+  assert.equal((await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision-1},true)).status,409);
+  const privateX=(await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision,credential_id:a},true)).data;
+  assert.equal(privateX.text_route.api_key,secretB);assert.equal(privateX.text_route.model_id,'text-b');
+  assert.equal((await request('/runtime/model-credentials','POST',{group_id:y.id,revision:y.revision},true)).data.text_route.api_key,secretA);
+  const {digest}=await import('../server/security.js');const scoped='isolated_model_scope_adapter_0000000000000';
+  await pool.query('INSERT INTO runtime_adapters VALUES($1,$2,$3,now())',[digest(scoped),'model scope test',JSON.stringify(['synthetic-route-a'])]);
+  const response=await fetch(base+'/api/runtime/model-credentials',{method:'POST',headers:{Authorization:'Bearer '+scoped,'Content-Type':'application/json'},body:JSON.stringify({group_id:y.id,revision:y.revision})});assert.equal(response.status,403);
+  await pool.query('DELETE FROM runtime_adapters WHERE token_hash=$1',[digest(scoped)]);
+  const keyB=(await request('/models')).data.credentials.find((c:any)=>c.id===b);
+  const edited={...keyB,enabled:false};
+  assert.equal((await request('/model-credentials/'+b,'PUT',edited)).status,200);
+  assert.equal((await request('/model-credentials/'+b,'PUT',edited)).status,409);
+  const after=(await request('/overview')).data;
+  const updatedX=after.groups.find((g:any)=>g.id===x.id),updatedY=after.groups.find((g:any)=>g.id===y.id);
+  assert.equal(updatedX.revision,x.revision+1);assert.equal(updatedY.revision,y.revision);
+  assert.equal((await request('/runtime/model-credentials','POST',{group_id:x.id,revision:updatedX.revision},true)).status,409);
+  assert.equal((await request('/runtime/model-credentials','POST',{group_id:y.id,revision:y.revision},true)).status,200);
+  const {refreshCatalog}=await import('../server/models.js');
+  const result=await refreshCatalog(a,'test',async()=>({data:[{id:'catalog-text'},{id:'flux-image'},{id:'example-video'}]}));assert.equal(result.count,3);
+  const catalogue=(await request('/models')).data.credentials.find((c:any)=>c.id===a);
+  assert(catalogue.models.some((m:any)=>m.model_id==='text-a'&&!m.listed));
+  await assert.rejects(refreshCatalog(a,'test',async()=>{throw new Error('upstream included '+secretA);}));
+  const failed=(await request('/models')).data.credentials.find((c:any)=>c.id===a);
+  assert.equal(failed.models.length,catalogue.models.length);assert(!failed.catalog_error.includes(secretA));
+  await migrate();assert.deepEqual((await request('/overview')).data.groups.find((g:any)=>g.id===x.id).model_routes,updatedX.model_routes);
+  assert(!JSON.stringify((await request('/logs')).data).includes(secretA));assert(!JSON.stringify((await request('/logs')).data).includes(secretB));
+});
+
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

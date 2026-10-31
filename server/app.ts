@@ -11,6 +11,8 @@ import {pool,transaction,audit} from './db.js';
 import {token,digest,passwordValid,passwordHash,secureEqual,HttpError,requireCondition} from './security.js';
 import {searchKnowledge} from './search.js';
 import {identityInstructions} from './identity.js';
+import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute} from './models.js';
+import {registerModelAdmin} from './models-api.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
 declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];}}}
@@ -20,7 +22,7 @@ const language=z.enum(['auto','zh-CN','en','ja','ko','fr','de','es']);
 const groupSchema=z.object({
   name:text(120).min(1),external_id:text(200).nullable(),enabled:z.boolean(),
   language,allow_language_override:z.boolean(),interaction:z.enum(['mention','topic']),
-  topic_ids:z.array(id).max(100),kb_ids:z.array(id).max(100),policy:groupPolicySchema.optional(),revision:z.number().int().positive().optional()
+  topic_ids:z.array(id).max(100),kb_ids:z.array(id).max(100),policy:groupPolicySchema.optional(),model_routes:groupRoutes.optional(),revision:z.number().int().positive().optional()
 });
 const topicSchema=z.object({name:text(80).min(1),description:text(1000),instructions:text(4000),color:z.enum(['violet','blue','green','amber']),policy:topicPolicySchema.optional(),revision:z.number().int().positive().optional()});
 const kbSchema=z.object({name:text(120).min(1),description:text(1000)});
@@ -116,7 +118,7 @@ export function createApp(){
       group.kb_ids=(await pool.query('SELECT kb_id FROM group_knowledge WHERE group_id=$1',[group.id])).rows.map(r=>r.kb_id);
     }
     res.json({
-      groups,
+      groups,model_config:await modelOverview(),
       topics:(await pool.query('SELECT * FROM topics ORDER BY name')).rows,
       knowledge_bases:(await pool.query("SELECT k.*,count(d.id)::int document_count,count(d.id) FILTER(WHERE d.status='ready')::int ready_count FROM knowledge_bases k LEFT JOIN documents d ON d.kb_id=k.id GROUP BY k.id ORDER BY k.created_at")).rows,
       stats:(await pool.query("SELECT (SELECT count(*)::int FROM memberships WHERE revoked_at IS NULL) members,(SELECT count(*)::int FROM documents) documents")).rows[0]
@@ -141,6 +143,7 @@ export function createApp(){
       const current=(await db.query('SELECT * FROM groups WHERE id=$1 FOR UPDATE',[groupId])).rows[0];
       requireCondition(current,404,'群不存在');
       requireCondition(body.revision===current.revision,409,'配置已被其他操作更新，请刷新后重试');
+      if(body.model_routes){await validateRoutes(body.model_routes,db);await db.query('UPDATE groups SET model_routes=$1 WHERE id=$2',[body.model_routes,groupId]);}
       await db.query('UPDATE groups SET name=$1,external_id=$2,enabled=$3,language=$4,allow_language_override=$5,interaction=$6,revision=revision+1 WHERE id=$7',
         [body.name,body.external_id||null,body.enabled,body.language,body.allow_language_override,body.interaction,groupId]);
       if(body.policy){
@@ -316,6 +319,7 @@ export function createApp(){
       await audit(req.admin!.username,'membership.revoked',req.params.id as string,{},db);
     });res.json({ok:true});
   });
+  registerModelAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
     version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
@@ -342,6 +346,15 @@ export function createApp(){
 }
 
 function registerRuntime(app:express.Express){
+  app.post('/api/runtime/model-credentials',async(req,res)=>{
+    const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);
+    const output=await transaction(async db=>{
+      const group=(await db.query('SELECT id,external_id,revision,enabled,model_routes FROM groups WHERE id=$1 FOR SHARE',[body.group_id])).rows[0];
+      requireCondition(group&&(!req.runtimeGroups||req.runtimeGroups.includes(group.external_id)),403,'此适配器未授权该群');
+      requireCondition(group.enabled&&group.revision===body.revision,409,'群已停用或配置版本已变化');
+      return {text_route:await privateTextRoute(group,db)};
+    });res.json(output);
+  });
   app.get('/api/runtime/scenes',async(req,res)=>{
     const userId=text(200).min(1).parse(req.query.user_id);
     res.json({scenes:(await pool.query('SELECT g.id,g.name FROM memberships m JOIN groups g ON g.id=m.group_id WHERE m.user_id=$1 AND m.revoked_at IS NULL AND g.enabled=true ORDER BY g.name',[userId])).rows});
@@ -408,12 +421,18 @@ function registerRuntime(app:express.Express){
     const config=await groupDetail(group.id);
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
+    config.model_routing_contract_version=1;
+    config.model_routing=await effectiveModelRoutes(config);
     config.identity_instructions=identityInstructions(config.policy.identity,config.policy.persona);
     config.participation_skill=await readFile(new URL('../skills/group-participation/SKILL.md',import.meta.url),'utf8');
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),model_routing_version:z.literal(1).optional()}).parse(req.body);
+    const routingGroup=(await pool.query('SELECT id,model_routes FROM groups WHERE id=$1',[body.group_id])).rows[0];
+    requireCondition(routingGroup,404,'群不存在');
+    const routes=await effectiveModelRoutes(routingGroup) as any;
+    if(routes.text.source!=='legacy'||routes.image.source!=='disabled')requireCondition(body.model_routing_version===1,409,'请更新机器人以应用模型路由后再确认');
     if(req.runtimeGroups){
       const group=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
       requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');

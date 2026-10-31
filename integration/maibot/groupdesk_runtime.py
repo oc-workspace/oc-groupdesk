@@ -76,6 +76,8 @@ def sync():
     for chat,external in conf['groups'].items():
         try:
             b=api('/config/'+urllib.parse.quote(external,safe=''));validate_bundle(b,external)
+            if b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):
+                b['private_text_route']=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']
             groups[str(chat)]={**b,'valid_until':time.time()+75}
             acks.append((str(chat),b['id'],b['revision']))
         except Exception:groups[str(chat)]={'enabled':False,'valid_until':0,'revision':'unavailable'}
@@ -84,7 +86,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'model_routing_version':1})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 
