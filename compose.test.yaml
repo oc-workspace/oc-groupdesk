@@ -1,0 +1,26 @@
+name: groupdesk-test
+services:
+  postgres-test:
+    image: postgres:16.13-bookworm
+    environment:
+      POSTGRES_PASSWORD: isolated-test-only
+      POSTGRES_DB: groupdesk_test
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d groupdesk_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 384m
+  test:
+    build: {context: ., target: test}
+    environment:
+      DATABASE_URL: postgres://postgres:isolated-test-only@postgres-test:5432/groupdesk_test
+      ADMIN_PASSWORD: isolated-test-admin-password
+      BOT_API_TOKEN: isolated-test-bot-token-at-least-32-characters
+      COOKIE_SECURE: "false"
+      DATA_DIR: /tmp/groupdesk-test-data
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    mem_limit: 768m

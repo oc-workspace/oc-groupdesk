@@ -1,0 +1,78 @@
+name: groupdesk
+x-app: &app
+  image: groupdesk:${RELEASE_SHA:-local}
+  build:
+    context: .
+    target: runtime
+  restart: unless-stopped
+  init: true
+  env_file:
+    - ${GROUPDESK_ENV_FILE:-/opt/persist/groupdesk/secrets/app.env}
+  environment:
+    PORT: "3110"
+    DATA_DIR: /data
+    TZ: Asia/Singapore
+  depends_on:
+    postgres:
+      condition: service_healthy
+  volumes:
+    - ${PERSIST_ROOT:-/opt/persist/groupdesk}/files:/data
+  networks: [internal]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  read_only: true
+  tmpfs: [/tmp:size=64m,mode=1777]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+services:
+  postgres:
+    image: postgres:16.13-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: groupdesk
+      POSTGRES_DB: groupdesk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in external env file}
+    volumes:
+      - ${PERSIST_ROOT:-/opt/persist/groupdesk}/postgres:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U groupdesk -d groupdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  app:
+    <<: *app
+    networks:
+      internal: {}
+      edge:
+        aliases: [groupdesk-web]
+    ports: ["127.0.0.1:${APP_PORT:-3110}:3110"]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3110/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    mem_limit: 384m
+    cpus: 0.5
+  worker:
+    <<: *app
+    command: [npm, run, worker]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 0.5
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  edge:
+    external: true
+    name: rococo_rococo-network
