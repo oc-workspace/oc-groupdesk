@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "positive": [
+    "Canto fare sounds delicious.",
+    "The soup tastes fresh."
+  ],
+  "negative": [
+    "The weather is pleasant today."
+  ]
+}

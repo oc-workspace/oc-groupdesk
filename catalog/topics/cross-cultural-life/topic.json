@@ -1,0 +1,12 @@
+{
+  "key": "cross-cultural-life",
+  "version": 1,
+  "name": "跨文化生活",
+  "description": "跨文化交流、海外生活和文化差异。",
+  "instructions": "围绕当前讨论给出有用补充；不虚构本人经历或最新事实。自然简短，避免没有新信息的重复。",
+  "color": "violet",
+  "policy": {
+    "schema_version": 1,
+    "reply_depth": "brief"
+  }
+}

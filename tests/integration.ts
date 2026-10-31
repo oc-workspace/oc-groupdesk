@@ -129,6 +129,30 @@ test('topic updates bump linked configuration versions and used topics cannot be
   assert.equal(fresh.revision,old.revision+1);
   assert.equal((await request('/topics/'+topicA.id,'DELETE')).status,409);
 });
+test('editable topic policy, dry-run, template preservation and multi-language group policy',async()=>{
+  const overview=(await request('/overview')).data;
+  const food=overview.topics.find((t:any)=>t.catalog_key==='china-food');assert(food.policy.combinations.length);
+  const edit={...food,policy:{...food.policy,lexicons:{...food.policy.lexicons,en:[...food.policy.lexicons.en,'synthetic culinary example']}}};
+  const updated=await request('/topics/'+food.id,'PUT',edit);assert.equal(updated.status,200);
+  assert.equal((await request('/topics/'+food.id,'PUT',edit)).status,409);
+  const preview=await request('/topics/'+food.id+'/test','POST',{messages:['Canto fare is delicious.','But it must be good since lots of people are waiting','The bus fare is expensive.']});
+  assert.equal(preview.status,200);assert.equal(preview.data.sends,0);assert.equal(preview.data.model_calls,0);
+  assert.deepEqual(preview.data.results.map((x:any)=>x.reason),['explicit','context','none']);
+  await migrate();const retained=(await request('/overview')).data.topics.find((t:any)=>t.id===food.id);assert(retained.policy.lexicons.en.includes('synthetic culinary example'));
+  assert.equal((await request('/catalog/import','POST',{keys:['china-food'],replace:false})).status,200);
+  assert((await request('/overview')).data.topics.find((t:any)=>t.id===food.id).policy.lexicons.en.includes('synthetic culinary example'));
+  assert.equal((await request('/catalog/import','POST',{keys:['china-food'],replace:true,expected:{'china-food':food.revision}})).status,409);
+  let group=(await request('/groups','POST',{name:'Synthetic policy group'})).data;
+  group=(await request('/groups/'+group.id,'PUT',{...group,enabled:true,external_id:'synthetic-policy-room',topic_ids:[food.id],interaction:'topic',policy:{...group.policy,topic_scope:'proactive',language:{mode:'restricted',allowed:['zh-CN','en'],fallback:'en',allow_requested:true}}})).data;
+  const context={user_id:'ui-local-sender',channel:'group',group_external_id:'synthetic-policy-room',language:'ja',mentioned:true};
+  const output=await request('/runtime/context','POST',context,true);assert.equal(output.status,200);assert.equal(output.data.language,'en');
+  assert.equal((await request('/runtime/context','POST',{...context,topic_id:topicA.id},true)).status,200);
+  assert.equal((await request('/runtime/context','POST',{...context,mentioned:false,topic_id:topicA.id},true)).status,403);
+  const config=await request('/runtime/config/synthetic-policy-room','GET',undefined,true);assert.equal(config.data.topics.length,1);assert(config.data.participation_skill.includes('group-participation'));
+  assert(!JSON.stringify(config.data).includes('secret-A'));
+  const bad={...group,policy:{...group.policy,language:{mode:'restricted',allowed:['en'],fallback:'ja',allow_requested:true}}};
+  assert.equal((await request('/groups/'+group.id,'PUT',bad)).status,400);
+});
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "type": "number",
+      "const": 1
+    },
+    "lexicons": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "maxLength": 35
+      },
+      "additionalProperties": {
+        "maxItems": 1024,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "combinations": {
+      "default": [],
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "all": {
+            "minItems": 2,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "minItems": 1,
+              "maxItems": 1024,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        "required": [
+          "name",
+          "all"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "exclusions": {
+      "default": [],
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "continuations": {
+      "default": [],
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "continuation_exclusions": {
+      "default": [],
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "exit_terms": {
+      "default": [],
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "hard_exit_terms": {
+      "default": [],
+      "maxItems": 1024,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "context": {
+      "default": {
+        "enabled": false,
+        "seconds": 180,
+        "max_intervening_messages": 3,
+        "anchor_chars": 400
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 180
+        },
+        "max_intervening_messages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "anchor_chars": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400
+        }
+      },
+      "required": [
+        "enabled",
+        "seconds",
+        "max_intervening_messages",
+        "anchor_chars"
+      ],
+      "additionalProperties": false
+    },
+    "reply_depth": {
+      "default": "brief",
+      "type": "string",
+      "enum": [
+        "brief",
+        "detailed"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "lexicons",
+    "combinations",
+    "exclusions",
+    "continuations",
+    "continuation_exclusions",
+    "exit_terms",
+    "hard_exit_terms",
+    "context",
+    "reply_depth"
+  ],
+  "additionalProperties": false
+}
