@@ -62,6 +62,21 @@ test('knowledge worker indexes text and handles upload formats and failures',asy
   const docs=(await request('/knowledge/'+kbA+'/documents')).data;
   assert.equal(docs.find((d:any)=>d.id===invalidDoc.id).status,'failed');
 });
+test('valid PDF uploads are parsed and indexed by the isolated worker',async()=>{
+  const stream='BT /F1 12 Tf 50 750 Td (GroupDesk PDF knowledge test) Tj ET';
+  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Length '+stream.length+' >>\nstream\n'+stream+'\nendstream'];
+  let pdf='%PDF-1.4\n';const offsets=[0];
+  objects.forEach((o,i)=>{offsets.push(Buffer.byteLength(pdf));pdf+=(i+1)+' 0 obj\n'+o+'\nendobj\n';});
+  const xref=Buffer.byteLength(pdf);pdf+='xref\n0 6\n0000000000 65535 f \n';
+  for(const offset of offsets.slice(1))pdf+=String(offset).padStart(10,'0')+' 00000 n \n';
+  pdf+='trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF\n';
+  const form=new FormData();form.append('file',new Blob([pdf],{type:'application/pdf'}),'knowledge-test.pdf');
+  const response=await fetch(base+'/api/knowledge/'+kbA+'/upload',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf},body:form});
+  assert.equal(response.status,201);const doc=await response.json();while(await processNext()){}
+  const docs=(await request('/knowledge/'+kbA+'/documents')).data;assert.equal(docs.find((d:any)=>d.id===doc.id).status,'ready');
+  const found=(await request('/knowledge/'+kbA+'/search','POST',{query:'GroupDesk PDF'})).data.results;
+  assert(found.some((r:any)=>r.content.includes('GroupDesk PDF knowledge test')));
+});
 test('DM scenes require verified membership and never leak another group knowledge',async()=>{
   groupA=(await request('/groups/'+groupA.id,'PUT',{...groupA,kb_ids:[kbA]})).data;
   groupB=(await request('/groups/'+groupB.id,'PUT',{...groupB,kb_ids:[kbB]})).data;
