@@ -12,6 +12,16 @@ class PureTests(unittest.TestCase):
   self.assertEqual(gd.direct_signal(POLICY,'The soup is tasty')[0],'combination')
   for text in ['food for thought','> Canto food','汤姆去开会','https://example.com/Canto-food']:
    self.assertFalse(gd.direct_signal(POLICY,text)[0])
+ def test_shipped_food_exclusions_do_not_continue_live_context(self):
+  import sqlite3
+  catalog=next((parent/'catalog/topics/china-food/topic.json' for parent in Path(__file__).resolve().parents if (parent/'catalog/topics/china-food/topic.json').exists()),Path('/catalog/topics/china-food/topic.json'))
+  rule=json.loads(catalog.read_text())['policy'];root=catalog.parent
+  rule['lexicons']={lang:json.loads((root/('lexicon.'+lang+'.json')).read_text()) for lang in ['en','zh-CN']}
+  cfg={'managed_groups':{'1':bundle()}};cfg['managed_groups']['1']['topics'][0]['policy']=rule
+  db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;gd.init_db(db)
+  gd.classify(db,cfg,'1',1,'Canto food is good.','Alice',100)
+  for seq,text in enumerate(['This is food for thought.','Alphabet soup is confusing.','The bus fare is good.'],2):
+   self.assertEqual(gd.classify(db,cfg,'1',seq,text,'Bob',100+seq)[0],[],text)
  def test_missing_snapshot_is_fail_closed(self):
   with tempfile.TemporaryDirectory() as d:
    c=Path(d)/'connection.json';c.write_text(json.dumps({'url':'https://example.invalid','token':'x'*32,'groups':{'1':'example-room'}}))

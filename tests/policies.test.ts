@@ -31,4 +31,6 @@ test('literal preview supports food combinations and bounded continuation withou
   assert.equal(classify(policy,'But it must be good since lots of people are waiting',181,r.state).reason,'none');
   assert.equal(classify(policy,'This soup tastes delicious.',0).reason,'combination');
   assert.equal(classify(policy,'food for thought',0).reason,'none');
+  for(const text of ['This is food for thought.','Alphabet soup is confusing.','The bus fare is good.','Taxi fares are expensive.'])assert.equal(classify(policy,text,55,r.state).reason,'none',text);
+  assert.equal(classify(policy,'This dish is tasty.',0).reason,'combination');
 });

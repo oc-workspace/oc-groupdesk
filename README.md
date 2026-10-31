@@ -6,7 +6,7 @@
 
 React/Vite + TypeScript/Express + PostgreSQL 16 + 独立文档 worker。
 
-- 群管理：真实群 ID 绑定、独立启停、话题勾选、回复语言/覆盖策略、回复方式、知识库关联。
+- 群管理：可信适配器群标识绑定、独立启停、话题勾选、回复语言/覆盖策略、回复方式、知识库关联。
 - 话题库：可复用说明与回复规则，修改后增加关联群的配置版本。
 - 知识库：文字录入、TXT/Markdown/文字型 PDF 上传、异步分片索引、检索测试、失败重试及删除。
 - 私聊：管理员核验稳定用户身份与群归属；成员选择已授权群场景；撤销即时生效。
@@ -75,6 +75,7 @@ scripts/restore.sh <backup-dir> --replace-current-data 验证校验和，停服�
 ## 适配器接入边界
 
 docs/runtime-api.md 和 integration/groupdesk-client.mjs 描述接入协议。后台通过可信适配器下发策略；只有适配器实际加载并确认revision才显示已应用。MaiBot接入实现和边界见integration/maibot。
+操作说明见[群聊话题与语言管理](docs/topic-policy-guide.md)。
 话题详情现由topics.policy存储，支持中英文词条、组合/排除、上下文承接和深度；通用skill及初始模板在skills/和catalog/。模板更新不覆盖后台修改。群policy独立控制persona、话题范围、参与程度和输出语言多选。
 
 现有 UI 桥的 ui- ID 来源于昵称和群，不能作为跨群/私聊身份凭据。在具备可信稳定身份前，不启用自动成员核验。
