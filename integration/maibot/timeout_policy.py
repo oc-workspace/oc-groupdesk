@@ -1,11 +1,14 @@
 """Validated per-group time budgets; never mutate shared native task/provider settings."""
-DEFAULTS={'planner_seconds':300,'request_seconds':310,'direct_ttl_seconds':420}
-LIMITS={'planner_seconds':(30,600),'request_seconds':(40,660),'direct_ttl_seconds':(105,1800)}
+DEFAULTS={'planner_seconds':300,'request_seconds':310,'direct_ttl_seconds':420,'wait_apology_seconds':300}
+LIMITS={'planner_seconds':(30,600),'request_seconds':(40,660),'direct_ttl_seconds':(105,1800),'wait_apology_seconds':(60,1800)}
 
-def validate(value):
-    if not isinstance(value,dict) or set(value)!=set(DEFAULTS):raise ValueError('Invalid timeout policy fields')
+def validate(value,require_apology=False):
+    required=set(DEFAULTS) if require_apology else set(DEFAULTS)-{'wait_apology_seconds'}
+    if not isinstance(value,dict) or not required<=set(value)<=set(DEFAULTS):raise ValueError('Invalid timeout policy fields')
+    value={**DEFAULTS,**value}
     for key,(lower,upper) in LIMITS.items():
         if type(value[key]) is not int or not lower<=value[key]<=upper:raise ValueError('Invalid timeout policy bounds')
+    if value['wait_apology_seconds']%60!=0:raise ValueError('Apology threshold must be whole minutes')
     if value['request_seconds']<value['planner_seconds']+10 or value['direct_ttl_seconds']<value['request_seconds']+65:
         raise ValueError('Inconsistent timeout policy budgets')
     return dict(value)
@@ -13,9 +16,12 @@ def validate(value):
 def for_group(config,chat):
     managed=config.get('managed_groups',{}).get(str(chat))
     raw=(managed or {}).get('policy',{}).get('timeouts')
-    if raw is not None:return validate(raw)
+    if raw is not None:
+        result=validate(raw)
+        if 'wait_apology_seconds' not in raw:result['wait_apology_seconds']=config.get('wait_apology_seconds',300)
+        return result
     # Preserve pre-contract behavior and unmanaged regression fixtures.
-    return {**DEFAULTS,'direct_ttl_seconds':config.get('direct_turn_ttl_seconds',config.get('turn_ttl_seconds',420))}
+    return {**DEFAULTS,'direct_ttl_seconds':config.get('direct_turn_ttl_seconds',config.get('turn_ttl_seconds',420)),'wait_apology_seconds':config.get('wait_apology_seconds',300)}
 
 def task_timeout(task,native_timeout):
     if task!='planner':return native_timeout

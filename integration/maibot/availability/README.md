@@ -47,4 +47,4 @@ monitor状态保存在/opt/persist/maibot-wechat/availability/state.json，权�
 
 测试：安装钩子后的既有limits代码加入PYTHONPATH，再运行python3 -m unittest discover -s integration/maibot/availability -q；单独monitor测试不依赖MaiBot。故障测试使用Fake驱动，不断开真实微信、不发送测试消息、不调用模型。实际登录点击只在真实故障出现时触发。
 
-后续生效参数更新：点名与跟进采用首次采集起共用420秒截止，来源首次入站及普通插话仍保留90秒限制；Planner300秒、HTTP310秒和两分钟致歉详见[慢模型等待策略](../long-wait/README.md)。恢复补答同样使用当前点名门控。
+后续生效参数更新：点名与跟进采用首次采集起共用420秒截止，来源首次入站及普通插话仍保留90秒限制；Planner300秒、HTTP310秒和五分钟致歉详见[慢模型等待策略](../long-wait/README.md)。恢复补答同样使用当前点名门控。

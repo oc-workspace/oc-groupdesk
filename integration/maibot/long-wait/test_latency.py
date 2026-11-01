@@ -47,31 +47,35 @@ class LongWaitTests(unittest.TestCase):
   self.p.ingest(2,'Bob','小T 还有问题？',chat_id='2');self.now+=181
   self.assertIsNone(self.p.dispatch())
  def test_fast_reply_is_byte_for_byte_unchanged(self):
-  turn=self.turn();text='Hello, Lisa!';output,info=self.response(turn,119.99,text)
+  turn=self.turn();text='Hello, Lisa!';output,info=self.response(turn,299.99,text)
   self.assertEqual(output,text);self.assertFalse(info['late'])
- def test_exactly_two_minutes_is_normal(self):
-  turn=self.turn();output,info=self.response(turn,120)
+ def test_two_to_five_minutes_no_longer_gets_an_apology(self):
+  turn=self.turn()
+  for elapsed in [120,121,180,240,299]:
+   output,info=self.response(turn,elapsed);self.assertEqual(output,'这是正文。');self.assertFalse(info['late'])
+ def test_exactly_five_minutes_is_normal(self):
+  turn=self.turn();output,info=self.response(turn,300)
   self.assertEqual(output,'这是正文。');self.assertFalse(info['late'])
- def test_over_two_minutes_prepends_apology_in_the_same_message(self):
-  turn=self.turn();output,info=self.response(turn,120.01)
+ def test_over_five_minutes_prepends_apology_in_the_same_message(self):
+  turn=self.turn();output,info=self.response(turn,300.01)
   self.assertTrue(output.startswith('抱歉久等'));self.assertTrue(output.endswith('这是正文。'));self.assertTrue(info['late'])
  def test_english_reply_uses_english_apology(self):
-  turn=self.turn();output,_=self.response(turn,121,'Here is your answer.')
+  turn=self.turn();output,_=self.response(turn,301,'Here is your answer.')
   self.assertTrue(output.startswith('Sorry for the wait.'));self.assertNotIn('抱歉',output)
  def test_japanese_reply_uses_japanese_apology(self):
-  turn=self.turn();output,_=self.response(turn,121,'これは回答です。')
+  turn=self.turn();output,_=self.response(turn,301,'これは回答です。')
   self.assertTrue(output.startswith('お待たせ'))
  def test_persona_model_prepared_apology_is_used_only_when_late(self):
   turn=self.turn();latency.remember(self.p,turn['id'],'久等了，刚才这句话多绕了两个弯。')
   fast,_=self.response(turn,100);self.assertEqual(fast,'这是正文。')
-  late,info=self.response(turn,121);self.assertTrue(late.startswith('久等了，刚才这句话多绕了两个弯。'));self.assertEqual(info['apology_source'],'persona_model')
+  late,info=self.response(turn,301);self.assertTrue(late.startswith('久等了，刚才这句话多绕了两个弯。'));self.assertEqual(info['apology_source'],'persona_model')
  def test_already_present_apology_is_not_duplicated(self):
   turn=self.turn();text='Sorry I missed this earlier. Here is the answer.'
-  output,info=self.response(turn,200,text);self.assertEqual(output,text);self.assertEqual(info['apology_source'],'already_present')
+  output,info=self.response(turn,350,text);self.assertEqual(output,text);self.assertEqual(info['apology_source'],'already_present')
  def test_apology_counts_toward_the_same_output_cap(self):
-  turn=self.turn();output,_=self.response(turn,200,'正文'*500);self.assertLessEqual(len(output),self.cfg['output_chars'])
+  turn=self.turn();output,_=self.response(turn,350,'正文'*500);self.assertLessEqual(len(output),self.cfg['output_chars'])
  def test_duplicate_delivery_is_still_denied(self):
-  turn=self.turn();self.response(turn,121)
+  turn=self.turn();self.response(turn,301)
   self.p.reserve_send('first',turn['id'],'1')
   with self.assertRaises(Denied):self.p.reserve_send('second',turn['id'],'1')
  def test_wrong_group_and_expired_turn_are_still_denied(self):
@@ -80,16 +84,16 @@ class LongWaitTests(unittest.TestCase):
   self.now=turn['expires']+1
   with self.assertRaises(Denied):self.p.reserve_send('late',turn['id'],'1')
  def test_latency_audit_stores_timing_and_hash_without_reply_body(self):
-  turn=self.turn();_,info=self.response(turn,200);latency.audit(self.p,turn['id'],'one',info)
+  turn=self.turn();_,info=self.response(turn,350);latency.audit(self.p,turn['id'],'one',info)
   with self.p.db() as db:
-   row=dict(db.execute('SELECT * FROM latency_deliveries').fetchone());self.assertEqual(row['elapsed_seconds'],200);self.assertEqual(row['late'],1)
+   row=dict(db.execute('SELECT * FROM latency_deliveries').fetchone());self.assertEqual(row['elapsed_seconds'],350);self.assertEqual(row['late'],1)
    self.assertNotIn('这是正文',str(row));self.assertEqual(len(row['apology_sha256']),64)
  def test_queued_wait_is_included_in_apology_clock(self):
-  self.p.ingest(1,'Alice','小T，解释一下',chat_id='1');self.now+=121;turn=self.p.dispatch()
+  self.p.ingest(1,'Alice','小T，解释一下',chat_id='1');self.now+=301;turn=self.p.dispatch()
   output,info=latency.decorate(self.p,turn['id'],'这是正文。');self.assertTrue(info['late']);self.assertTrue(output.startswith('抱歉久等'))
  def test_restart_preserves_clock_and_prepared_apology(self):
   turn=self.turn();latency.remember(self.p,turn['id'],'抱歉久等，刚才拐了个弯。')
-  self.p=Policy(self.tmp.name,self.cfg,lambda:self.now);output,_=self.response(turn,150)
+  self.p=Policy(self.tmp.name,self.cfg,lambda:self.now);output,_=self.response(turn,350)
   self.assertTrue(output.startswith('抱歉久等，刚才拐了个弯。'))
  def test_empty_or_injected_apology_is_ignored(self):
   turn=self.turn()
@@ -97,7 +101,7 @@ class LongWaitTests(unittest.TestCase):
   with self.p.db() as db:self.assertEqual(db.execute('SELECT wait_apology FROM turns').fetchone()[0],'')
  def test_greeting_and_late_preparation_do_not_add_model_calls(self):
   turn=self.turn('小T hello');before=self.p.snapshot()['model_calls_today']
-  latency.remember(self.p,turn['id'],'Sorry for the wait.');self.response(turn,130)
+  latency.remember(self.p,turn['id'],'Sorry for the wait.');self.response(turn,350)
   self.assertEqual(self.p.snapshot()['model_calls_today'],before)
 
 if __name__=='__main__':unittest.main()

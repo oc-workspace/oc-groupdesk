@@ -25,7 +25,8 @@ export class GroupDeskClient {
   async applyConfig(trustedExternalGroupId,apply){
     const config=await this.request('/config/'+encodeURIComponent(trustedExternalGroupId));
     const applied=await apply(config);
-    if(config.timeout_policy_contract_version===1&&applied?.timeout_policy_version!==1){
+    const requiredTimeoutVersion=config.timeout_policy_contract_version;
+    if(requiredTimeoutVersion!==undefined&&(![1,2].includes(requiredTimeoutVersion)||applied?.timeout_policy_version!==requiredTimeoutVersion)){
       throw new Error('Adapter must apply per-group time budgets before acknowledging this configuration');
     }
     // Send acknowledgement only AFTER the adapter applied this exact version.

@@ -40,7 +40,7 @@ edit('core/reply.py',[
  ('    properties["attach_pic"] = {', '''    properties["wait_apology"] = {
         "type": "string",
         "maxLength": 120,
-        "description": "预备一句与本次回复同语言、符合当前Persona的简短等待致歉。不要混入正文。系统仅在真实等待超过120秒时使用；未超过时忽略。不编造掉线原因，不要求重发。",
+        "description": "预备一句与本次回复同语言、符合当前Persona的简短等待致歉。不要混入正文。系统仅在超过配置的等待阈值时使用；未超过时忽略。不编造掉线原因，不要求重发。",
     }
     properties["attach_pic"] = {''',1),
  ('    fast_reply_text = str(invocation_arguments.get("reply_text") or "").strip()', '''    from group_guard import TURN, policy as gt_policy
@@ -49,7 +49,7 @@ edit('core/reply.py',[
         remember_wait_apology(gt_policy(), TURN.get(), invocation_arguments.get("wait_apology"))
     fast_reply_text = str(invocation_arguments.get("reply_text") or "").strip()''',1),
 ])
-path=root/'limits/policy.json';v=json.loads(path.read_text());v.update(direct_turn_ttl_seconds=420,wait_apology_seconds=120)
+path=root/'limits/policy.json';v=json.loads(path.read_text());v.update(direct_turn_ttl_seconds=420,wait_apology_seconds=300)
 path.write_text(json.dumps(v,ensure_ascii=False,indent=2)+'\n')
 
 # Existing regression fixtures should test the configured deadline, not the
