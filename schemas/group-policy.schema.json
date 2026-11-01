@@ -103,6 +103,42 @@
       ],
       "additionalProperties": false
     },
+    "conversation": {
+      "default": {
+        "enabled": false,
+        "banter_replies": false,
+        "frequency": "low",
+        "instructions": ""
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "banter_replies": {
+          "type": "boolean"
+        },
+        "frequency": {
+          "type": "string",
+          "enum": [
+            "low",
+            "normal",
+            "high"
+          ]
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 1500
+        }
+      },
+      "required": [
+        "enabled",
+        "banter_replies",
+        "frequency",
+        "instructions"
+      ],
+      "additionalProperties": false
+    },
     "base_questions": {
       "default": false,
       "type": "boolean"
@@ -187,6 +223,7 @@
     "persona",
     "identity",
     "timeouts",
+    "conversation",
     "base_questions",
     "base_social",
     "topic_overrides",

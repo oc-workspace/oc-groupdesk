@@ -21,6 +21,7 @@ COPY scripts/import-model-credential.ts ./scripts/import-model-credential.ts
 COPY scripts/import-model-providers.ts ./scripts/import-model-providers.ts
 COPY scripts/import-persona-archive.ts ./scripts/import-persona-archive.ts
 COPY scripts/bootstrap-persona.ts ./scripts/bootstrap-persona.ts
+COPY scripts/prepare-persona-specialist.ts ./scripts/prepare-persona-specialist.ts
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3110

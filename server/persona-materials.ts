@@ -5,6 +5,7 @@ import {z} from 'zod';
 import type pg from 'pg';
 import {pool,transaction,audit} from './db.js';
 import {digest,requireCondition,HttpError} from './security.js';
+import {textMatchesAny} from '../shared/conversation.js';
 
 export const materialRoot=()=>resolve(process.env.DATA_DIR||'data','persona');
 const short=z.string().max(500).min(1);
@@ -82,11 +83,11 @@ export async function importMaterial(collectionId:string,buffer:Buffer,name:stri
   await audit(actor,'persona.material_imported',collectionId,{added,updated,unchanged:result.unchanged},db);return result;
  });}catch(e){await unlink(resolve(materialRoot(),filename)).catch(()=>{});throw e;}
 }
-export const datasetBody=z.object({name:z.string().trim().min(1).max(120),collection_id:z.uuid(),sender_ids:z.array(short).max(500).default([]),since:z.number().int().min(0).nullable().default(null),until_time:z.number().int().min(0).nullable().default(null)}).refine(v=>v.since===null||v.until_time===null||v.since<=v.until_time,'时间范围无效');
+export const datasetBody=z.object({name:z.string().trim().min(1).max(120),collection_id:z.uuid(),sender_ids:z.array(short).max(500).default([]),contains_any:z.array(z.string().trim().min(1).max(100)).max(30).default([]),since:z.number().int().min(0).nullable().default(null),until_time:z.number().int().min(0).nullable().default(null)}).refine(v=>v.since===null||v.until_time===null||v.since<=v.until_time,'时间范围无效');
 export async function datasetRecords(datasetId:string,db:Pick<pg.PoolClient,'query'>=pool,includeExcluded=false){
  const d=(await db.query('SELECT d.*,c.source_group_id FROM persona_datasets d JOIN persona_collections c ON c.id=d.collection_id WHERE d.id=$1',[datasetId])).rows[0];requireCondition(d,404,'数据集不存在');
  const rows=(await db.query(`SELECT * FROM persona_materials WHERE collection_id=$1 AND (cardinality($2::text[])=0 OR sender_id=ANY($2::text[])) AND ($3::bigint IS NULL OR timestamp>=$3) AND ($4::bigint IS NULL OR timestamp<=$4) ${includeExcluded?'':'AND NOT excluded'} ORDER BY timestamp,source_id`,[d.collection_id,d.sender_ids,d.since,d.until_time])).rows;
- return {dataset:d,rows};
+ return {dataset:d,rows:rows.filter(r=>textMatchesAny(r.authored_text||'',d.contains_any||[]))};
 }
 export async function materialOverview(){
  return {collections:(await pool.query(`SELECT c.*,count(m.source_id)::int message_count,count(m.source_id) FILTER(WHERE m.authored_text IS NOT NULL AND m.authored_text<>'')::int text_count,count(DISTINCT m.sender_id)::int sender_count,min(NULLIF(m.timestamp,0)) first_timestamp,max(m.timestamp) last_timestamp FROM persona_collections c LEFT JOIN persona_materials m ON m.collection_id=c.id GROUP BY c.id ORDER BY c.created_at`)).rows,

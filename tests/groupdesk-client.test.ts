@@ -34,3 +34,9 @@ test('enabled interactions require the adapter capability before acknowledgement
  await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/interactions/);assert.equal(calls.length,1);
  await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,interactions_policy_version:1}));assert.equal(calls.at(-1)!.body.interactions_policy_version,1);
 });
+test('conversation recognition is acknowledged only after the adapter applies its explicit capability',async()=>{
+ const bundle={...config,conversation_policy_contract_version:1,policy:{...config.policy,conversation:{enabled:true}}};
+ const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/conversation policy/);assert.equal(calls.length,1);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,conversation_policy_version:1}));assert.equal(calls.at(-1)!.body.conversation_policy_version,1);
+});
