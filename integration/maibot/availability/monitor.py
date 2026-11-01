@@ -1,4 +1,4 @@
-"""Hourly server maintenance. No LLM calls or chat-history exports."""
+"""Hourly server maintenance; recovery replies use the normal bridge gates."""
 from pathlib import Path
 import argparse,fcntl,json,os,sqlite3,subprocess,time,urllib.request,urllib.error
 
@@ -7,7 +7,6 @@ PERSIST=Path(os.environ.get('MAIBOT_PERSIST','/opt/persist/maibot-wechat'))
 STATE=PERSIST/'availability'
 DESKTOP='/config/bowxt/availability_desktop.py'
 NAMES={'wechat':'wechat-bot','bridge':'maibot-wechat-bridge','maibot':'maibot-gt'}
-NOTICE='Back online. I occasionally lose the connection; if I went quiet, it wasn’t personal—my connection has its own ideas about taking breaks. 🙂'
 
 def atomic(path,value):
     path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -114,30 +113,32 @@ class Driver:
         fields=['state','wechat','bridge','maibot','reason','actions','memory_mib','swap_mib','notification_configured','notification_pending']
         payload={k:result[k] for k in fields if k in result};payload['interval_seconds']=3600
         for external in conf['groups'].values():http(conf['url'].rstrip('/')+'/api/runtime/health',{'external_id':external,**payload},{'Authorization':'Bearer '+conf['token']})
-    def announce(self,incident):
-        # Run in the existing bridge environment, using its current quota ledger.
-        script='''import json,time,os,sys
-from pathlib import Path
-from policy import Policy,settings
-import groupdesk_runtime as gd
-from bowxt import AgentClient,ChatType
-data=json.loads(sys.stdin.read());p=Policy('/limits-state');cfg=json.loads(Path('/state/groups.json').read_text());agent=AgentClient('maibot-gt',base_url=os.environ['BOWXT_BASE_URL'])
-for name,g in cfg.items():
- chat=g['chat_id'];p.cfg=settings();managed=gd.profile(p.cfg,str(chat))
- if not gd.available(managed,time.time()) or not gd.check_remote_revision(managed) or not gd.language_allowed(managed,data['text']):continue
- identifier='availability-'+data['incident']+'-'+str(chat)
- with p.db() as db:
-  if db.execute('SELECT 1 FROM sends WHERE id=?',(identifier,)).fetchone():continue
-  if p._quota(db,'direct',time.time(),table='sends',explicit=True,chat_id=str(chat)):continue
-  now=time.time();db.execute('INSERT INTO sends(id,turn_id,ts,day,kind,status) VALUES(?,NULL,?,?,?,?)',(identifier,now,p.day(now),'direct','reserved'))
- try:
-  if agent.ensure_chat(name,ChatType.GROUP).id!=chat:raise ValueError('group_mismatch')
-  queued=agent.send_text(chat,data['text'],client_id=identifier);out=agent.wait_delivery(queued,timeout=35);status=out.delivery_status
- except Exception:status='uncertain'
- with p.db() as db:db.execute('UPDATE sends SET status=? WHERE id=?',(status,identifier))
-'''
-        # Code is an argument; approved notice data remains stdin. Never use shell interpolation.
-        subprocess.run(['docker','exec','-i',NAMES['bridge'],'/MaiMBot/.venv/bin/python','-c',script],input=json.dumps({'incident':incident,'text':NOTICE}),text=True,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=100)
+    def reconcile(self,incident,recovered_at):
+        from datetime import datetime
+        config=json.loads((PERSIST/'bridge/groups.json').read_text())
+        rows=[]
+        with sqlite3.connect('file:'+str(PERSIST/'wechat/bowxt/messages.db')+'?mode=ro',uri=True) as db:
+            db.row_factory=sqlite3.Row
+            for group in config.values():
+                for row in db.execute('SELECT seq,chat_id,sender,content,message_type,direction,observed_at,is_at_me FROM messages WHERE chat_id=? AND seq>? AND direction="incoming" AND message_type="text" AND sender IS NOT NULL',(group['chat_id'],group.get('min_seq',0))):
+                    value=dict(row)
+                    try:value['source_at']=datetime.fromisoformat(value.pop('observed_at')).timestamp()
+                    except (ValueError,TypeError):continue
+                    if recovered_at-12*3600<=value['source_at']<=recovered_at:rows.append(value)
+        script="""import json,sys
+from policy import Policy
+import recovery
+v=json.load(sys.stdin);p=Policy('/limits-state')
+print(json.dumps(recovery.reconcile(p,v['incident'],v['recovered_at'],v['rows'],v['allowed'])))
+"""
+        process=subprocess.run(['docker','exec','-i',NAMES['bridge'],'/MaiMBot/.venv/bin/python','-c',script],input=json.dumps({'incident':incident,'recovered_at':recovered_at,'rows':rows,'allowed':[str(g['chat_id']) for g in config.values()]}),text=True,check=True,capture_output=True,timeout=35)
+        return json.loads(process.stdout)
+    def transport_recoveries(self):
+        with sqlite3.connect('file:'+str(PERSIST/'limits/limits.sqlite3')+'?mode=ro',uri=True) as db:
+            return db.execute('SELECT id,ended FROM recovery_transport WHERE ended IS NOT NULL AND scanned=0 ORDER BY ended LIMIT 10').fetchall()
+    def mark_transport(self,identifier):
+        with sqlite3.connect(PERSIST/'limits/limits.sqlite3') as db:
+            db.execute('UPDATE recovery_transport SET scanned=1 WHERE id=?',(identifier,))
 
 def run(driver,previous,now):
     attempts=[v for v in previous.get('attempts',[]) if now-v['at']<3600]
@@ -157,13 +158,30 @@ def run(driver,previous,now):
     recovered=state=='online' and bool(incident)
     notification=state+':'+reason
     result['notified']=previous.get('notified')
-    if (state not in {'maintenance','online'} and previous.get('notified')!=notification) or recovered:
+    notify_needed=(state not in {'maintenance','online'} and previous.get('notified')!=notification)
+    if recovered:
+        recovered_at=previous.get('recovered_at') or now
+        result['recovered_at']=recovered_at
+        try:
+            result['reconciliation']=driver.reconcile(incident,recovered_at)
+            result['incident']=None
+            result['recovered_at']=None
+            notify_needed=previous.get('notified')!=notification
+        except Exception:result['reconciliation_pending']=True
+    if state=='online':
+        # A short receive outage can recover between two hourly checks. Its
+        # existing receive outcomes are durable; process them on this check.
+        try:
+            gaps=driver.transport_recoveries()
+            if gaps:
+                identifier,at=gaps[-1]
+                result['transport_reconciliation']=driver.reconcile('transport-'+identifier,at)
+                for identifier,_ in gaps:driver.mark_transport(identifier)
+        except Exception:result['transport_reconciliation_pending']=True
+    # Owner notifications are independent of conditional group recovery replies.
+    if notify_needed or (state=='online' and previous.get('notification_pending') and previous.get('notified')!=notification):
         try:driver.notify(state,reason,recovered);result['notified']=notification
         except Exception:result['notification_pending']=True
-    if recovered:
-        try:driver.announce(incident);result['announcement_attempted']=True
-        except Exception:result['announcement_failed']=True
-        result['incident']=None
     try:driver.report(result)
     except Exception:result['report_pending']=True
     return result
