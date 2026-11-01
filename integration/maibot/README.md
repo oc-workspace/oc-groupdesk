@@ -17,3 +17,5 @@ GroupDesk在数据库中仅保存适配器token的SHA256，并限制授权群。
 原生测试时需把仓库catalog目录只读挂载为/catalog，用于验证实际发布词表的排除与承接；测试使用临时SQLite，不能指向运行账本。
 
 Unified diff context lines for empty source lines contain a required single space. The scoped .gitattributes rule preserves that patch syntax while leaving source-code whitespace checks enabled.
+
+Gemini 3.8 Flash兼容修正：针对固定MaiBot基线，用patch-gemini-client.py把generateContent工具结果的Content角色从tool改成user；保留函数名、调用ID及thought signature。当前普通gemini-3.8-flash使用LOW思考、关闭思考摘要，不改变既有输出token上限；high等显式变体不覆盖。修正源文件需只读挂载到原路径，仅重建MaiBot，微信会话保持。test_gemini_compatibility.py在原生镜像中验证转换及SDK配置；合成工具结果的真实接口简测不向微信群发消息。
