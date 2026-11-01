@@ -1,5 +1,5 @@
 export type GroupStatus={
-  id:string;revision:number;applied_revision:number;bot_seen_at:string|null;enabled:boolean
+  id:string;revision:number;applied_revision:number;bot_seen_at:string|null;enabled:boolean;runtime_health?:import('./runtime-health').RuntimeHealth|null;runtime_health_at?:string|null
 };
 export type StatusMap=Record<string,GroupStatus>;
 export type Confirmation={kind:'confirmed'|'pending'|'offline'|'changed'|'checking';label:string};
@@ -7,13 +7,14 @@ export type Confirmation={kind:'confirmed'|'pending'|'offline'|'changed'|'checki
 export function mergeStatuses(previous:StatusMap,incoming:readonly GroupStatus[]):StatusMap{
   const merged={...previous};
   for(const value of incoming){
-    const next:GroupStatus={id:value.id,revision:value.revision,applied_revision:value.applied_revision,bot_seen_at:value.bot_seen_at,enabled:value.enabled};
+    const next:GroupStatus={id:value.id,revision:value.revision,applied_revision:value.applied_revision,bot_seen_at:value.bot_seen_at,enabled:value.enabled,runtime_health:value.runtime_health,runtime_health_at:value.runtime_health_at};
     const old=merged[next.id];
     if(old&&next.revision<old.revision)continue;
     if(old&&next.revision===old.revision){
       next.applied_revision=Math.max(old.applied_revision,next.applied_revision);
       if(old.bot_seen_at&&(!next.bot_seen_at||Date.parse(old.bot_seen_at)>Date.parse(next.bot_seen_at)))next.bot_seen_at=old.bot_seen_at;
     }
+    if(old?.runtime_health_at&&(!next.runtime_health_at||Date.parse(old.runtime_health_at)>Date.parse(next.runtime_health_at))){next.runtime_health=old.runtime_health;next.runtime_health_at=old.runtime_health_at;}
     merged[next.id]=next;
   }
   return merged;

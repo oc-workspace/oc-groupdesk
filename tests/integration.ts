@@ -421,6 +421,21 @@ test('different groups select different personas; archive, restore and unbinding
  assert.deepEqual((await request('/personas/'+p.id)).data.draft_provenance,{});
 });
 
+test('runtime health is scoped, rejects extra data, and never confirms a policy revision',async()=>{
+ const group=(await request('/overview')).data.groups[0];
+ const body={external_id:group.external_id,state:'needs_phone',wechat:false,bridge:true,maibot:true,reason:'phone_confirmation',interval_seconds:3600,actions:[]};
+ const old=group.revision,ack=group.applied_revision;
+ assert.equal((await request('/runtime/health','POST',body,true)).status,200);
+ const status=(await request('/groups/status')).data.find((g:any)=>g.id===group.id);
+ assert.equal(status.runtime_health.state,'needs_phone');assert(status.runtime_health_at);
+ assert.equal(status.revision,old);assert.equal(status.applied_revision,ack);
+ assert.equal((await request('/runtime/health','POST',{...body,api_key:'secret'},true)).status,400);
+ const {digest}=await import('../server/security.js');
+ await pool.query('INSERT INTO runtime_adapters(token_hash,name,group_external_ids) VALUES($1,$2,$3)',[digest('health-test-scoped-adapter-token'),'health-test',JSON.stringify([group.external_id])]);
+ const send=(external_id:string)=>fetch(base+'/api/runtime/health',{method:'POST',headers:{Authorization:'Bearer health-test-scoped-adapter-token','Content-Type':'application/json'},body:JSON.stringify({...body,external_id})});
+ assert.equal((await send(group.external_id)).status,200);assert.equal((await send('untrusted-room')).status,403);
+});
+
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
   const logs=JSON.stringify((await request('/logs')).data);
   assert(!logs.includes('secret-A'));assert(!logs.includes(process.env.ADMIN_PASSWORD!));

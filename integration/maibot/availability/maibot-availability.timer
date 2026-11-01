@@ -1,0 +1,11 @@
+[Unit]
+Description=Inspect WeChat availability once per hour
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=30s
+Persistent=true
+Unit=maibot-availability.service
+
+[Install]
+WantedBy=timers.target
