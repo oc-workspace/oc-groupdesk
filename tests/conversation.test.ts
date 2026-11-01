@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {textMatchesAny,conversationGuide,conversationDefaults} from '../shared/conversation.js';
-import {parseJudgements,insightSummary} from '../server/conversation-insights.js';
+import {parseJudgements,insightSummary,analysisFailure} from '../server/conversation-insights.js';
+import {generationRequest} from '../server/model-generation.js';
 test('authored target filters support normalized aliases without substring identity mistakes',()=>{
  for(const s of ['Ask Alex-Z.','@alex z hi','ＡＬＥＸ—Ｚ','Alex left early'])assert(textMatchesAny(s,['Alex-Z','Alex Z','Alex']));
  for(const s of ['Alexander left','notalex','words'])assert(!textMatchesAny(s,['Alex']));
@@ -10,7 +11,21 @@ test('authored target filters support normalized aliases without substring ident
 test('low confidence stays uncertain and malformed, duplicate or foreign IDs are rejected',()=>{
  const item={id:0,tone:'playful',substantive:false,confidence:.4,reason:'Context is missing'};
  const result=parseJudgements(JSON.stringify({items:[item]}),1)[0];assert.equal(result.tone,'uncertain');assert.equal(result.substantive,null);
+ assert.equal(parseJudgements('  ```JSON '+JSON.stringify({items:[item]})+'```  ',1).length,1);
+ assert.throws(()=>parseJudgements('prose '+JSON.stringify({items:[item]}),1));
  for(const items of [[],[item,item],[{...item,id:1}],[{...item,confidence:1.2}],[{...item,tone:'liar'}]])assert.throws(()=>parseJudgements(JSON.stringify({items}),1));
+});
+test('Gemini analysis requests JSON while Persona/plain generation remains text by default',()=>{
+ const c={base_url:'https://example.com',client_type:'gemini' as const};
+ assert.equal((generationRequest(c,'gemini-3.8-flash','s','i',{jsonOutput:true,lowThinking:true}).body as any).generationConfig.responseMimeType,'application/json');
+ assert.equal((generationRequest(c,'gemini-3.8-flash','s','i').body as any).generationConfig.responseMimeType,undefined);
+ assert.equal((generationRequest({base_url:'https://example.com/v1',client_type:'openai'},'m','s','i',{jsonOutput:true}).body as any).response_format,undefined);
+});
+test('analysis errors explain validation and database failures without echoing private model text',()=>{
+ let invalid:unknown;try{parseJudgements(JSON.stringify({items:[{id:0,tone:'private-model-text',substantive:true,confidence:.9,reason:'secret'}]}),1);}catch(e){invalid=e;}
+ const message=analysisFailure(invalid);assert.match(message,/items.0.tone/);assert(!message.includes('private-model-text'));assert(!message.includes('secret'));
+ assert(!analysisFailure(new SyntaxError('private-model-output')).includes('private-model-output'));
+ assert.match(analysisFailure({code:'23503',detail:'private detail'}),/23503/);
 });
 test('statistics keep mixed substance, unknowns, changed sources and exclusions distinct',()=>{
  const rows=[0,1,2,3].map(i=>({collection_id:'c',source_id:String(i),content_hash:'new',timestamp:i}));

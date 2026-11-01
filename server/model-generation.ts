@@ -2,12 +2,12 @@ import {request} from 'node:https';
 import {lookup} from 'node:dns/promises';
 import {baseUrl,publicAddress,openKey,type ClientType} from './model-security.js';
 import {requireCondition,HttpError} from './security.js';
-export type GenerationOptions={timeoutMs?:number;maxOutputTokens?:number;signal?:AbortSignal;lowThinking?:boolean};
+export type GenerationOptions={timeoutMs?:number;maxOutputTokens?:number;signal?:AbortSignal;lowThinking?:boolean;jsonOutput?:boolean};
 export function generationRequest(c:{base_url:string;client_type:ClientType},model:string,system:string,input:string,options:GenerationOptions={}){
  const base=baseUrl(c.base_url),output=options.maxOutputTokens||8192;
  if(c.client_type==='gemini'){
   const prefix=/\/v\d+(?:alpha|beta)?\d*$/.test(new URL(base).pathname)?base:base+'/v1beta';
-  return {url:new URL(prefix+'/models/'+encodeURIComponent(model)+':generateContent'),body:{systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{maxOutputTokens:output,...(options.lowThinking&&model==='gemini-3.8-flash'?{thinkingConfig:{thinkingLevel:'LOW',includeThoughts:false}}:{})}}};
+  return {url:new URL(prefix+'/models/'+encodeURIComponent(model)+':generateContent'),body:{systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:input}]}],generationConfig:{maxOutputTokens:output,...(options.jsonOutput?{responseMimeType:'application/json'}:{}),...(options.lowThinking&&model==='gemini-3.8-flash'?{thinkingConfig:{thinkingLevel:'LOW',includeThoughts:false}}:{})}}};
  }
  if(c.client_type==='openai_responses')return {url:new URL(base+'/responses'),body:{model,store:false,stream:false,instructions:system,input,max_output_tokens:output}};
  return {url:new URL(base+'/chat/completions'),body:{model,store:false,stream:false,messages:[{role:'system',content:system},{role:'user',content:input}],max_tokens:output}};

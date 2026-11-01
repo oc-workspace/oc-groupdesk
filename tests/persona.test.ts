@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {gunzipSync} from 'node:zlib';
 import {parseMaterial} from '../server/persona-materials.js';
-import {makeSkill,validateSkill,representativeSample,generationRequest,generationText} from '../server/persona-generation.js';
+import {makeSkill,validateSkill,representativeSample,generationRequest,generationText,personaRequestOptions} from '../server/persona-generation.js';
 import {skillArchive} from '../server/personas-api.js';
 
 test('material identity preserves repeated speech and Unicode while isolating quotations and groups',()=>{
@@ -35,4 +35,12 @@ test('generation routes each protocol correctly and extracts visible text withou
  assert.equal(generationText({candidates:[{content:{parts:[{thought:true,text:'private thought'},{text:'visible'}]}}]},'gemini'),'visible');
  assert.equal(generationText({output:[{type:'reasoning',content:[{text:'private thought'}]},{type:'message',content:[{type:'output_text',text:'visible'}]}]},'openai_responses'),'visible');
  assert.throws(()=>generationText({choices:[]},'openai'));
+});
+test('long Persona drafts have a bounded four-minute wait and only the supported plain Gemini uses LOW',()=>{
+ const c={base_url:'https://example.com',client_type:'gemini' as const};
+ const plain=personaRequestOptions('gemini','gemini-3.8-flash');assert.equal(plain.timeoutMs,240000);assert(plain.timeoutMs!<300000);
+ assert.deepEqual((generationRequest(c,'gemini-3.8-flash','s','i',plain).body as any).generationConfig.thinkingConfig,{thinkingLevel:'LOW',includeThoughts:false});
+ for(const m of ['gemini-3.8-flash-high','gemini-3.8-flash-low','gemini-2.0-flash'])assert.equal(personaRequestOptions('gemini',m).lowThinking,undefined);
+ assert.equal(personaRequestOptions('openai','gemini-3.8-flash').lowThinking,undefined);
+ assert.equal((generationRequest(c,'gemini-3.8-flash-high','s','i',personaRequestOptions('gemini','gemini-3.8-flash-high')).body as any).generationConfig.thinkingConfig,undefined);
 });

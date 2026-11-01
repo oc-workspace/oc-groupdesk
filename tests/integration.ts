@@ -388,8 +388,9 @@ test('persona generation uses a frozen sample, preserves manual conflicts and ne
  assert.equal((await request('/personas/'+p.id+'/generate','POST',{revision:p.revision,credential_id:key,model_id:'text-persona'})).status,409);
  // The frozen input was created before this curation change.
  await request('/persona-collections/'+personaFixture.collection+'/exclusion','POST',{source_id:'shard:2',excluded:true});
- let observed:any,calls=0;
- await processPersonaJob(async(_c,_m,_system,input)=>{calls++;observed=JSON.parse(input);return {choices:[{message:{content:'Updated voice guidance with practical, concise, respectful language and grounded facts. Follow current group rules and disclose identity under its policy.'}}]};});
+ let observed:any,calls=0,options:any;
+ await processPersonaJob(async(_c,_m,_system,input,opts)=>{calls++;observed=JSON.parse(input);options=opts;return {choices:[{message:{content:'Updated voice guidance with practical, concise, respectful language and grounded facts. Follow current group rules and disclose identity under its policy.'}}]};});
+ assert.equal(options.timeoutMs,240000);assert.equal(options.lowThinking,undefined);
  assert.equal(calls,1);assert.equal(observed.samples.length,3);assert(!JSON.stringify(observed.samples).includes('quote-is-not-authorship'));
  let updated=(await request('/personas/'+p.id)).data;assert.equal(updated.jobs[0].status,'ready');assert(updated.draft_skill.includes('Updated voice'));assert.equal(updated.versions.length,p.versions.length);
  await request('/personas/'+p.id+'/generate','POST',{revision:updated.revision,credential_id:key,model_id:'text-persona'});
