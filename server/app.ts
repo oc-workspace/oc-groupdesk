@@ -13,6 +13,8 @@ import {searchKnowledge} from './search.js';
 import {identityInstructions} from './identity.js';
 import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute} from './models.js';
 import {registerPersonaAdmin,runtimePersona} from './personas-api.js';
+import {registerTopicDraftAdmin} from './topic-drafting.js';
+import type {callTextModel} from './model-generation.js';
 import {registerModelAdmin} from './models-api.js';
 import {registerRuntimeHealth} from './runtime-health.js';
 import {registerNotificationAdmin,registerNotificationRuntime} from './notifications.js';
@@ -47,7 +49,7 @@ async function bumpGroups(db:Pick<typeof pool,'query'>,topicId?:string,kbId?:str
   if(topicId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_topics WHERE topic_id=$1)',[topicId]);
   if(kbId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_knowledge WHERE kb_id=$1)',[kbId]);
 }
-export function createApp(){
+export function createApp(options:{topicDraftCaller?:typeof callTextModel}={}){
   const app=express();
   app.disable('x-powered-by');
   // Direct loopback or explicitly configured proxy only; never trust arbitrary X-Forwarded-For.
@@ -325,6 +327,7 @@ export function createApp(){
     });res.json({ok:true});
   });
   registerModelAdmin(app);
+  registerTopicDraftAdmin(app,options.topicDraftCaller);
   registerNotificationAdmin(app);
   registerPersonaAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));

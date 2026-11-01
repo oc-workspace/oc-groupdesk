@@ -5,6 +5,9 @@ import {migrate} from '../server/migrate.js';
 import {pool} from '../server/db.js';
 import {createApp} from '../server/app.js';
 import {processNext} from '../server/worker.js';
+import type {callTextModel} from '../server/model-generation.js';
+import {foodDraft} from './topic-fixture.js';
+let topicDraftReply:typeof callTextModel=async()=>{throw new Error('Unexpected test model call');};
 
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw new Error('Integration tests require a dedicated groupdesk_test database');
 let server:Server,base='',cookie='',csrf='',groupA:any,groupB:any,topicA:any,kbA='',kbB='';
@@ -19,7 +22,7 @@ async function request(path:string,method='GET',body?:unknown,runtime=false,csrf
 before(async()=>{
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await migrate();await migrate();
-  server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));
+  server=createServer(createApp({topicDraftCaller:(...args)=>topicDraftReply(...args)}));await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));
   const address=server.address() as {port:number};base='http://127.0.0.1:'+address.port;
 });
 after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();});
@@ -451,6 +454,52 @@ test('independent WeChat notifications encrypt credentials and bind them to exac
  assert.equal((await request('/runtime/notification','GET',undefined,true)).data.configured,false);
  assert.equal((await request('/notifications/wechat','PUT',{...b,binding_confirmed:true})).status,409);
  const logs=JSON.stringify((await request('/logs')).data);assert(!logs.includes(secret));
+});
+
+test('AI topic assistance authenticates, fills the draft and never saves topics or changes group settings',async()=>{
+ const before=(await request('/overview')).data,topicCount=before.topics.length;
+ assert.equal((await fetch(base+'/api/topics/draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).status,401);
+ assert.equal((await request('/topics/draft','POST',{},false,'wrong')).status,403);
+ const key=(await request('/model-credentials','POST',{name:'Topic assistance fixture',base_url:'https://api.example.com/v1',api_key:'isolated-topic-assist-secret',client_type:'openai'})).data.id;
+ await request('/model-credentials/'+key+'/models','POST',{model_id:'topic-text',capability:'text'});await request('/model-credentials/'+key+'/models','POST',{model_id:'topic-image',capability:'image'});
+ const input={prompt:'我想增加一个关于美食的话题',credential_id:key,model_id:'topic-text',current_draft:{name:'',description:'',instructions:'',color:'amber',policy:{}}};
+ let calls=0;topicDraftReply=async(c,model,system,body,options)=>{calls++;assert.equal(c.id,key);assert.equal(model,'topic-text');assert(system.includes('JSON'));assert.equal(JSON.parse(body).request,input.prompt);assert.equal(options?.maxOutputTokens,6000);assert.equal(options?.timeoutMs,95000);assert(!body.includes('isolated-topic-assist-secret'));return {choices:[{message:{content:JSON.stringify(foodDraft)}}]};};
+ assert.equal((await request('/topics/draft','POST',{...input,model_id:'topic-image'})).status,400);assert.equal(calls,0);
+ const response=await request('/topics/draft','POST',input);assert.equal(response.status,200);assert.deepEqual(response.data.draft,foodDraft);assert.equal(calls,1);assert.equal(response.data.summary.lexicon_terms,5);
+ const after=(await request('/overview')).data;assert.equal(after.topics.length,topicCount);assert.deepEqual(after.groups,before.groups);
+ assert(!JSON.stringify(response.data).includes('isolated-topic-assist-secret'));assert(!JSON.stringify((await request('/logs')).data).includes(input.prompt));
+ // The ordinary save flow remains explicit and validates the returned configuration.
+ const saved=await request('/topics','POST',response.data.draft);assert.equal(saved.status,201);assert.equal((await request('/overview')).data.topics.length,topicCount+1);
+ await request('/topics/'+saved.data.id,'DELETE');
+});
+test('AI topic assistance accepts each configured text protocol and rejects invalid responses without writes',async()=>{
+ const before=(await request('/overview')).data.topics;
+ for(const protocol of ['gemini','openai_responses'] as const){
+  const key=(await request('/model-credentials','POST',{name:'Topic '+protocol,base_url:'https://api.example.com/v1',api_key:'isolated-topic-'+protocol,client_type:protocol})).data.id;
+  await request('/model-credentials/'+key+'/models','POST',{model_id:'topic-model',capability:'text'});
+  topicDraftReply=async(c)=>c.client_type==='gemini'?{candidates:[{content:{parts:[{text:JSON.stringify(foodDraft)}]}}]}:{output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(foodDraft)}]}]};
+  assert.equal((await request('/topics/draft','POST',{prompt:'帮我完善美食话题',credential_id:key,model_id:'topic-model'})).status,200);
+  topicDraftReply=async()=>({choices:[{message:{content:'malformed JSON'}}],candidates:[{content:{parts:[{text:'malformed JSON'}]}}],output:[{type:'message',content:[{type:'output_text',text:'malformed JSON'}]}]});
+  assert.equal((await request('/topics/draft','POST',{prompt:'帮我完善美食话题',credential_id:key,model_id:'topic-model'})).status,502);
+ }
+ assert.deepEqual((await request('/overview')).data.topics,before);
+});
+test('AI topic assistance stops applying a result if its selected key changes',async()=>{
+ const c=(await request('/models')).data.credentials.find((c:any)=>c.name==='Topic assistance fixture');
+ topicDraftReply=async()=>{await pool.query('UPDATE model_credentials SET revision=revision+1 WHERE id=$1',[c.id]);return {choices:[{message:{content:JSON.stringify(foodDraft)}}]};};
+ assert.equal((await request('/topics/draft','POST',{prompt:'继续完善话题',credential_id:c.id,model_id:'topic-text'})).status,409);
+ const logs=JSON.stringify((await request('/logs')).data);assert(!logs.includes('isolated-topic-assist-secret'));assert(!logs.includes(foodDraft.instructions));
+});
+
+test('closing the AI request aborts its upstream work without saving a topic',async()=>{
+ const c=(await request('/models')).data.credentials.find((c:any)=>c.name==='Topic assistance fixture');
+ let started!:()=>void,aborted!:()=>void;const begun=new Promise<void>(r=>{started=r;}),cancelled=new Promise<void>(r=>{aborted=r;});
+ topicDraftReply=async(_c,_m,_s,_i,options)=>new Promise((_resolve,reject)=>{started();options!.signal!.addEventListener('abort',()=>{aborted();reject(new Error('cancelled fixture'));},{once:true});});
+ const controller=new AbortController();const before=(await request('/overview')).data.topics.length;
+ const pending=fetch(base+'/api/topics/draft',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({prompt:'取消这个生成请求',credential_id:c.id,model_id:'topic-text'})});
+ await begun;controller.abort();await assert.rejects(pending,{name:'AbortError'});
+ await Promise.race([cancelled,new Promise<void>((_r,reject)=>{const t=setTimeout(()=>reject(new Error('upstream abort not observed')),1500);t.unref();})]);
+ assert.equal((await request('/overview')).data.topics.length,before);
 });
 
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{
