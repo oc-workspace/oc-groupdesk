@@ -440,7 +440,7 @@ test('independent WeChat notifications encrypt credentials and bind them to exac
  const {digest}=await import('../server/security.js');
  const adapter='notification-test',secret='SCT'+('x'.repeat(24));
  await pool.query('INSERT INTO runtime_adapters(token_hash,name,group_external_ids) VALUES($1,$2,$3)',[digest('notification-test-scoped-adapter-token'),adapter,JSON.stringify(['example-room'])]);
- const b={adapter_name:adapter,recipient_wechat_id:'Ryuuna',sendkey:secret,enabled:true,binding_confirmed:false,revision:0};
+ const b={adapter_name:adapter,recipient_wechat_id:'example-owner',sendkey:secret,enabled:true,binding_confirmed:false,revision:0};
  assert.equal((await request('/notifications/wechat','PUT',b)).status,400);
  assert.equal((await request('/notifications/wechat','PUT',{...b,binding_confirmed:true})).status,200);
  assert(!JSON.stringify((await request('/notifications/wechat')).data).includes(secret));
