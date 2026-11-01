@@ -97,3 +97,17 @@ test('explicit specialist split preserves old versions, scopes the group and is 
  assert.equal((await req('/persona-versions/'+old.version_id)).data.persona_id,old.id);
  assert.equal((await config(b)).revision,other.revision);
 });
+
+test('welcome is published-feature opt-in and requires a capable adapter ACK',async()=>{
+ const other=await config(b),welcome=await create('newcomer-welcome','feature');
+ assert.equal((await config(a)).newcomer_welcome_contract_version,undefined);
+ assert.equal((await bind(a,{version_id:base.version_id,features:[{version_id:welcome.version_id}]})).status,200);
+ const c=await config(a);assert.equal(c.persona_feature_skills[0].skill_name,'newcomer-welcome');
+ assert.deepEqual(c.newcomer_welcome,{min_delay_seconds:15,max_delay_seconds:40,ttl_seconds:90,coalesce_seconds:120});
+ const ack={group_id:c.id,revision:c.revision,timeout_policy_version:2,persona_skill_version:1,persona_skill_sha256:c.persona_skill.sha256,persona_composition_version:1,persona_composition_sha256:c.persona_composition_sha256};
+ assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
+ assert.equal((await req('/runtime/ack','POST',{...ack,newcomer_welcome_policy_version:1},true)).status,200);
+ assert.equal((await config(b)).revision,other.revision);assert.equal((await config(b)).newcomer_welcome_contract_version,undefined);
+ assert.equal((await bind(a,{version_id:base.version_id,features:[]})).status,200);
+ assert.equal((await config(a)).newcomer_welcome_contract_version,undefined);
+});
