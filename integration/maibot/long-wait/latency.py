@@ -35,11 +35,11 @@ def model_busy(db,now):
 def bind(p,request,turn_id,task):
     if task not in {'planner','replyer'}:return
     from src.llm_models.payload_content.context_item import ContextItemBuilder,RoleType
-    text=('[GT_WAIT_POLICY]【可信等待策略】回复是否超过两分钟由发送层按真实计时决定，不要仅凭历史或猜测自行写等待致歉。'
+    text=('[GT_WAIT_POLICY]【可信等待策略】回复是否超过五分钟由发送层按真实计时决定，不要仅凭历史或猜测自行写等待致歉。'
           '调用reply工具时，若提供wait_apology参数，请预备一句与本次回复同语言、符合当前Persona的简短致歉，'
           '例如GT中文“抱歉久等，刚才这句话绕了点远路。[呲牙]”、英文“Sorry for the wait. My answer took the scenic route. 😄”。'
           '这些只是合成语气示例，其他语言自然改写。将致歉单独放在wait_apology，不写入reply_text或正常回复正文；'
-          '发送层仅在超过120秒时使用，未超时会忽略。不要声称掉线或编造具体技术原因，不要求成员重发。'
+          '发送层仅在超过300秒时使用，未超时会忽略。不要声称掉线或编造具体技术原因，不要求成员重发。'
           '认真问题先回答问题，不因等待而增加无关内容。')
     items=[i for i in request.context_items if not (type(i).__name__=='SystemMessageItem' and any(getattr(part,'text','').startswith('[GT_WAIT_POLICY]') for part in i.parts))]
     index=next((i for i,item in enumerate(items) if type(item).__name__!='SystemMessageItem'),len(items))
@@ -89,7 +89,7 @@ def decorate(p,turn_id,text,managed=None):
     with p.db() as db:turn=db.execute('SELECT * FROM turns WHERE id=?',(turn_id,)).fetchone()
     if not turn:raise ValueError('Unattributed wait-time decoration')
     now=p.clock();received=turn['received_at'] or turn['created'];elapsed=max(0,now-received)
-    info={'received_at':received,'submitted_at':now,'elapsed_seconds':elapsed,'late':int(elapsed>p.cfg.get('wait_apology_seconds',120)),'apology_source':'none','apology_sha256':None}
+    info={'received_at':received,'submitted_at':now,'elapsed_seconds':elapsed,'late':int(elapsed>p.cfg.get('wait_apology_seconds',300)),'apology_source':'none','apology_sha256':None}
     if not info['late']:return text,info
     # Recovery tasks already carry their own truthful incident apology. Avoid
     # doubling it when that reply also takes a while.

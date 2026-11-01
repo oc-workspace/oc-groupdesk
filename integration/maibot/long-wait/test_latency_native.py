@@ -53,10 +53,10 @@ class NativeWaitTests(unittest.TestCase):
    asyncio.run(bridge.outgoing(packet))
   return bridge,packet
  def test_real_bridge_fast_send_has_no_apology(self):
-  bridge,_=self.outgoing(119.9,'这是正文。');bridge.agent.send_text.assert_called_once()
+  bridge,_=self.outgoing(299.9,'这是正文。');bridge.agent.send_text.assert_called_once()
   self.assertEqual(bridge.agent.send_text.call_args.args[1],'这是正文。')
  def test_real_bridge_late_send_is_one_message_and_duplicate_is_suppressed(self):
-  bridge,packet=self.outgoing(121,'这是正文。');bridge.agent.send_text.assert_called_once()
+  bridge,packet=self.outgoing(301,'这是正文。');bridge.agent.send_text.assert_called_once()
   text=bridge.agent.send_text.call_args.args[1];self.assertTrue(text.startswith('抱歉久等'));self.assertTrue(text.endswith('这是正文。'))
   asyncio.run(bridge.outgoing(packet));bridge.agent.send_text.assert_called_once()
   with self.p.db() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM sends').fetchone()[0],1)
