@@ -12,6 +12,7 @@ fi
 cd /opt/docker/groupdesk/current
 export RELEASE_SHA="$(cat /opt/persist/groupdesk/release-sha)"
 dc=(docker compose --env-file /opt/persist/groupdesk/secrets/app.env)
+"${dc[@]}" stop interaction-worker
 "${dc[@]}" stop app worker
 # On failure remain stopped rather than serving partially restored data.
 "${dc[@]}" exec -T postgres pg_restore -U groupdesk -d groupdesk --clean --if-exists --exit-on-error < "$backup_dir/database.dump"
@@ -20,5 +21,5 @@ tar -xzf "$backup_dir/files.tar.gz" -C "$restore_dir"
 chown -R 1000:1000 "$restore_dir"
 mv /opt/persist/groupdesk/files "/opt/persist/groupdesk/files.before-restore-$(date +%s)"
 mv "$restore_dir" /opt/persist/groupdesk/files
-"${dc[@]}" up -d --no-build --force-recreate --no-deps --wait --wait-timeout 150 app worker
+"${dc[@]}" up -d --no-build --force-recreate --no-deps --wait --wait-timeout 150 app worker interaction-worker
 echo "Restore complete. Previous files remain in files.before-restore-*."

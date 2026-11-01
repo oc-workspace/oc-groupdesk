@@ -66,6 +66,8 @@ def validate_persona_bundle(bundle):
 
 def validate_bundle(bundle,external_id):
     validate_persona_bundle(bundle)
+    from interactions_runtime import validate_bundle as validate_interactions
+    validate_interactions(bundle)
     from timeout_policy import validate as validate_timeouts
     contract=bundle.get('timeout_policy_contract_version')
     if contract not in [None,1,2]:raise ValueError('Unknown timeout policy contract')
@@ -111,7 +113,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 
@@ -169,6 +171,9 @@ def generation_rules(p,names=(),short=False):
         pieces.append('首次交流或容易误解时简短主动说明AI身份，不每条重复。' if identity['disclosure']=='proactive' else '日常不主动介绍AI身份，不用固定自我介绍开场。')
         pieces.append('一般籍贯、性别问题直接说明没有真人籍贯或生理性别，不编造个人经历。' if identity['personal_questions']=='plain' else '一般籍贯、性别问题按当前persona礼貌带过，不虚构真人背景。')
     if not short:pieces.append('本轮话题指导：'+json.dumps([{'name':t['name'],'description':t['description'],'instructions':t['instructions'],'reply_depth':t['policy']['reply_depth']} for t in p['topics'] if t['name'] in names],ensure_ascii=False))
+    if not short:
+        from interactions_runtime import guide
+        pieces.append(guide(p))
     return '\n'.join(pieces)
 
 def check_remote_revision(p):

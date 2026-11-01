@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {pool,transaction} from './db.js';
 import {passwordHash} from './security.js';
 import {catalog} from './policies.js';
+import {defaultInteractionId,interactionCommands} from '../shared/interactions.js';
 
 export async function migrate(){
   await transaction(async db=>{
@@ -38,6 +39,7 @@ export async function migrate(){
         for(const i of indices)await db.query('INSERT INTO group_topics(group_id,topic_id) VALUES($1,$2)',[id,ids[i]]);
       }
     }
+    await db.query("INSERT INTO interaction_definitions(id,builtin_key,name,kind,description,instructions,commands) VALUES($1,'daily-moyu-v1','每日摸鱼','daily_checkin','每日签到摸鱼，获得娱乐积分 token，支持余额与兑换列表。','简短、机智、有分寸；奖品未定时可找群主商量，不自行承诺奖品或发放。',$2) ON CONFLICT(builtin_key) DO NOTHING",[defaultInteractionId,interactionCommands]);
     if(!(await db.query("SELECT 1 FROM catalog_imports WHERE name='builtin-v1'")).rowCount){
       for(const item of await catalog()){
         const existing=(await db.query('SELECT id FROM topics WHERE name=$1',[item.name])).rows[0];

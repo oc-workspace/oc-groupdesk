@@ -17,6 +17,9 @@ import {registerTopicDraftAdmin} from './topic-drafting.js';
 import type {callTextModel} from './model-generation.js';
 import {registerModelAdmin} from './models-api.js';
 import {registerRuntimeHealth} from './runtime-health.js';
+import {registerInteractionAdmin} from './interactions/admin-api.js';
+import {registerInteractionRuntime} from './interactions/runtime-api.js';
+import {runtimeInteractions} from './interactions/config.js';
 import {registerNotificationAdmin,registerNotificationRuntime} from './notifications.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
@@ -49,7 +52,7 @@ async function bumpGroups(db:Pick<typeof pool,'query'>,topicId?:string,kbId?:str
   if(topicId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_topics WHERE topic_id=$1)',[topicId]);
   if(kbId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_knowledge WHERE kb_id=$1)',[kbId]);
 }
-export function createApp(options:{topicDraftCaller?:typeof callTextModel}={}){
+export function createApp(options:{topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
   const app=express();
   app.disable('x-powered-by');
   // Direct loopback or explicitly configured proxy only; never trust arbitrary X-Forwarded-For.
@@ -87,7 +90,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel}={}){
     if(['/scenes','/select-scene'].includes(req.path))return res.status(403).json({error:'此适配器只授权群聊'});
     next();
   });
-  registerRuntime(app);
+  registerRuntime(app,options.interactions);
   app.use('/api',async(req,res,next)=>{
     const session=req.cookies[cookieName];
     if(!session)return res.status(401).json({error:'请先登录'});
@@ -330,6 +333,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel}={}){
   registerTopicDraftAdmin(app,options.topicDraftCaller);
   registerNotificationAdmin(app);
   registerPersonaAdmin(app);
+  registerInteractionAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
     version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
@@ -355,7 +359,8 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel}={}){
   return app;
 }
 
-function registerRuntime(app:express.Express){
+function registerRuntime(app:express.Express,interactions:{clock?:()=>number;random?:(min:number,max:number)=>number}={}){
+  registerInteractionRuntime(app,interactions);
   registerRuntimeHealth(app);
   registerNotificationRuntime(app);
   app.post('/api/runtime/model-credentials',async(req,res)=>{
@@ -436,6 +441,8 @@ function registerRuntime(app:express.Express){
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
     config.timeout_policy_contract_version=2;
+    config.interactions_contract_version=1;
+    config.interactions=await runtimeInteractions(config);
     config.model_routing_contract_version=1;
     config.model_routing=await effectiveModelRoutes(config);
     config.persona_contract_version=1;
@@ -445,7 +452,7 @@ function registerRuntime(app:express.Express){
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const persona=await runtimePersona(routingGroup.persona_version_id);
@@ -457,6 +464,8 @@ function registerRuntime(app:express.Express){
       requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');
     }
     requireCondition(body.timeout_policy_version===2,409,'请更新机器人以应用本群等待时间和致歉阈值后再确认');
+    const activeInteractions=(await pool.query("SELECT 1 FROM group_interactions b JOIN interaction_definitions d ON d.id=b.definition_id WHERE b.group_id=$1 AND (b.config->>'enabled')::boolean AND NOT d.archived LIMIT 1",[body.group_id])).rowCount;
+    if(activeInteractions)requireCondition(body.interactions_policy_version===1,409,'请更新机器人以应用本群互动后再确认');
     const result=await pool.query('UPDATE groups SET applied_revision=$1,bot_seen_at=now() WHERE id=$2 AND revision=$1',[body.revision,body.group_id]);
     requireCondition(result.rowCount,409,'配置版本已变化，请重新获取后再确认');
     res.json({ok:true});
