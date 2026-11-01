@@ -50,4 +50,12 @@ class MonitorTests(unittest.TestCase):
   r=run(Failure(snapshot()),{'incident':'old'},10000)
   self.assertTrue(r['reconciliation_pending']);self.assertEqual(r['incident'],'old');self.assertEqual(r['recovered_at'],10000)
   f=Fake(snapshot());run(f,r,13600);self.assertEqual(f.reconciliations,[('old',10000)])
+class UiLockTests(unittest.TestCase):
+ def test_ui_lock_is_not_healthy_even_when_connected_flag_is_true(self):
+  f=Fake(snapshot(ui_input_blocked=True));r=run(f,{},10000)
+  self.assertEqual(r['state'],'degraded');self.assertEqual(r['reason'],'ui_window_blocked')
+  self.assertFalse(f.actions);self.assertEqual(len(f.notices),1)
+ def test_same_ui_lock_alert_is_deduplicated_and_manual_pause_still_wins(self):
+  f=Fake(snapshot(ui_input_blocked=True));run(f,{'notified':'degraded:ui_window_blocked','incident':'prior'},10000);self.assertFalse(f.notices)
+  self.assertEqual(classify(snapshot(ui_input_blocked=True,paused=True)),('maintenance','manual_pause'))
 if __name__=='__main__':unittest.main()

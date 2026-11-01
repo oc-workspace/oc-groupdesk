@@ -24,6 +24,7 @@ def classify(s):
     if not all(s['running'].values()):return 'offline','container_stopped'
     if s.get('desktop') in {'needs_phone','needs_unlock','login_ready'}:
         v=s['desktop'];return ('needs_unlock','phone_unlock') if v=='needs_unlock' else ('needs_phone','phone_confirmation') if v=='needs_phone' else ('recovering','login_button')
+    if s.get('ui_input_blocked'):return 'degraded','ui_window_blocked'
     if not s['wechat']:return 'degraded','wechat_unavailable'
     if not s['maibot']:return 'degraded','maibot_unavailable'
     if not s['bridge']:return 'degraded','bridge_unavailable'
@@ -32,6 +33,7 @@ def classify(s):
 def next_action(s):
     state,_=classify(s)
     if state in {'online','maintenance','needs_phone','needs_unlock','offline'}:return None
+    if s.get('ui_input_blocked'):return None
     if s.get('desktop')=='login_ready':return 'click_login'
     if s.get('desktop')=='process_missing':return 'start_wechat'
     if not s['wechat']:return 'restart_adapter'
@@ -59,9 +61,9 @@ class Driver:
         if running['wechat']:
             try:status=http('http://127.0.0.1:18087/api/status',timeout=10)
             except Exception:pass
-        wechat=bool(status.get('wechat_connected') and status.get('running'))
+        wechat=bool(status.get('wechat_connected') and status.get('running') and not status.get('ui_input_blocked'))
         result={'paused':not control.get('enabled') or not control.get('send_enabled'),'running':running,
-                'wechat':wechat,'bridge':bool(running['bridge'] and health.get('connected') and time.time()-health.get('updated_at',0)<120),
+                'wechat':wechat,'ui_input_blocked':bool(status.get('ui_input_blocked')),'bridge':bool(running['bridge'] and health.get('connected') and time.time()-health.get('updated_at',0)<120),
                 'maibot':bool(running['maibot'] and containers['maibot']['State'].get('Health',{}).get('Status')=='healthy')}
         if not wechat and running['wechat'] and not result['paused']:result['desktop']=self.desktop()
         try:
@@ -95,6 +97,7 @@ class Driver:
         labels={'online':'微信与机器人已恢复连接','needs_phone':'微信需要手机确认或扫码','needs_unlock':'微信需要在手机上解除电脑端锁定','degraded':'微信或桥接异常，自动恢复尚未成功','offline':'容器已停止；为尊重手动停机，没有自动启动'}
         message='GT小跟班：'+labels.get(state,'运行状态需要检查')+'。\n巡检频率：每小时一次。'
         if state in {'needs_phone','needs_unlock'}:message+='\n远程桌面：http://127.0.0.1:18080 （需已连接SSH转发）'
+        if reason=='ui_window_blocked':message+='\n微信残留窗口未能安全清理，请打开远程桌面检查；没有自动重启微信。\nhttp://127.0.0.1:18080 （需已连接SSH转发）'
         message+='\n状态原因：'+reason
         from zoneinfo import ZoneInfo
         day=datetime.datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()

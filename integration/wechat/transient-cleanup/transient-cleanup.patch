@@ -1,0 +1,182 @@
+--- a/src/bowxt/client.py
++++ b/src/bowxt/client.py
+@@ -182,7 +182,21 @@
+                         return
+             search = find_search_box(root, self.profile)
+             if search is None or search.bounds is None:
+-                raise ControlNotFound("WeChat search field was not found in the AT-SPI tree")
++                # Qt may replace its accessible root while a popover closes.
++                # Refresh once BEFORE typing; never replay a submitted message.
++                self.accessibility.connect()
++                self._root = self.accessibility.main_window()
++                self._control_cache = None
++                root = self._root
++                self._assert_clean_surface(root)
++                if self._chat_matches(root, chat):
++                    self._chat = chat
++                    self._chat_type = chat_type
++                    return
++                search = find_search_box(root, self.profile)
++                input_backend = self._ensure_input()
++            if search is None or search.bounds is None:
++                raise ControlNotFound("WeChat search field was not found in the AT-SPI tree after one refresh")
+             input_backend.click(*search.bounds.center)
+             self._sleep(self.safety.action_delay)
+             input_backend.shortcut("ctrl", "a")
+@@ -897,6 +911,8 @@
+         if not (clip.x <= x < clip.right and clip.y <= y < clip.bottom):
+             return None
+         known_windows = {window.identity for window in self.accessibility.windows()}
++        from .transient_recovery import begin_profile, observe_profile
++        begin_profile(self, main_window, expected_chat, known_windows)
+         input_backend = self._ensure_input()
+         input_backend.click(x, y)
+         deadline = time.monotonic() + 1.8
+@@ -907,6 +923,7 @@
+                     if window.identity not in known_windows
+                     and window.identity != main_window.identity
+                 ]
++                observe_profile(self, main_window, popups)
+                 for popup in popups:
+                     identity = find_profile_identity(popup)
+                     if identity:
+@@ -914,6 +931,7 @@
+                 self._sleep(0.08)
+             return None
+         finally:
++            observe_profile(self, main_window, [w for w in self.accessibility.windows() if w.identity not in known_windows])
+             # A profile card must be explicitly dismissed and observed gone.
+             # Merely reactivating the main window is not sufficient.
+             self._dismiss_transients(main_window, expected_chat=expected_chat)
+--- a/src/bowxt/service.py
++++ b/src/bowxt/service.py
+@@ -8,7 +8,7 @@
+ import time
+ import uuid
+ from collections import deque
+-from dataclasses import dataclass, field
++from dataclasses import dataclass, field, replace
+ from datetime import datetime, timezone
+ from enum import Enum
+ from typing import Any, Callable, Iterable
+@@ -126,6 +126,7 @@
+         self.events = EventBroker()
+         self._client_factory = client_factory or self._default_client
+         self._commands: queue.Queue[_SendCommand] = queue.Queue(maxsize=128)
++        self._sender_retries = {}
+         self._sender_jobs: deque[_SenderJob] = deque()
+         self._sender_job_keys: set[tuple[int, str]] = set()
+         self._image_jobs: deque[_ImageJob] = deque()
+@@ -144,6 +145,8 @@
+             "last_error": None,
+             "active_chat": None,
+             "last_send_timings": None,
++            "ui_input_blocked": False,
++            "owned_transient_recoveries": 0,
+         }
+ 
+     def _default_client(self) -> WeChatClient:
+@@ -517,6 +520,14 @@
+                     self._wake.clear()
+                     continue
+                 if client is not None and getattr(client, "is_input_blocked", False):
++                    from .transient_recovery import cleanup_owned_profile
++                    recovered = False
++                    try:
++                        recovered = cleanup_owned_profile(client)
++                    except Exception:
++                        pass
++                    self._set_status(ui_input_blocked=not recovered,
++                                     owned_transient_recoveries=self.status().get('owned_transient_recoveries',0)+int(recovered))
+                     # The failed operation stays failed and is never replayed.
+                     # Discard only the locked in-memory session so a later
+                     # iteration can reconnect after the visible surface is
+@@ -675,6 +686,8 @@
+ 
+     def _queue_sender_job(self, chat_id: int, message_id: str) -> None:
+         key = (int(chat_id), str(message_id))
++        from .transient_recovery import sender_ready
++        if not sender_ready(self,key):return
+         if key in self._sender_job_keys or len(self._sender_jobs) >= 512:
+             return
+         self._sender_jobs.append(_SenderJob(*key))
+@@ -721,13 +734,20 @@
+     def _next_sender_job(self) -> _SenderJob | None:
+         if not self._sender_jobs:
+             return None
+-        job = self._sender_jobs.popleft()
+-        self._sender_job_keys.discard((job.chat_id, job.message_id))
+-        return job
++        from .transient_recovery import sender_ready
++        for _ in range(len(self._sender_jobs)):
++            job = self._sender_jobs.popleft()
++            if sender_ready(self,(job.chat_id,job.message_id)):
++                self._sender_job_keys.discard((job.chat_id,job.message_id))
++                return job
++            self._sender_jobs.append(job)
++        return None
+ 
+     def _execute_sender_job(self, client: WeChatClient, job: _SenderJob) -> None:
+         started=time.monotonic()
+         timings={'queue_wait_s':max(0.0,started-job.queued_at)}
++        from .transient_recovery import sender_started, sender_finished
++        sender_started(self,(job.chat_id,job.message_id))
+         try:
+             chat = self.store.get_chat(job.chat_id)
+             self._set_status(active_chat=chat.name)
+@@ -742,11 +762,15 @@
+             if target is None:
+                 return
+             phase=time.monotonic()
+-            enriched = client.enrich_visible_senders([target], chat=chat.name)
++            if target.direction is Direction.UNKNOWN and target.id.startswith(('arrival:','appearance:')):
++                stored, _ = self.store.save_message(target)
++                if stored.direction=='incoming':target=replace(target,direction=Direction.INCOMING)
++            enriched = [target] if target.sender else client.enrich_visible_senders([target], chat=chat.name)
+             timings['profile_lookup_s']=time.monotonic()-phase
+             if not enriched or enriched[0].sender is None:
+                 return
+             stored, _created = self.store.save_message(enriched[0])
++            sender_finished(self,(job.chat_id,job.message_id))
+             timings['worker_total_s']=time.monotonic()-started
+             timings['capture_to_sender_s']=max(0.0,(datetime.now(timezone.utc)-datetime.fromisoformat(stored.observed_at)).total_seconds())
+             self._record_timings(stored.seq,'sender',timings)
+@@ -864,8 +888,9 @@
+                     image_candidates.append(message)
+                 if (
+                     uia_sender
++                    and not stored.sender
+                     and message.chat_type is ChatType.GROUP
+-                    and message.direction is Direction.INCOMING
++                    and stored.direction == 'incoming'
+                     and stored.seq>self.sender_profile_cutoffs.get(str(chat.id),0)
+                     and not self.store.sender_profile_checked(stored.seq)
+                 ):
+@@ -885,7 +910,7 @@
+             for message in image_candidates:
+                 self._queue_image_job(chat.id, message.id)
+             self.store.set_chat_error(chat.id, None)
+-            self._set_status(last_error=None)
++            self._set_status(last_error=None,ui_input_blocked=False)
+         except Exception as exc:
+             self.store.set_chat_error(chat.id, str(exc))
+             self._set_status(last_error=f"{chat.name}: {exc}")
+--- a/src/bowxt/store.py
++++ b/src/bowxt/store.py
+@@ -687,7 +687,7 @@
+                     UPDATE messages SET sender = COALESCE(?, sender),
+                         sender_organization = COALESCE(?, sender_organization),
+                         sender_profile_checked = MAX(sender_profile_checked, ?), content = ?,
+-                        message_type = ?, direction = ?, timestamp = COALESCE(?, timestamp),
++                        message_type = ?, direction = CASE WHEN ? = 'unknown' AND (message_id LIKE 'arrival:%' OR message_id LIKE 'appearance:%') THEN direction ELSE ? END, timestamp = COALESCE(?, timestamp),
+                         is_at_me = ?, raw_json = ?,
+                         image_path = COALESCE(image_path, ?),
+                         image_mime_type = COALESCE(image_mime_type, ?),
+@@ -711,6 +711,7 @@
+                         sender_profile_checked,
+                         message.content,
+                         message.type.value,
++                        message.direction.value,
+                         message.direction.value,
+                         timestamp,
+                         int(message.is_at_me),
