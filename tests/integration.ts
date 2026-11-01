@@ -211,7 +211,7 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   const pending=await request('/groups/status');
   assert.equal(pending.status,200);assert.equal(pending.response.headers.get('cache-control'),'no-store');
   const pendingRow=pending.data.find((g:any)=>g.id===selected.id);
-  assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision']);
+  assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision','runtime_health','runtime_health_at']);
   assert.equal(pendingRow.revision,selected.revision);assert(pendingRow.applied_revision<selected.revision);
   assert.equal((await request('/runtime/ack','POST',{group_id:selected.id,revision:selected.revision-1},true)).status,409);
   assert.deepEqual((await request('/groups/status')).data.find((g:any)=>g.id===selected.id),pendingRow);
@@ -434,6 +434,23 @@ test('runtime health is scoped, rejects extra data, and never confirms a policy 
  await pool.query('INSERT INTO runtime_adapters(token_hash,name,group_external_ids) VALUES($1,$2,$3)',[digest('health-test-scoped-adapter-token'),'health-test',JSON.stringify([group.external_id])]);
  const send=(external_id:string)=>fetch(base+'/api/runtime/health',{method:'POST',headers:{Authorization:'Bearer health-test-scoped-adapter-token','Content-Type':'application/json'},body:JSON.stringify({...body,external_id})});
  assert.equal((await send(group.external_id)).status,200);assert.equal((await send('untrusted-room')).status,403);
+});
+
+test('independent WeChat notifications encrypt credentials and bind them to exactly one adapter',async()=>{
+ const {digest}=await import('../server/security.js');
+ const adapter='notification-test',secret='SCT'+('x'.repeat(24));
+ await pool.query('INSERT INTO runtime_adapters(token_hash,name,group_external_ids) VALUES($1,$2,$3)',[digest('notification-test-scoped-adapter-token'),adapter,JSON.stringify(['example-room'])]);
+ const b={adapter_name:adapter,recipient_wechat_id:'Ryuuna',sendkey:secret,enabled:true,binding_confirmed:false,revision:0};
+ assert.equal((await request('/notifications/wechat','PUT',b)).status,400);
+ assert.equal((await request('/notifications/wechat','PUT',{...b,binding_confirmed:true})).status,200);
+ assert(!JSON.stringify((await request('/notifications/wechat')).data).includes(secret));
+ const ciphertext=(await pool.query('SELECT key_ciphertext FROM runtime_notifications WHERE adapter_token_hash=$1',[digest('notification-test-scoped-adapter-token')])).rows[0].key_ciphertext;
+ assert(!ciphertext.includes(secret));
+ const response=await fetch(base+'/api/runtime/notification',{headers:{Authorization:'Bearer notification-test-scoped-adapter-token'}});
+ assert.equal(response.status,200);assert.equal((await response.json()).sendkey,secret);
+ assert.equal((await request('/runtime/notification','GET',undefined,true)).data.configured,false);
+ assert.equal((await request('/notifications/wechat','PUT',{...b,binding_confirmed:true})).status,409);
+ const logs=JSON.stringify((await request('/logs')).data);assert(!logs.includes(secret));
 });
 
 test('audit logs exclude raw knowledge and passwords; logout invalidates sessions',async()=>{

@@ -71,6 +71,8 @@ class Driver:
             result['memory_mib']=round(int((cg/'memory.current').read_text())/1048576,1)
             result['swap_mib']=round(int((cg/'memory.swap.current').read_text())/1048576,1)
         except (OSError,StopIteration,ValueError):pass
+        try:result['notification_configured']=bool(self.notification().get('configured'))
+        except Exception:result['notification_configured']=False
         return result
     def act(self,action):
         if action=='click_login':return self.desktop('login')
@@ -82,24 +84,34 @@ class Driver:
             if db.execute('SELECT 1 FROM turns WHERE status="active" AND expires>?',(time.time(),)).fetchone():return 'busy'
         self.docker(['restart',target],timeout=90);return 'restarted'
     def wait(self,seconds):time.sleep(seconds)
+    def notification(self):
+        conf=json.loads((PERSIST/'groupdesk/connection.json').read_text())
+        return http(conf['url'].rstrip('/')+'/api/runtime/notification',headers={'Authorization':'Bearer '+conf['token']})
     def notify(self,state,reason,recovered=False):
-        env={}
-        for line in Path('/opt/persist/hermes-agent/.env').read_text().splitlines():
-            if '=' not in line or line.lstrip().startswith('#'):continue
-            k,v=line.removeprefix('export ').split('=',1);env[k.strip()]=v.strip().strip('"').strip("'")
-        chat=env.get('TELEGRAM_HOME_CHANNEL','');token=env.get('TELEGRAM_BOT_TOKEN','')
-        directory=json.loads(Path('/opt/persist/hermes-agent/channel_directory.json').read_text())
-        authorized=[str(v['id']) for v in directory.get('platforms',{}).get('telegram',[]) if v.get('type')=='dm']
-        if not token or chat not in authorized:raise ValueError('notification_destination_unverified')
+        settings=self.notification()
+        if not settings.get('configured'):raise ValueError('wechat_notification_not_configured')
+        key=settings.get('sendkey','')
+        import re,datetime,urllib.parse
+        if not re.fullmatch(r'SCT[A-Za-z0-9_-]{10,200}',key):raise ValueError('invalid_notification_key')
         labels={'online':'微信与机器人已恢复连接','needs_phone':'微信需要手机确认或扫码','needs_unlock':'微信需要在手机上解除电脑端锁定','degraded':'微信或桥接异常，自动恢复尚未成功','offline':'容器已停止；为尊重手动停机，没有自动启动'}
         message='GT小跟班：'+labels.get(state,'运行状态需要检查')+'。\n巡检频率：每小时一次。'
         if state in {'needs_phone','needs_unlock'}:message+='\n远程桌面：http://127.0.0.1:18080 （需已连接SSH转发）'
         message+='\n状态原因：'+reason
-        value=http('https://api.telegram.org/bot'+token+'/sendMessage',{'chat_id':chat,'text':message},timeout=15)
-        if not value.get('ok'):raise ValueError('notification_failed')
+        from zoneinfo import ZoneInfo
+        day=datetime.datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+        path=STATE/'notification-sends.json'
+        try:quota=json.loads(path.read_text())
+        except (OSError,ValueError):quota={}
+        count=quota.get('count',0) if quota.get('day')==day else 0
+        if count>=5:raise ValueError('notification_daily_limit')
+        body=urllib.parse.urlencode({'title':'GT小跟班运行提醒','desp':message}).encode()
+        request=urllib.request.Request('https://sctapi.ftqq.com/'+key+'.send',data=body,headers={'Content-Type':'application/x-www-form-urlencoded'})
+        with urllib.request.build_opener(NoRedirect).open(request,timeout=20) as r:value=json.load(r)
+        if value.get('code')!=0:raise ValueError('wechat_notification_failed')
+        atomic(path,{'day':day,'count':count+1})
     def report(self,result):
         conf=json.loads((PERSIST/'groupdesk/connection.json').read_text())
-        fields=['state','wechat','bridge','maibot','reason','actions','memory_mib','swap_mib']
+        fields=['state','wechat','bridge','maibot','reason','actions','memory_mib','swap_mib','notification_configured','notification_pending']
         payload={k:result[k] for k in fields if k in result};payload['interval_seconds']=3600
         for external in conf['groups'].values():http(conf['url'].rstrip('/')+'/api/runtime/health',{'external_id':external,**payload},{'Authorization':'Bearer '+conf['token']})
     def announce(self,incident):

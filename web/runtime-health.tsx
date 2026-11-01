@@ -1,5 +1,5 @@
 import React from 'react';
-export type RuntimeHealth={state:string;wechat:boolean;bridge:boolean;maibot:boolean;reason:string;interval_seconds:number;actions:string[];memory_mib?:number;swap_mib?:number};
+export type RuntimeHealth={state:string;wechat:boolean;bridge:boolean;maibot:boolean;reason:string;interval_seconds:number;actions:string[];notification_configured?:boolean;notification_pending?:boolean;memory_mib?:number;swap_mib?:number};
 export function runtimeLabel(health:RuntimeHealth|null|undefined,at:string|null|undefined,now=Date.now()){
  if(!health||!at)return {label:'尚未收到微信巡检结果',ok:false};
  const age=now-Date.parse(at);
@@ -9,5 +9,5 @@ export function runtimeLabel(health:RuntimeHealth|null|undefined,at:string|null|
 }
 export function RuntimeHealthPanel({health,at,now}:{health?:RuntimeHealth|null;at?:string|null;now:number}){
  const s=runtimeLabel(health,at,now);
- return <div className={'confirmation-panel '+(s.ok?'confirmed':'pending')} aria-label="微信在线巡检"><div><strong>{s.label}</strong><p>微信：{health?.wechat?'已连接':'待确认'} · 桥接：{health?.bridge?'已连接':'待确认'} · MaiBot：{health?.maibot?'运行中':'待确认'}</p><small>每小时巡检一次；{at?'最近巡检 '+new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'等待首次巡检'}。此状态与配置应用确认分别检查，页面需手动刷新。</small></div></div>;
+ return <div className={'confirmation-panel '+(s.ok?'confirmed':'pending')} aria-label="微信在线巡检"><div><strong>{s.label}</strong><p>微信：{health?.wechat?'已连接':'待确认'} · 桥接：{health?.bridge?'已连接':'待确认'} · MaiBot：{health?.maibot?'运行中':'待确认'}</p><small>每小时巡检一次；{at?'最近巡检 '+new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'等待首次巡检'}。此状态与配置应用确认分别检查，页面需手动刷新。</small><p>微信告警：{health?.notification_pending?'推送待重试':health?.notification_configured?'已配置独立通道':'待配置或待确认，请到系统设置完成'}</p></div></div>;
 }

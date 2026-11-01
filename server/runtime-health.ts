@@ -9,6 +9,7 @@ export const runtimeHealthSchema=z.object({
  wechat:z.boolean(),bridge:z.boolean(),maibot:z.boolean(),
  reason:z.string().regex(/^[a-z_]{1,80}$/),
  interval_seconds:z.literal(3600),
+ notification_configured:z.boolean().optional(),notification_pending:z.boolean().optional(),
  actions:z.array(z.enum(['restart_bridge','restart_adapter','start_wechat','click_login','restart_maibot'])).max(5),
  memory_mib:z.number().nonnegative().max(1000000).optional(),
  swap_mib:z.number().nonnegative().max(1000000).optional()
