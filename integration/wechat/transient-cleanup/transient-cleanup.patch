@@ -152,11 +152,13 @@
                      and stored.seq>self.sender_profile_cutoffs.get(str(chat.id),0)
                      and not self.store.sender_profile_checked(stored.seq)
                  ):
-@@ -885,7 +910,7 @@
+@@ -885,7 +910,9 @@
              for message in image_candidates:
                  self._queue_image_job(chat.id, message.id)
              self.store.set_chat_error(chat.id, None)
 -            self._set_status(last_error=None)
++            surface_check = getattr(client, '_assert_clean_surface', None)
++            if callable(surface_check):surface_check(client._ensure_root(),expected_chat=chat.name)
 +            self._set_status(last_error=None,ui_input_blocked=False)
          except Exception as exc:
              self.store.set_chat_error(chat.id, str(exc))

@@ -60,6 +60,15 @@ class SenderAndDirectionTests(unittest.TestCase):
   client.enrich_visible_senders=Mock(side_effect=AssertionError('No avatar click'))
   service=BowxtService(self.store,client_factory=lambda:client);chat=service.add_chat('测试群',ChatType.GROUP)
   service._poll_chat(client,chat);self.assertEqual(service.status()['sender_queue_depth'],0);client.enrich_visible_senders.assert_not_called()
+ def test_connected_or_successful_read_does_not_clear_a_still_blocked_surface(self):
+  client=FakeServiceClient();client.uia_sender=True;client.get_visible_messages=lambda *a,**k:[incoming('arrival:visible')]
+  client._ensure_root=lambda:object()
+  client._assert_clean_surface=Mock(side_effect=RuntimeError('unknown transient still present'))
+  service=BowxtService(self.store,client_factory=lambda:client);service._set_status(ui_input_blocked=True)
+  chat=service.add_chat('测试群',ChatType.GROUP);service._poll_chat(client,chat)
+  self.assertTrue(service.status()['ui_input_blocked']);self.assertIn('unknown transient',service.status()['last_error'])
+  client._assert_clean_surface=Mock();service._poll_chat(client,chat)
+  self.assertFalse(service.status()['ui_input_blocked'])
  def test_stable_arrival_preserves_known_direction_and_original_first_capture(self):
   for direction in [Direction.INCOMING,Direction.OUTGOING]:
    original=replace(incoming('arrival:'+direction.value),direction=direction,sender=None)

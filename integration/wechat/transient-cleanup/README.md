@@ -13,7 +13,7 @@
 
 `baseline.json`和`candidate.json`约束精确源码摘要，`install.py`在内存中验证全部候选再写入。重复安装字节一致，未知基线在改动任何文件前拒绝。`transient_recovery.py`与`test_transient_recovery.py`由安装器一并放入SDK。
 
-验证：13项针对性用例纳入171项完整固定微信镜像断网测试，另17项巡检用例通过；无跳过、无真实群测试消息。单条用户授权补答与上述测试分开，发送须保留来源、当前Persona、配额和去重关系；失败或不确定不盲目重放。
+验证：14项针对性用例纳入172项完整固定微信镜像断网测试，另17项巡检用例通过；无跳过、无真实群测试消息。单条用户授权补答与上述测试分开，发送须保留来源、当前Persona、配额和去重关系；失败或不确定不盲目重放。
 
 发布仍走开发提交、生产PR核对合并。用此目录Dockerfile，以既有frame-identities镜像为基底构建带发布SHA标签的新镜像，比较镜像、候选及运行源码摘要。`deploy-root2.py --stage SDK候选目录 --manifest 验证清单 --release 生产SHA --monitor integration/maibot/availability/monitor.py`先核对活动任务和SDK空闲、备份三份SQLite及配置，仅停止/启动custom-svc-bowxt并复制同码；微信、MaiBot、桥接不重启。更新未来重建镜像和原build脚本末端钩子，保留此前frame-identity安装步骤。失败回滚源码、监控、私有环境和原开关，微信PID/StartedAt必须保持。
 

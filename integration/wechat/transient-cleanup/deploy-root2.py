@@ -21,7 +21,7 @@ os.umask(0o077)
 root=Path('/opt/docker/oc-projects/maibot-wechat');persist=Path('/opt/persist/maibot-wechat')
 sdk=root/'.build/wechat-adapter/bowxt';package=Path(__file__).resolve().parent
 manifest=json.loads(args.manifest.read_text());names=list(manifest['candidate'])
-assert manifest['sdk_tests']==171 and manifest['monitor_tests']==17
+assert manifest['sdk_tests']==172 and manifest['monitor_tests']==17
 def run(command,**kwargs):return subprocess.run(command,check=True,**kwargs)
 def output(command):return subprocess.check_output(command,text=True)
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
