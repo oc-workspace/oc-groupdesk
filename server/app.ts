@@ -1,3 +1,4 @@
+import {registerSummaryAdmin,registerSummaryRuntime} from './summaries/api.js';
 import express,{type Request,type Response,type NextFunction} from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -339,6 +340,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   registerPersonaAdmin(app);
   registerConversationAdmin(app);
   registerInteractionAdmin(app);
+  registerSummaryAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
     version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
@@ -366,6 +368,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
 
 function registerRuntime(app:express.Express,interactions:{clock?:()=>number;random?:(min:number,max:number)=>number}={}){
   registerInteractionRuntime(app,interactions);
+  registerSummaryRuntime(app);
   registerRuntimeHealth(app);
   registerNotificationRuntime(app);
   app.post('/api/runtime/model-credentials',async(req,res)=>{

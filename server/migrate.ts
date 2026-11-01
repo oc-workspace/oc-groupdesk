@@ -16,6 +16,10 @@ export async function migrate(){
       await db.query(await readFile(new URL('../migrations/'+name,import.meta.url),'utf8'));
       await db.query('INSERT INTO schema_migrations(name) VALUES($1)',[name]);
     }
+    for(const [slug,name] of [['comprehensive','综合版'],['technical','技术职场版'],['ranking','发言排名版'],['entertainment','娱乐排名版'],['news','资讯排名版']]){
+      const instructions=await readFile(new URL('../skills/wechat-server-summary/references/'+slug+'.md',import.meta.url),'utf8');
+      await db.query('INSERT INTO summary_templates(slug,name,instructions) VALUES($1,$2,$3) ON CONFLICT(slug) DO NOTHING',[slug,name,instructions]);
+    }
     if(!(await db.query('SELECT 1 FROM admins LIMIT 1')).rowCount){
       const password=process.env.ADMIN_PASSWORD;
       if(!password||password.length<16)throw new Error('ADMIN_PASSWORD must contain at least 16 characters for initial setup');

@@ -1,3 +1,5 @@
+import {tick} from './summaries/core.js';
+import {processSummary} from './summaries/generation.js';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -46,12 +48,13 @@ export async function processNext(){
   return true;
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
-  let running=true;
-  process.on('SIGTERM',()=>{running=false;});process.on('SIGINT',()=>{running=false;});
+  let running=true;const summaryAbort=new AbortController();
+  const summaryTasks=[(async()=>{while(running){try{await tick();}catch{console.error('summary_schedule_retry');}await new Promise(r=>setTimeout(r,2000));}})(),(async()=>{while(running){try{if(!await processSummary(undefined,summaryAbort.signal))await new Promise(r=>setTimeout(r,2000));}catch{await new Promise(r=>setTimeout(r,3000));}}})()];
+  process.on('SIGTERM',()=>{running=false;summaryAbort.abort();});process.on('SIGINT',()=>{running=false;summaryAbort.abort();});
   console.log('GroupDesk worker ready');
   while(running){
     try{if(!await processNext()&&!await processPersonaJob()&&!await processConversationJob())await new Promise(r=>setTimeout(r,2000));}
     catch{console.error('worker_retry');await new Promise(r=>setTimeout(r,3000));}
   }
-  await pool.end();
+  await Promise.allSettled(summaryTasks);await pool.end();
 }
