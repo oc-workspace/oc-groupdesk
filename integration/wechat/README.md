@@ -6,13 +6,15 @@ Linux微信的Qt行标识不是原生消息ID。旧采集器由文字、时间�
 
 第一次启用追踪时，新的初始可见行只记为`historical`，不触发Agent和积分；已入库的当前行保持原状态。后来回看时新暴露的历史前缀也不发给Agent。确认的追加行可绕过旧的全文引用误过滤，旧历史引用保护保留；本机发送回执与追加行的UI回显仍合并为同一次发送。
 
-这是可见界面的连续性修复，不是微信服务端ID接入。画面完全失去重叠、只剩无法区分的重复内容等情况仍退回原有读取能力，不能承诺不可见历史完整覆盖。娱乐积分继续按群昵称记账，改名和同名仍需人工核对。未改GroupDesk的每天次数、奖励、模型、配额或发送去重。
+单条消息画面发生变化但没有重叠时，分配独立appearance观察标识，防止复用全局同文记录。短文字末行使用内存中头像小块的归一化像素哈希作缓存区分，不保存截图，不把头像当作账号认证；发言人仍从资料卡读取。明确退回旧时间的整帧只记历史，带时间的已见整帧返回也复用原标识。
+
+这是可见界面的连续性修复，不是微信服务端ID接入。相同文字、相同头像且界面没有其他可区分信息等情况仍有界面读取边界，不能承诺不可见历史完整覆盖。采集工作线程应独占微信界面，人工回看历史前先暂停采集。娱乐积分继续按群昵称记账，改名和同名仍需人工核对。未改GroupDesk的每天次数、奖励、模型、配额或发送去重。
 
 ## 验证和发布
 
 1. 用`baseline.json`校验`client.py`、`service.py`、`store.py`三个已部署文件的摘要，再在隔离SDK副本运行`install-frame-identity.py SDK_ROOT baseline.json`。重复执行应字节一致；未知基线拒绝安装。
 2. 将`test_frame_identity.py`放入SDK的tests目录。用固定响应性镜像`sha256:d4fdddc24109a4220bc497149ea16f80cef11891139b0dc25492500ac87a90f6`断网运行完整测试；不挂载生产/config。再用该SDK挂载运行原生MaiBot回归。
-3. 测试通过后生成validation.json，记录baseline、candidate四文件SHA256、构建脚本SHA256、sdk_tests=153及native_tests=280。按既定oc-push→oc-prod-release→PR精确候选审查流程发布本目录。
+3. 测试通过后生成validation.json，记录baseline、candidate四文件SHA256（后续升级baseline也记录已有四文件）、构建脚本SHA256、sdk_tests=158及native_tests=280。按既定oc-push→oc-prod-release→PR精确候选审查流程发布本目录。
 4. 从相同已测SDK根目录用本目录Dockerfile构建`wechat-bot:frame-identities-PROD_SHA前12位`，传入完整SOURCE_REVISION。构建前确认本机基镜像摘要与第2步一致。该镜像只包含代码，不含聊天库或凭据。
 5. 生产root2运行`deploy-root2.py --stage SDK_ROOT --manifest validation.json --release PROD_SHA --check`。通过后去掉--check。脚本比较运行与主机基线、已测源码、镜像内源码和版本标签，等待空闲，短暂关闭桥接入站，只停止`custom-svc-bowxt`。
 6. 根用户私有目录备份源码、原开关、构建脚本、私有.env以及三份SQLite，更新与新镜像一致的四文件，仅重启采集API，不重启微信、MaiBot或桥接。更新WECHAT_IMAGE供今后正常重建使用；把有摘要门控的安装调用加入既有SDK构建脚本，防止未来构建遗漏补丁。比较微信容器StartedAt及原微信进程启动标识，恢复原开关。

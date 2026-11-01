@@ -125,5 +125,45 @@ class FrameIdentityTests(unittest.TestCase):
         # A later separate outgoing bubble must not merge into that receipt.
         self.frame([tracked,bubble('another anchor')]);later=self.frame([bubble('another anchor'),echo])[-1]
         separate,created=self.store.save_message(later);self.assertTrue(created);self.assertNotEqual(separate.seq,sent.seq)
+    def test_single_bubble_view_can_return_equal_text_from_another_member(self):
+        first=self.frame([bubble('摸鱼','Synthetic Alpha')]);self.save(first)
+        self.save(self.frame([bubble('different text')]))
+        second=self.frame([bubble('摸鱼','Synthetic Beta')]);row,created=self.store.save_message(second[0])
+        self.assertTrue(created);self.assertNotEqual(first[0].id,second[0].id);self.assertEqual(row.sender,'Synthetic Beta')
+        self.assertEqual(second[0].raw['capture_origin'],'observation')
+        again=self.frame([bubble('摸鱼','Synthetic Beta')]);self.assertEqual(again[0].id,second[0].id)
+    def test_single_bubble_change_is_not_filtered_by_a_quote_of_the_same_text(self):
+        self.store.save_message(bubble('reply\n引用 Synthetic Alpha 的消息：摸鱼','Synthetic Beta'))
+        self.frame([bubble('a different current bubble')]);message=self.frame([bubble('摸鱼')])[0]
+        self.assertFalse(self.store.is_historical_quote_source(message))
+        self.assertTrue(self.store.is_historical_quote_source(bubble('摸鱼')))
+    def test_whole_view_of_older_explicit_times_is_history_and_return_is_deduped(self):
+        current=self.frame([bubble('current','Synthetic Alpha',TIME)])
+        self.save(current)
+        history=self.frame([bubble('older','Synthetic Beta',TIME-timedelta(days=1))]);self.assertEqual(history[0].raw['capture_origin'],'history')
+        self.assertEqual(self.save(history)[0].delivery_status,'historical')
+        again=self.frame([bubble('current','Synthetic Alpha',TIME)]);self.assertEqual(again[0].id,current[0].id)
+    def test_identical_single_bubble_from_a_different_avatar_is_not_cached_as_old_member(self):
+        self.frame([bubble('anchor')])
+        alpha=replace(bubble('摸鱼','Synthetic Alpha'),raw={'avatar_hint':'a'*64})
+        first=self.frame([alpha])[0];self.store.save_message(first)
+        beta=replace(bubble('摸鱼','Synthetic Beta'),raw={'avatar_hint':'b'*64})
+        second=self.frame([beta])[0];stored,created=self.store.save_message(second)
+        self.assertTrue(created);self.assertNotEqual(first.id,second.id);self.assertEqual(stored.sender,'Synthetic Beta')
+        repeated=self.frame([beta])[0];self.assertEqual(repeated.id,second.id)
+    def test_avatar_hint_uses_only_ephemeral_normalized_pixels(self):
+        from PIL import Image,ImageDraw
+        from bowxt.models import Rect
+        from bowxt.vision import VisualSnapshot
+        from bowxt.frame_identity import avatar_hint
+        message=replace(bubble('摸鱼'),bounds=Rect(0,0,400,64));clip=Rect(0,0,400,200)
+        def snapshot(color):
+            image=Image.new('RGB',(400,200),'#eeeeee');ImageDraw.Draw(image).rectangle((14,11,34,31),fill=color)
+            return VisualSnapshot(image,clip)
+        first=avatar_hint([message],snapshot('red'),clip)[0]
+        same=avatar_hint([message],snapshot('red'),clip)[0]
+        other=avatar_hint([message],snapshot('blue'),clip)[0]
+        self.assertEqual(first.raw['avatar_hint'],same.raw['avatar_hint']);self.assertNotEqual(first.raw['avatar_hint'],other.raw['avatar_hint'])
+        self.assertEqual(len(first.raw['avatar_hint']),64);self.assertIsNone(first.image)
 
 if __name__=='__main__':unittest.main()
