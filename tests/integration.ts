@@ -122,8 +122,8 @@ test('language overrides, group mention rules and revision acknowledgements are 
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).data.language,'ja');
   groupA=(await request('/groups/'+groupA.id,'PUT',{...groupA,allow_language_override:false})).data;
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).data.language,'en');
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:groupA.id,revision:groupA.revision-1},true)).status,409);
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:groupA.id,revision:groupA.revision},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:groupA.id,revision:groupA.revision-1},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:groupA.id,revision:groupA.revision},true)).status,200);
   const anonymous=await fetch(base+'/api/runtime/config/trusted-room-A');assert.equal(anonymous.status,401);
   groupA=(await request('/groups/'+groupA.id,'PUT',{...groupA,enabled:false})).data;
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).status,403);
@@ -216,9 +216,9 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   const pendingRow=pending.data.find((g:any)=>g.id===selected.id);
   assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision','runtime_health','runtime_health_at']);
   assert.equal(pendingRow.revision,selected.revision);assert(pendingRow.applied_revision<selected.revision);
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:selected.id,revision:selected.revision-1},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:selected.id,revision:selected.revision-1},true)).status,409);
   assert.deepEqual((await request('/groups/status')).data.find((g:any)=>g.id===selected.id),pendingRow);
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:selected.id,revision:selected.revision},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:selected.id,revision:selected.revision},true)).status,200);
   const confirmed=(await request('/groups/status')).data.find((g:any)=>g.id===selected.id);
   assert.equal(confirmed.revision,selected.revision);assert.equal(confirmed.applied_revision,selected.revision);
   assert(Number.isFinite(Date.parse(confirmed.bot_seen_at)));
@@ -259,8 +259,8 @@ test('model credentials stay write-only while text/image routes isolate groups a
   assert.equal(configX.model_routing.text.model_id,'text-b');assert.equal(configX.model_routing.image.model_id,'image-a');
   assert.equal(configY.model_routing.text.model_id,'text-a');assert.equal(configY.model_routing.text.source,'default');
   assert(!JSON.stringify(configX).includes(secretB));assert(!JSON.stringify((await request('/overview')).data).includes(secretA));
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:x.id,revision:x.revision},true)).status,409);
-  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:x.id,revision:x.revision,model_routing_version:1},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:x.id,revision:x.revision},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:x.id,revision:x.revision,model_routing_version:1},true)).status,200);
   assert.equal((await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision-1},true)).status,409);
   const privateX=(await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision,credential_id:a},true)).data;
   assert.equal(privateX.text_route.api_key,secretB);assert.equal(privateX.text_route.model_id,'text-b');
@@ -367,9 +367,9 @@ test('personas publish immutable versions and groups pin independent skills with
  const a=(await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data;assert.equal(a.persona_skill.skill_md,skill);assert.equal(a.persona_skill.version_id,v1.id);assert.equal(a.persona_binding.name,'Voice A');assert(!JSON.stringify(a).includes('private-authored-A'));
  const other=(await request('/overview')).data.groups.find((g:any)=>g.id!==group.id);
  assert.equal((await request('/runtime/config/'+other.external_id,'GET',undefined,true)).data.persona_skill,null);
- assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:a.id,revision:a.revision,model_routing_version:1},true)).status,409);
- assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:'0'.repeat(64)},true)).status,409);
- assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:1,group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:a.persona_skill.sha256},true)).status,200);
+ assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:a.id,revision:a.revision,model_routing_version:1},true)).status,409);
+ assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:'0'.repeat(64)},true)).status,409);
+ assert.equal((await request('/runtime/ack','POST',{timeout_policy_version:2,group_id:a.id,revision:a.revision,model_routing_version:1,persona_skill_version:1,persona_skill_sha256:a.persona_skill.sha256},true)).status,200);
  p=(await request('/personas/'+persona)).data;await request('/personas/'+persona,'PUT',{...p,draft_skill:skill+'\nNew manually edited rule.'});
  assert.equal((await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data.persona_skill.skill_md,skill);
  p=(await request('/personas/'+persona)).data;const v2=(await request('/personas/'+persona+'/publish','POST',{revision:p.revision})).data;
@@ -510,22 +510,23 @@ test('closing the AI request aborts its upstream work without saving a topic',as
 test('per-group time budgets persist independently, validate atomically and require capable ACK',async()=>{
  const createdA=await request('/groups','POST',{name:'Synthetic short timeout group'}),createdB=await request('/groups','POST',{name:'Synthetic long timeout group'});
  assert.equal(createdA.status,201);assert.equal(createdB.status,201);let a=createdA.data,b=createdB.data;
- assert.deepEqual(a.policy.timeouts,{planner_seconds:300,request_seconds:310,direct_ttl_seconds:420});
- const short={planner_seconds:60,request_seconds:70,direct_ttl_seconds:180},long={planner_seconds:450,request_seconds:460,direct_ttl_seconds:600};
+ assert.deepEqual(a.policy.timeouts,{planner_seconds:300,request_seconds:310,direct_ttl_seconds:420,wait_apology_seconds:300});
+ const short={planner_seconds:60,request_seconds:70,direct_ttl_seconds:180,wait_apology_seconds:60},long={planner_seconds:450,request_seconds:460,direct_ttl_seconds:600,wait_apology_seconds:300};
  for(const [group,external,limits] of [[a,'synthetic-timeouts-a',short],[b,'synthetic-timeouts-b',long]] as const){
   const saved=await request('/groups/'+group.id,'PUT',{...group,enabled:true,external_id:external,topic_ids:[topicA.id],policy:{...group.policy,timeouts:limits}});assert.equal(saved.status,200);
   if(group.id===a.id)a=saved.data;else b=saved.data;
  }
  const runtimeA=(await request('/runtime/config/'+a.external_id,'GET',undefined,true)).data;
  const runtimeB=(await request('/runtime/config/'+b.external_id,'GET',undefined,true)).data;
- assert.equal(runtimeA.timeout_policy_contract_version,1);assert.deepEqual(runtimeA.policy.timeouts,short);assert.deepEqual(runtimeB.policy.timeouts,long);
- for(const invalid of [{...short,request_seconds:60},{...short,direct_ttl_seconds:120},{...short,planner_seconds:601},{...short,request_seconds:true},{...short,extra:1}]){
+ assert.equal(runtimeA.timeout_policy_contract_version,2);assert.deepEqual(runtimeA.policy.timeouts,short);assert.deepEqual(runtimeB.policy.timeouts,long);
+ for(const invalid of [{...short,request_seconds:60},{...short,direct_ttl_seconds:120},{...short,planner_seconds:601},{...short,request_seconds:true},{...short,extra:1},{...short,wait_apology_seconds:0},{...short,wait_apology_seconds:61},{...short,wait_apology_seconds:1801}]){
   assert.equal((await request('/groups/'+a.id,'PUT',{...a,policy:{...a.policy,timeouts:invalid}})).status,400);
  }
  const current=(await request('/overview')).data.groups;assert.equal(current.find((g:any)=>g.id===a.id).revision,a.revision);assert.deepEqual(current.find((g:any)=>g.id===b.id).policy.timeouts,long);
  const missing=await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1},true);assert.equal(missing.status,409);assert.match(missing.data.error,/等待时间/);
- assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1,timeout_policy_version:1},true)).status,200);
- const updated=await request('/groups/'+a.id,'PUT',{...a,policy:{...a.policy,timeouts:{planner_seconds:90,request_seconds:100,direct_ttl_seconds:240}}});assert.equal(updated.status,200);
+ assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1,timeout_policy_version:1},true)).status,409);
+ assert.equal((await request('/runtime/ack','POST',{group_id:a.id,revision:a.revision,model_routing_version:1,timeout_policy_version:2},true)).status,200);
+ const updated=await request('/groups/'+a.id,'PUT',{...a,policy:{...a.policy,timeouts:{planner_seconds:90,request_seconds:100,direct_ttl_seconds:240,wait_apology_seconds:120}}});assert.equal(updated.status,200);assert.equal(updated.data.policy.timeouts.wait_apology_seconds,120);
  assert.equal((await request('/groups/'+a.id,'PUT',a)).status,409);
  assert.deepEqual((await request('/runtime/config/'+b.external_id,'GET',undefined,true)).data.policy.timeouts,long);
 });

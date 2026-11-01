@@ -68,8 +68,8 @@ def validate_bundle(bundle,external_id):
     validate_persona_bundle(bundle)
     from timeout_policy import validate as validate_timeouts
     contract=bundle.get('timeout_policy_contract_version')
-    if contract not in [None,1]:raise ValueError('Unknown timeout policy contract')
-    if contract==1:validate_timeouts(bundle.get('policy',{}).get('timeouts'))
+    if contract not in [None,1,2]:raise ValueError('Unknown timeout policy contract')
+    if contract in [1,2]:validate_timeouts(bundle.get('policy',{}).get('timeouts'),require_apology=contract==2)
     elif 'timeouts' in bundle.get('policy',{}):validate_timeouts(bundle['policy']['timeouts'])
     if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')
     if bundle.get('model_routing_contract_version') not in [None,1]:raise ValueError('Unknown model routing contract')
@@ -111,7 +111,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':1,'model_routing_version':1,'persona_skill_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 

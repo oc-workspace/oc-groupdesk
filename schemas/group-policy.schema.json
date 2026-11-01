@@ -67,7 +67,8 @@
       "default": {
         "planner_seconds": 300,
         "request_seconds": 310,
-        "direct_ttl_seconds": 420
+        "direct_ttl_seconds": 420,
+        "wait_apology_seconds": 300
       },
       "type": "object",
       "properties": {
@@ -85,12 +86,20 @@
           "type": "integer",
           "minimum": 105,
           "maximum": 1800
+        },
+        "wait_apology_seconds": {
+          "default": 300,
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 1800,
+          "multipleOf": 60
         }
       },
       "required": [
         "planner_seconds",
         "request_seconds",
-        "direct_ttl_seconds"
+        "direct_ttl_seconds",
+        "wait_apology_seconds"
       ],
       "additionalProperties": false
     },

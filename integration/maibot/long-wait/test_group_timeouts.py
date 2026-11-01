@@ -8,13 +8,24 @@ import groupdesk_runtime as gd
 from policy import Policy,settings
 from test_groupdesk_runtime import bundle
 
-SHORT={'planner_seconds':60,'request_seconds':70,'direct_ttl_seconds':180}
-LONG={'planner_seconds':450,'request_seconds':460,'direct_ttl_seconds':600}
+SHORT={'planner_seconds':60,'request_seconds':70,'direct_ttl_seconds':180,'wait_apology_seconds':60}
+LONG={'planner_seconds':450,'request_seconds':460,'direct_ttl_seconds':600,'wait_apology_seconds':300}
 
 class TimeoutContractTests(unittest.TestCase):
+ def test_apology_threshold_is_whole_minutes_and_v2_requires_the_field(self):
+  for seconds in [60,120,300,1800]:self.assertEqual(tp.validate({**SHORT,'wait_apology_seconds':seconds},require_apology=True)['wait_apology_seconds'],seconds)
+  for seconds in [0,30,61,1801,True,120.5]:
+   with self.assertRaises(ValueError):tp.validate({**SHORT,'wait_apology_seconds':seconds})
+  old={k:v for k,v in SHORT.items() if k!='wait_apology_seconds'}
+  self.assertEqual(tp.validate(old)['wait_apology_seconds'],300)
+  with self.assertRaises(ValueError):tp.validate(old,require_apology=True)
+ def test_v2_bundle_does_not_silently_accept_a_missing_apology_threshold(self):
+  b=bundle();b['timeout_policy_contract_version']=2;b['policy']['timeouts']={k:v for k,v in SHORT.items() if k!='wait_apology_seconds'}
+  with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
+  b['timeout_policy_contract_version']=1;gd.validate_bundle(b,b['external_id'])
  def test_policy_bounds_and_relationships_are_strict(self):
   for value in [tp.DEFAULTS,SHORT,LONG,{'planner_seconds':30,'request_seconds':40,'direct_ttl_seconds':105},{'planner_seconds':600,'request_seconds':660,'direct_ttl_seconds':1800}]:
-   self.assertEqual(tp.validate(value),value)
+   self.assertEqual(tp.validate(value),{**tp.DEFAULTS,**value})
   for value in [{**SHORT,'planner_seconds':True},{**SHORT,'request_seconds':60},{**SHORT,'direct_ttl_seconds':120},{**SHORT,'planner_seconds':601},{**SHORT,'hidden':1},{'planner_seconds':60}]:
    with self.assertRaises(ValueError):tp.validate(value)
  def test_bundle_requires_valid_policy_before_it_can_be_confirmed(self):
@@ -23,10 +34,10 @@ class TimeoutContractTests(unittest.TestCase):
   for value in [None,{**SHORT,'request_seconds':60}]:
    b['policy']['timeouts']=value
    with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
-  b['timeout_policy_contract_version']=2
+  b['timeout_policy_contract_version']=3
   with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
  def test_sync_ack_declares_applied_timeout_contract(self):
-  b=bundle();b['timeout_policy_contract_version']=1;b['policy']['timeouts']=SHORT
+  b=bundle();b['timeout_policy_contract_version']=2;b['policy']['timeouts']=SHORT
   acks=[]
   def api(path,body=None):
    if path.startswith('/config/'):return b
@@ -35,7 +46,7 @@ class TimeoutContractTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    connection=Path(d)/'connection.json';connection.write_text(json.dumps({'url':'https://example.invalid','token':'isolated-test-token','groups':{'1':b['external_id']}}))
    with patch.object(gd,'CONNECTION',connection),patch.object(gd,'SNAPSHOT',Path(d)/'snapshot.json'),patch.object(gd,'api',side_effect=api):gd.sync()
-  self.assertEqual(acks[0]['timeout_policy_version'],1)
+  self.assertEqual(acks[0]['timeout_policy_version'],2)
 
 class GroupQueueTests(unittest.TestCase):
  def setUp(self):
@@ -70,6 +81,49 @@ class GroupQueueTests(unittest.TestCase):
   self.cfg['direct_turn_ttl_seconds']=420
   received=self.now;self.enqueue();self.now+=5
   self.assertEqual(self.p.dispatch()['expires'],received+420)
+
+class GroupApologyTests(unittest.TestCase):
+ setUp=GroupQueueTests.setUp
+ def turn(self,chat):
+  temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
+  p=Policy(temp.name,self.cfg,lambda:self.now);received=self.now
+  self.assertEqual(p.ingest(1,'Synthetic member','小T，解释一下网络拥塞？',chat_id=chat,at_me=True),'queued')
+  self.now+=5;return p,p.dispatch(),received
+ def test_two_groups_have_different_apology_thresholds_at_the_same_elapsed_time(self):
+  import latency
+  a,ta,ra=self.turn('1');b,tb,rb=self.turn('2')
+  self.now=ra+90;body,info=latency.decorate(a,ta['id'],'This is the answer.');self.assertTrue(info['late']);self.assertTrue(body.startswith('Sorry for the wait.'))
+  self.now=rb+90;body,info=latency.decorate(b,tb['id'],'This is the answer.');self.assertFalse(info['late']);self.assertEqual(body,'This is the answer.')
+ def test_exact_threshold_is_normal_and_only_strictly_greater_is_late(self):
+  import latency
+  p,t,received=self.turn('1')
+  for elapsed,late in [(59.99,False),(60,False),(60.01,True)]:
+   self.now=received+elapsed;_,info=latency.decorate(p,t['id'],'This is the answer.');self.assertEqual(bool(info['late']),late)
+ def test_queue_time_is_part_of_the_apology_clock(self):
+  import latency
+  received=self.now;self.p.ingest(1,'Synthetic member','小T，解释一下网络拥塞？',chat_id='1',at_me=True)
+  self.now+=45;t=self.p.dispatch();self.now=received+60.01
+  _,info=latency.decorate(self.p,t['id'],'This is the answer.');self.assertTrue(info['late']);self.assertAlmostEqual(info['elapsed_seconds'],60.01,places=4)
+ def test_v1_policy_preserves_the_existing_global_five_minute_setting(self):
+  import latency
+  self.cfg['wait_apology_seconds']=300;self.cfg['managed_groups']['2']['policy']['timeouts'].pop('wait_apology_seconds')
+  p,t,received=self.turn('2')
+  for elapsed,late in [(121,False),(300,False),(300.01,True)]:
+   self.now=received+elapsed;_,info=latency.decorate(p,t['id'],'This is the answer.');self.assertEqual(bool(info['late']),late)
+ def test_threshold_beyond_lifetime_does_not_extend_the_task(self):
+  import latency
+  from policy import Denied
+  self.cfg['managed_groups']['1']['policy']['timeouts']['wait_apology_seconds']=600
+  p,t,received=self.turn('1');self.now=received+170
+  body,info=latency.decorate(p,t['id'],'This is the answer.');self.assertFalse(info['late']);self.assertEqual(body,'This is the answer.')
+  self.now=received+181
+  with self.assertRaises(Denied):p.reserve_send('synthetic-expired',t['id'],'1')
+ def test_prepared_persona_apology_remains_in_the_single_output(self):
+  import latency
+  p,t,received=self.turn('1')
+  with p.db() as db:db.execute('UPDATE turns SET wait_apology=? WHERE id=?',('Sorry, I took the scenic route.',t['id']))
+  self.now=received+61;body,info=latency.decorate(p,t['id'],'This is the answer.')
+  self.assertEqual(body,'Sorry, I took the scenic route.\n\nThis is the answer.');self.assertEqual(info['apology_source'],'persona_model')
 
 try:
  from src.config.model_configs import ModelInfo,APIProvider
