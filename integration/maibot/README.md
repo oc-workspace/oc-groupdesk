@@ -19,3 +19,5 @@ GroupDesk在数据库中仅保存适配器token的SHA256，并限制授权群。
 Unified diff context lines for empty source lines contain a required single space. The scoped .gitattributes rule preserves that patch syntax while leaving source-code whitespace checks enabled.
 
 Gemini 3.8 Flash兼容修正：针对固定MaiBot基线，用patch-gemini-client.py把generateContent工具结果的Content角色从tool改成user；保留函数名、调用ID及thought signature。当前普通gemini-3.8-flash使用LOW思考、关闭思考摘要，不改变既有输出token上限；high等显式变体不覆盖。修正源文件需只读挂载到原路径，仅重建MaiBot，微信会话保持。test_gemini_compatibility.py在原生镜像中验证转换及SDK配置；合成工具结果的真实接口简测不向微信群发消息。
+
+慢模型等待与两分钟致歉：见 [运行策略与安装验证](long-wait/README.md)。Planner 300秒、HTTP 310秒、点名从首次采集起共用420秒，普通插话保留短时效。
