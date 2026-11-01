@@ -458,11 +458,12 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,policy,language,allow_language_override,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const composition=await runtimePersonaBundle(routingGroup);
     const persona=composition.persona_skill;
+    if(composition.newcomer_welcome_contract_version)requireCondition(body.newcomer_welcome_policy_version===1,409,'请更新机器人以应用新人欢迎随机等待后再确认');
     if(composition.persona_feature_skills.length)requireCondition(body.persona_composition_version===1&&body.persona_composition_sha256===composition.persona_composition_sha256,409,'请更新机器人并应用完整 Persona 与特色 Skill 组合后再确认');
     if(persona)requireCondition(body.persona_skill_version===1&&body.persona_skill_sha256===persona.sha256,409,'请更新机器人并应用正确的 Persona 版本后再确认');
     const routes=await effectiveModelRoutes(routingGroup) as any;

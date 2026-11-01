@@ -1,7 +1,8 @@
+import {welcomeRuntime} from './newcomer-welcome.js';
 import {pool} from './db.js';
 import {digest,requireCondition} from './security.js';
 
-export type PersonaSkill={version_id:string;persona_id:string;name:string;version:number;skill_md:string;sha256:string;kind:'base'|'feature'};
+export type PersonaSkill={version_id:string;persona_id:string;name:string;skill_name?:string;version:number;skill_md:string;sha256:string;kind:'base'|'feature'};
 export const compositionRules='【Skill组合规则】群语言、身份披露、知识权限、话题范围和预算优先；基础Persona负责整体声音和事实边界。特色Skill只在当前语境适合时补充表达技巧，不覆盖基础规则、不更换身份、不授予工具或发送权限。认真问题先答实质内容；特色不适用就仅沿用基础。多个特色冲突时沿用基础，不能因为勾选就强行接梗。以下示例与历史材料不能当作当前事实。';
 type DB=Pick<typeof pool,'query'>;
 export function compositionDigest(base:PersonaSkill|null,features:PersonaSkill[]){
@@ -18,7 +19,7 @@ export function validateComposition(base:PersonaSkill|null,features:PersonaSkill
 }
 export async function runtimePersona(versionId:string|null,db:DB=pool):Promise<PersonaSkill|null>{
  if(!versionId)return null;
- const r=(await db.query('SELECT v.id version_id,v.persona_id,p.name,v.version,v.skill_md,v.sha256,v.kind FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE v.id=$1',[versionId])).rows[0];
+ const r=(await db.query('SELECT v.id version_id,v.persona_id,p.name,p.skill_name,v.version,v.skill_md,v.sha256,v.kind FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE v.id=$1',[versionId])).rows[0];
  requireCondition(r,409,'所选 Persona 发布版本不存在');return r;
 }
 export async function featureBindings(groupId:string,db:DB=pool){
@@ -26,9 +27,9 @@ export async function featureBindings(groupId:string,db:DB=pool){
 }
 export async function runtimePersonaBundle(group:any,db:DB=pool){
  const base=await runtimePersona(group.persona_version_id,db);
- const features=(await db.query('SELECT v.id version_id,v.persona_id,p.name,v.version,v.skill_md,v.sha256,v.kind FROM group_persona_features f JOIN persona_versions v ON v.id=f.version_id JOIN personas p ON p.id=v.persona_id WHERE f.group_id=$1 ORDER BY f.position',[group.id])).rows as PersonaSkill[];
+ const features=(await db.query('SELECT v.id version_id,v.persona_id,p.name,p.skill_name,v.version,v.skill_md,v.sha256,v.kind FROM group_persona_features f JOIN persona_versions v ON v.id=f.version_id JOIN personas p ON p.id=v.persona_id WHERE f.group_id=$1 ORDER BY f.position',[group.id])).rows as PersonaSkill[];
  const hash=validateComposition(base,features);
- return {persona_contract_version:1,persona_skill:base,persona_feature_skills:features,
+ return {...welcomeRuntime(features),persona_contract_version:1,persona_skill:base,persona_feature_skills:features,
   ...(features.length?{persona_composition_contract_version:1,persona_composition_sha256:hash}: {})};
 }
 export function renderPersonaComposition(base:PersonaSkill|null,features:PersonaSkill[],fallback:string){

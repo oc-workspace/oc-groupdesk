@@ -1,7 +1,7 @@
 import React,{useState} from 'react';
 type Props={data:any;api:(path:string,method?:string,body?:unknown)=>Promise<any>;busy:boolean;work:(action:()=>Promise<void>)=>Promise<void>;reload:()=>Promise<void>;notify:(text:string,error?:boolean)=>void};
 export function PersonaBindings(props:Props){
- return <section className="panel persona-panel"><h2>基础人设与特色 Skill</h2><p className="hint">每群选择一个基础 Persona，再勾选最多5个特色 Skill。特色只在合适的语境中补充表达；群语言、身份、话题权限和额度继续优先。勾选特色不会增加主动发言次数。</p><p className="hint">跟随最新发布：发布新版本时自动更新这些群；只保存草稿不会影响群聊。固定版本：保持当前所选版本，随时可以换回旧版。</p>{props.data.bindings.map((b:any)=><GroupBinding key={b.group_id+':'+b.revision} {...props} binding={b}/>)}</section>;
+ return <section className="panel persona-panel"><h2>基础人设与特色 Skill</h2><p className="hint">每群选择一个基础 Persona，再勾选最多5个特色 Skill。特色只在合适的语境中补充表达；群语言、身份、话题权限和额度继续优先。特色沿用群发言权限和额度；“新人欢迎”另有程序计时：明确介绍新人后随机等15—40秒再准备欢迎，忙碌或不适合时保持安静。</p><p className="hint">跟随最新发布：发布新版本时自动更新这些群；只保存草稿不会影响群聊。固定版本：保持当前所选版本，随时可以换回旧版。</p>{props.data.bindings.map((b:any)=><GroupBinding key={b.group_id+':'+b.revision} {...props} binding={b}/>)}</section>;
 }
 function GroupBinding({data,api,busy,work,reload,notify,binding:b}:Props&{binding:any}){
  const [base,setBase]=useState(b.persona_version_id||''),[follow,setFollow]=useState(!!b.persona_follow_latest);
