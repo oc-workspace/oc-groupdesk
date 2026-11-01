@@ -27,9 +27,10 @@ edit('limits/policy.py',[
 edit('limits/group_guard.py',[
  ("            recovery.bind(p,request,turn['id'])", "            recovery.bind(p,request,turn['id'])\n            import latency\n            latency.bind(p,request,turn['id'],task)",1),
 ])
-edit('limits/model_routing.py',[
- ("max_retry=2,timeout=80,retry_interval=4)","max_retry=2,timeout=310,retry_interval=4)",1),
-])
+if 'timeout=seconds' not in (root/'limits/model_routing.py').read_text():
+    edit('limits/model_routing.py',[
+     ("max_retry=2,timeout=80,retry_interval=4)","max_retry=2,timeout=310,retry_interval=4)",1),
+    ])
 edit('bridge/app.py',[
  ("                if not self.ledger.reserve(identifier):", "                turn_id = (info.additional_config or {}).get('gt_limit_turn')\n                import latency\n                text,wait_info=latency.decorate(self.policy,turn_id,text,managed)\n                if managed is not None and not gd.language_allowed(managed,text):raise Denied('groupdesk_language')\n                if not self.ledger.reserve(identifier):",1),
  ("                article = self.policy.reserve_send(identifier, turn_id,chat_id=str(chat.id))", "                article = self.policy.reserve_send(identifier, turn_id,chat_id=str(chat.id))\n                latency.audit(self.policy,turn_id,identifier,wait_info)",1),

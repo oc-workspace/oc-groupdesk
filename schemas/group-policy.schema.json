@@ -63,6 +63,37 @@
       ],
       "additionalProperties": false
     },
+    "timeouts": {
+      "default": {
+        "planner_seconds": 300,
+        "request_seconds": 310,
+        "direct_ttl_seconds": 420
+      },
+      "type": "object",
+      "properties": {
+        "planner_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600
+        },
+        "request_seconds": {
+          "type": "integer",
+          "minimum": 40,
+          "maximum": 660
+        },
+        "direct_ttl_seconds": {
+          "type": "integer",
+          "minimum": 105,
+          "maximum": 1800
+        }
+      },
+      "required": [
+        "planner_seconds",
+        "request_seconds",
+        "direct_ttl_seconds"
+      ],
+      "additionalProperties": false
+    },
     "base_questions": {
       "default": false,
       "type": "boolean"
@@ -146,6 +177,7 @@
     "participation",
     "persona",
     "identity",
+    "timeouts",
     "base_questions",
     "base_social",
     "topic_overrides",

@@ -34,7 +34,7 @@ POST /api/runtime/context：user_id、channel:"group"、group_external_id、ment
 ## 版本应用
 
 GET /api/runtime/config/:externalId 返回完整配置和 revision，停用配置也返回。
-适配器实际应用成功后 POST /api/runtime/ack：group_id、revision。
+适配器实际应用成功后 POST /api/runtime/ack：group_id、revision、timeout_policy_version=1；启用模型路由或发布 Persona 的群也需要对应能力和版本摘要。只有真正应用完整配置后才能确认。
 版本已变化返回409，必须重取；应用失败不能确认。
 
 建议30–60秒同步配置；每个私聊请求仍重取授权和检索。
@@ -54,3 +54,7 @@ policy.topic_scope=all保留原来的全部回答范围限制；proactive只限�
 可信群标识可包含适配器实例命名空间和持久会话标识，不必冒充微信官方wxid。昵称派生用户标识只用于群内会话，不授予私聊权限。专用适配器token以SHA256存数据库，限制group_external_ids，禁止私聊场景。主BOT_API_TOKEN仍用于服务端管理集成，不能交给浏览器。
 
 MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤销停止该群处理，发送前复核服务端revision。ack表示已应用对应版本，不代表已发送实测。测试预览不调用模型或微信。
+
+## 群等待策略契约 v1
+
+`timeout_policy_contract_version=1` 与 `policy.timeouts` 下发本群的 planner_seconds、request_seconds、direct_ttl_seconds。旧群缺省300/310/420秒。校验范围、参数关系、请求绝对截止及原生客户端缓存处理见[按群配置等待时间](group-timeouts.md)。ACK缺少timeout_policy_version=1返回409；通用客户端要求apply回调在实际应用后返回能力字段，不自动替旧适配器声明支持。
