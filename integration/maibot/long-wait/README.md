@@ -4,6 +4,8 @@
 
 ## 生效参数
 
+以下是兼容缺省。现在可以在 GroupDesk「群管理 → 模型等待与请求时效」按群覆盖 Planner、HTTP 和点名请求总有效期，详见[按群配置等待时间](../../../docs/group-timeouts.md)。私有 TOML 保留缺省，实际请求使用来源群的已确认策略。
+
 | 层级 | 参数 | 行为 |
 | --- | --- | --- |
 | MaiBot Planner | hard_timeout=300秒 | 每次规划最多等待5分钟；仍受整个任务截止时间限制 |
@@ -36,6 +38,8 @@
 latency.py与既有policy.py同目录；install-latency.py对已安装恢复钩子的生产基线生成幂等变更：policy、group_guard、model_routing、bridge与原生reply工具。输入目录布局为limits/、bridge/、core/reply.py；先复制生产源码到隔离目录再执行，不直接以生产目录试错。
 
 configure-timeouts.py只在服务器处理私有model_config.toml，保留注释，并逐字段验证除Planner超时与提供商timeout外所有字段完全一致。凭据不传出服务器、不提交Git。准备完毕并通过隔离测试后，备份原配置与SQLite，等待无活动任务，暂停收发，部署并只重建MaiBot和桥接；微信容器与登录保持。
+
+按群版本另外使用timeout_policy.py及install-group-timeouts.py；后者在审核过的utils_model.py副本中安装请求内Planner超时钩子。先更新机器人再更新后台，避免旧机器人误报已应用。接口超时参与提供商名称，隔离原生SDK的按名称缓存。旧的configure-timeouts.py只用于兼容缺省，不替代群设置。
 
 received_at与wait_apology为增量字段，既有记录用原created/first回填；新请求使用真实首次采集时间。延长模型并发占用判断：3分钟以上仍活跃的请求不会被误认为释放了模型位置。保留原180秒孤立保留窗口及剩余任务截止时间，避免并发漏算。
 

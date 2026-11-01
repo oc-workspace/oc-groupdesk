@@ -12,6 +12,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-fund && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY server ./server
+COPY shared ./shared
 COPY migrations ./migrations
 COPY catalog ./catalog
 COPY skills ./skills

@@ -14,7 +14,7 @@ class RecoveryTests(unittest.TestCase):
  def scan(self,incident='incident',rows=(),allowed=('1',)):
   return recovery.reconcile(self.p,incident,self.now,rows,allowed)
  def expire(self):
-  self.now+=100;self.p.dispatch()
+  self.now+=self.cfg.get('direct_turn_ttl_seconds',self.cfg['turn_ttl_seconds'])+1;self.p.dispatch()
  def count(self,table):
   with self.p.db() as db:return db.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
  def test_no_mentions_no_task_and_no_model_or_send(self):

@@ -24,9 +24,13 @@ export class GroupDeskClient {
   context(trustedRequest){return this.request('/context',trustedRequest);}
   async applyConfig(trustedExternalGroupId,apply){
     const config=await this.request('/config/'+encodeURIComponent(trustedExternalGroupId));
-    await apply(config);
+    const applied=await apply(config);
+    if(config.timeout_policy_contract_version===1&&applied?.timeout_policy_version!==1){
+      throw new Error('Adapter must apply per-group time budgets before acknowledging this configuration');
+    }
     // Send acknowledgement only AFTER the adapter applied this exact version.
-    await this.request('/ack',{group_id:config.id,revision:config.revision});
+    const capabilities=Object.fromEntries(['timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
+    await this.request('/ack',{group_id:config.id,revision:config.revision,...capabilities});
     return config;
   }
 }

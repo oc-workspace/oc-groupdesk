@@ -435,6 +435,7 @@ function registerRuntime(app:express.Express){
     const config=await groupDetail(group.id);
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
+    config.timeout_policy_contract_version=1;
     config.model_routing_contract_version=1;
     config.model_routing=await effectiveModelRoutes(config);
     config.persona_contract_version=1;
@@ -444,7 +445,7 @@ function registerRuntime(app:express.Express){
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),timeout_policy_version:z.literal(1).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const persona=await runtimePersona(routingGroup.persona_version_id);
@@ -455,6 +456,7 @@ function registerRuntime(app:express.Express){
       const group=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
       requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');
     }
+    requireCondition(body.timeout_policy_version===1,409,'请更新机器人以应用本群等待时间配置后再确认');
     const result=await pool.query('UPDATE groups SET applied_revision=$1,bot_seen_at=now() WHERE id=$2 AND revision=$1',[body.revision,body.group_id]);
     requireCondition(result.rowCount,409,'配置版本已变化，请重新获取后再确认');
     res.json({ok:true});

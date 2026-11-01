@@ -11,14 +11,20 @@ def init(db):
         db.execute('ALTER TABLE turns ADD COLUMN wait_apology TEXT NOT NULL DEFAULT ""')
     db.execute('CREATE TABLE IF NOT EXISTS latency_deliveries(send_id TEXT PRIMARY KEY,turn_id TEXT NOT NULL,received_at REAL NOT NULL,submitted_at REAL NOT NULL,elapsed_seconds REAL NOT NULL,late INTEGER NOT NULL,apology_source TEXT NOT NULL,apology_sha256 TEXT)')
 
-def direct_ttl(p):return p.cfg.get('direct_turn_ttl_seconds',p.cfg['turn_ttl_seconds'])
+def direct_ttl(p,chat=''):
+    from timeout_policy import for_group
+    return for_group(p.cfg,chat)['direct_ttl_seconds']
 
 def expire_pending(p,db,now):
-    return db.execute('DELETE FROM pending WHERE (kind="direct" AND (CASE WHEN received_at>0 THEN received_at ELSE first END)<?) OR (kind!="direct" AND first<?)',
-                      (now-direct_ttl(p),now-p.cfg['queue_ttl_seconds'])).rowcount
+    expired=[]
+    for row in db.execute('SELECT id,kind,chat_id,received_at,first FROM pending'):
+        until=(row['received_at'] or row['first'])+direct_ttl(p,row['chat_id']) if row['kind']=='direct' else row['first']+p.cfg['queue_ttl_seconds']
+        if until<=now:expired.append((row['id'],))
+    db.executemany('DELETE FROM pending WHERE id=?',expired)
+    return len(expired)
 
 def deadline(p,row,now):
-    if row['kind']=='direct':return (row['received_at'] or row['first'])+direct_ttl(p)
+    if row['kind']=='direct':return (row['received_at'] or row['first'])+direct_ttl(p,row['chat_id'])
     return now+p.cfg['turn_ttl_seconds']
 
 def model_busy(db,now):

@@ -3,6 +3,8 @@ import {readFile,readdir} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {HttpError} from './security.js';
 import {identityPolicySchema,identityInstructions} from './identity.js';
+import {timeoutPolicySchema} from './timeout-policy.js';
+import {timeoutDefaults} from '../shared/timeout-policy.js';
 
 export const languageCode=z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/).max(35);
 const term=z.string().trim().min(1).max(128);
@@ -21,6 +23,7 @@ export const groupPolicySchema=z.object({
   participation:z.enum(['quiet','moderate','active']).default('moderate'),
   persona:z.enum(['gt-persona','neutral']).default('gt-persona'),
   identity:identityPolicySchema.default({disclosure:'when_asked',personal_questions:'tactful'}),
+  timeouts:timeoutPolicySchema.default(timeoutDefaults),
   base_questions:z.boolean().default(false),base_social:z.boolean().default(false),
   topic_overrides:z.record(z.uuid(),z.object({reply_depth:z.enum(['default','brief','detailed'])})).default({}),
   language:z.object({mode:z.enum(['follow','restricted','fixed']),allowed:z.array(languageCode).max(30),fallback:languageCode,fixed:languageCode.optional(),allow_requested:z.boolean()})
