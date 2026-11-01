@@ -64,10 +64,35 @@ def validate_persona_bundle(bundle):
     if hashlib.sha256(text.encode()).hexdigest()!=skill.get('sha256'):raise ValueError('Published persona digest mismatch')
     return skill
 
+def validate_persona_composition(bundle):
+    base=validate_persona_bundle(bundle)
+    features=bundle.get('persona_feature_skills',[])
+    if not isinstance(features,list) or len(features)>5:raise ValueError('Invalid feature skill count')
+    if not features and bundle.get('persona_composition_contract_version') is None:return []
+    if bundle.get('persona_composition_contract_version')!=1:raise ValueError('Unknown persona composition contract')
+    if base and base.get('kind','base')!='base':raise ValueError('Invalid base persona kind')
+    seen=set();characters=len((base or {}).get('skill_md','').encode('utf-16-le'))//2
+    for feature in features:
+        if not isinstance(feature,dict) or feature.get('kind')!='feature':raise ValueError('Invalid feature kind')
+        for key in ['version_id','persona_id']:
+            if not isinstance(feature.get(key),str) or not 1<=len(feature[key])<=128:raise ValueError('Invalid feature identity')
+        if feature['persona_id'] in seen or feature['persona_id']==(base or {}).get('persona_id'):raise ValueError('Duplicate persona feature')
+        seen.add(feature['persona_id'])
+        text=feature.get('skill_md')
+        if not isinstance(text,str) or not 30<=len(text.encode('utf-16-le'))//2<=6000:raise ValueError('Invalid feature skill text')
+        if hashlib.sha256(text.encode()).hexdigest()!=feature.get('sha256'):raise ValueError('Feature digest mismatch')
+        characters+=len(text.encode('utf-16-le'))//2
+    if characters>30000:raise ValueError('Persona composition too large')
+    manifest=[1,(base or {}).get('version_id'),(base or {}).get('sha256'),[[v['version_id'],v['sha256']] for v in features]]
+    digest=hashlib.sha256(json.dumps(manifest,separators=(',',':')).encode()).hexdigest()
+    if digest!=bundle.get('persona_composition_sha256'):raise ValueError('Persona composition digest mismatch')
+    return features
+
+
 def validate_bundle(bundle,external_id):
     from banter import validate as validate_conversation
     validate_conversation(bundle)
-    validate_persona_bundle(bundle)
+    validate_persona_composition(bundle)
     from interactions_runtime import validate_bundle as validate_interactions
     validate_interactions(bundle)
     from timeout_policy import validate as validate_timeouts
@@ -115,7 +140,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {}),**({'persona_composition_version':1,'persona_composition_sha256':groups[chat]['persona_composition_sha256']} if groups[chat].get('persona_feature_skills') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 

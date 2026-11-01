@@ -58,3 +58,7 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 ## 群等待策略契约 v2
 
 `timeout_policy_contract_version=2` 与 `policy.timeouts` 下发本群的 planner_seconds、request_seconds、direct_ttl_seconds、wait_apology_seconds。旧群缺省300/310/420秒及5分钟致歉。致歉阈值存秒数，只接受1—30整分钟。校验范围、参数关系、请求绝对截止及原生客户端缓存处理见[按群配置等待时间](group-timeouts.md)。ACK未声明v2返回409；通用客户端要求apply回调在实际应用后返回匹配能力字段，不自动替旧适配器声明支持。新机器人仍能接收v1配置并按v1确认。
+
+## Persona 组合契约 v1
+
+有特色的群在基础Persona字段之外下发persona_feature_skills、有序组合摘要和persona_composition_contract_version=1。ACK须声明persona_composition_version=1及完整组合摘要，旧适配器不能确认部分应用。基础-only仍兼容原契约；详见[组合与维护](persona-composition.md)。

@@ -5,3 +5,6 @@ dist
 .env.*
 data
 backups
+
+**/._*
+**/.DS_Store

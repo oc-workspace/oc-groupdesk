@@ -1,0 +1,22 @@
+import React,{useState} from 'react';
+type Props={data:any;api:(path:string,method?:string,body?:unknown)=>Promise<any>;busy:boolean;work:(action:()=>Promise<void>)=>Promise<void>;reload:()=>Promise<void>;notify:(text:string,error?:boolean)=>void};
+export function PersonaBindings(props:Props){
+ return <section className="panel persona-panel"><h2>基础人设与特色 Skill</h2><p className="hint">每群选择一个基础 Persona，再勾选最多5个特色 Skill。特色只在合适的语境中补充表达；群语言、身份、话题权限和额度继续优先。勾选特色不会增加主动发言次数。</p><p className="hint">跟随最新发布：发布新版本时自动更新这些群；只保存草稿不会影响群聊。固定版本：保持当前所选版本，随时可以换回旧版。</p>{props.data.bindings.map((b:any)=><GroupBinding key={b.group_id+':'+b.revision} {...props} binding={b}/>)}</section>;
+}
+function GroupBinding({data,api,busy,work,reload,notify,binding:b}:Props&{binding:any}){
+ const [base,setBase]=useState(b.persona_version_id||''),[follow,setFollow]=useState(!!b.persona_follow_latest);
+ const [features,setFeatures]=useState<{version_id:string;follow_latest:boolean}[]>((b.features||[]).map((f:any)=>({version_id:f.version_id,follow_latest:f.follow_latest})));
+ const [preview,setPreview]=useState<any>(null);
+ const versions=(id:string)=>data.versions.filter((v:any)=>v.persona_id===id);
+ const selected=(id:string)=>features.find(f=>versions(id).some((v:any)=>v.id===f.version_id));
+ const before=JSON.stringify({base:b.persona_version_id||'',follow:!!b.persona_follow_latest,features:(b.features||[]).map((f:any)=>({version_id:f.version_id,follow_latest:f.follow_latest}))});
+ const dirty=before!==JSON.stringify({base,follow,features});
+ function patchFeature(id:string,patch:any){setFeatures(features.map(f=>f.version_id===id?{...f,...patch}:f));}
+ return <div className="persona-binding"><h3>{b.group_name}</h3><p>已保存 v{b.revision} · 机器人已应用 v{b.applied_revision}</p><fieldset disabled={busy}>
+ <label>基础 Persona（单选）<select value={base} onChange={e=>{setBase(e.target.value);setFollow(!!e.target.value);}}><option value="">使用群原有的内置 Persona</option>{data.personas.filter((p:any)=>p.kind==='base'&&!p.archived&&p.published_version).map((p:any)=><optgroup key={p.id} label={p.name}>{versions(p.id).map((v:any)=><option key={v.id} value={v.id}>{p.name} · v{v.version}</option>)}</optgroup>)}</select></label>
+ <label className="check-row"><input type="checkbox" disabled={!base} checked={follow} onChange={e=>setFollow(e.target.checked)}/>基础人设跟随最新发布{!base?'（内置人设由机器人维护）':''}</label>
+ <div className="persona-feature-list"><h4>特色 Skill（多选，已选 {features.length}/5）</h4>{data.personas.filter((p:any)=>p.kind==='feature'&&!p.archived&&p.published_version).map((p:any)=>{const f=selected(p.id);return <div className={'persona-feature-choice '+(f?'selected':'')} key={p.id}><label className="check-row"><input type="checkbox" checked={!!f} disabled={!f&&features.length>=5} onChange={e=>setFeatures(e.target.checked?[...features,{version_id:versions(p.id)[0].id,follow_latest:true}]:features.filter(x=>x!==f))}/><span><strong>{p.name}</strong><small>{p.description}</small></span></label>{f&&<div className="policy-grid"><label>特色发布版本<select value={f.version_id} onChange={e=>patchFeature(f.version_id,{version_id:e.target.value,follow_latest:false})}>{versions(p.id).map((v:any)=><option key={v.id} value={v.id}>v{v.version}</option>)}</select></label><label className="check-row"><input type="checkbox" checked={f.follow_latest} onChange={e=>patchFeature(f.version_id,{follow_latest:e.target.checked})}/>跟随最新发布</label></div>}</div>;})}{!data.personas.some((p:any)=>p.kind==='feature'&&!p.archived&&p.published_version)&&<p className="hint">还没有已发布特色。在「Persona 技能」中新建“特色 Skill”，只填写独有技巧，再发布。</p>}</div>
+ <div className="model-key-actions"><button className="button primary" disabled={!dirty} onClick={()=>void work(async()=>{await api('/persona-bindings/'+b.group_id,'PUT',{revision:b.revision,version_id:base||null,follow_latest:follow,features});await reload();notify('组合已保存；请手动刷新查看机器人确认');})}>应用组合到此群</button><button className="button" onClick={()=>void work(async()=>{setPreview(await api('/persona-bindings/'+b.group_id));})}>查看已保存组合</button></div></fieldset>
+ {preview&&<details open className="persona-composition-preview"><summary>已保存组合 · {preview.persona_feature_skills.length} 个特色 · 正文 {preview.characters} 字符</summary><p className="hint">{dirty?'当前有未应用的选择；下方展示服务器已保存的组合。':'展示基础与特色的合并内容；运行时还会加入该群的语言、身份和权限规则。'}</p><pre>{preview.text}</pre><button className="button small" onClick={()=>setPreview(null)}>收起组合</button></details>}
+ </div>;
+}

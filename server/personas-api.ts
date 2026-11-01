@@ -10,14 +10,12 @@ import {digest,requireCondition,HttpError} from './security.js';
 import {importMaterial,materialOverview,datasetBody,datasetRecords,materialRoot} from './persona-materials.js';
 import {makeSkill,skillName,validateSkill,queuePersonaJob} from './persona-generation.js';
 
+import {runtimePersona,featureBindings,runtimePersonaBundle,resolveBindingVersion,validateComposition,advanceFollowers,renderPersonaComposition} from './persona-composition.js';
+export {runtimePersona} from './persona-composition.js';
+
 const uuid=(v:unknown)=>z.uuid().parse(v);
 const revision=z.number().int().positive();
-const personaBody=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().max(500),goal:z.string().trim().max(3000),dataset_ids:z.array(z.uuid()).max(20),draft_skill:z.string().max(30000)});
-export async function runtimePersona(versionId:string|null,db:Pick<typeof pool,'query'>=pool){
- if(!versionId)return null;
- const r=(await db.query('SELECT v.id version_id,v.persona_id,p.name,v.version,v.skill_md,v.sha256 FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE v.id=$1',[versionId])).rows[0];
- requireCondition(r,409,'所选 Persona 发布版本不存在');return r;
-}
+const personaBody=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().max(500),goal:z.string().trim().max(3000),dataset_ids:z.array(z.uuid()).max(20),draft_skill:z.string().max(30000),kind:z.enum(['base','feature']).optional()});
 // A portable skill package needs no executable archive utility or extra dependency.
 export function skillArchive(name:string,skill:string,provenance:unknown){
  skillName.parse(name);const blocks:Buffer[]=[];
@@ -33,9 +31,9 @@ export function skillArchive(name:string,skill:string,provenance:unknown){
 }
 export function registerPersonaAdmin(app:express.Express){
  app.get('/api/persona-studio',async(_req,res)=>{
-  res.json({...await materialOverview(),personas:(await pool.query(`SELECT p.id,p.name,p.skill_name,p.description,p.revision,p.archived,p.created_at,(SELECT max(version) FROM persona_versions WHERE persona_id=p.id) published_version FROM personas p ORDER BY p.created_at`)).rows,
-   versions:(await pool.query('SELECT id,persona_id,version FROM persona_versions ORDER BY version DESC')).rows,
-   bindings:(await pool.query('SELECT g.id group_id,g.name group_name,g.revision,g.applied_revision,g.persona_version_id,v.persona_id,v.version FROM groups g LEFT JOIN persona_versions v ON v.id=g.persona_version_id ORDER BY g.name')).rows});
+  res.json({...await materialOverview(),personas:(await pool.query(`SELECT p.id,p.name,p.skill_name,p.description,p.kind,p.revision,p.archived,p.created_at,(SELECT max(version) FROM persona_versions WHERE persona_id=p.id) published_version FROM personas p ORDER BY p.created_at`)).rows,
+   versions:(await pool.query('SELECT id,persona_id,version,kind FROM persona_versions ORDER BY version DESC')).rows,
+   bindings:(await pool.query(`SELECT g.id group_id,g.name group_name,g.revision,g.applied_revision,g.persona_version_id,g.persona_follow_latest,v.persona_id,v.version,COALESCE((SELECT json_agg(json_build_object('persona_id',f.persona_id,'version_id',f.version_id,'follow_latest',f.follow_latest,'position',f.position,'name',p2.name,'version',v2.version) ORDER BY f.position) FROM group_persona_features f JOIN personas p2 ON p2.id=f.persona_id JOIN persona_versions v2 ON v2.id=f.version_id WHERE f.group_id=g.id),'[]'::json) features FROM groups g LEFT JOIN persona_versions v ON v.id=g.persona_version_id ORDER BY g.name`)).rows});
  });
  app.post('/api/persona-collections',async(req,res)=>{
   const b=z.object({name:z.string().trim().min(1).max(120),group_id:z.uuid().nullable().default(null)}).parse(req.body),id=randomUUID();
@@ -85,7 +83,7 @@ export function registerPersonaAdmin(app:express.Express){
  });
  app.post('/api/personas',async(req,res)=>{
   const b=personaBody.omit({draft_skill:true}).extend({skill_name:skillName}).parse(req.body),id=randomUUID();
-  await pool.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,b.name,b.skill_name,b.description,b.goal,b.dataset_ids,makeSkill(b.skill_name,b.description||b.name,'# '+b.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。')]);
+  await pool.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,b.name,b.skill_name,b.description,b.goal,b.dataset_ids,makeSkill(b.skill_name,b.description||b.name,'# '+b.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。'),b.kind||'base']);
   await audit(req.admin!.username,'persona.created',id);res.status(201).json({id});
  });
  app.get('/api/personas/:id',async(req,res)=>{
@@ -96,9 +94,14 @@ export function registerPersonaAdmin(app:express.Express){
  app.put('/api/personas/:id',async(req,res)=>{
   const b=personaBody.extend({revision,source_version_id:z.uuid().nullable().optional()}).parse(req.body),id=uuid(req.params.id);
   await transaction(async db=>{
+   const current=(await db.query('SELECT kind,revision FROM personas WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   requireCondition(current,404,'Persona 不存在');
+   const kind=b.kind||current.kind;
+   if(kind!==current.kind)requireCondition(!(await db.query("SELECT 1 FROM persona_versions WHERE persona_id=$1 UNION ALL SELECT 1 FROM persona_jobs WHERE persona_id=$1 AND status IN ('pending','processing') LIMIT 1",[id])).rowCount,409,'已发布或正在生成的 Skill 不能更改类型，请另建特色 Skill');
+   if(kind==='feature')requireCondition(b.draft_skill.length<=6000,400,'特色 Skill 最多6000字符；只保留增量技巧');
    for(const datasetId of b.dataset_ids)requireCondition((await db.query('SELECT 1 FROM persona_datasets WHERE id=$1',[datasetId])).rowCount,400,'关联数据集不存在');
    if(b.source_version_id)requireCondition((await db.query('SELECT 1 FROM persona_versions WHERE id=$1 AND persona_id=$2',[b.source_version_id,id])).rowCount,400,'历史版本不属于此 Persona');
-   const r=await db.query('UPDATE personas SET name=$1,description=$2,goal=$3,dataset_ids=$4,draft_skill=$5,draft_provenance=COALESCE((SELECT provenance FROM persona_versions WHERE id=$8 AND persona_id=$6),draft_provenance),revision=revision+1 WHERE id=$6 AND revision=$7 AND NOT archived',[b.name,b.description,b.goal,b.dataset_ids,b.draft_skill,id,b.revision,b.source_version_id||null]);requireCondition(r.rowCount,409,'草稿已更新或已归档，请保留本地修改后载入最新版本');
+   const r=await db.query('UPDATE personas SET name=$1,description=$2,goal=$3,dataset_ids=$4,draft_skill=$5,kind=$9,draft_provenance=COALESCE((SELECT provenance FROM persona_versions WHERE id=$8 AND persona_id=$6),draft_provenance),revision=revision+1 WHERE id=$6 AND revision=$7 AND NOT archived',[b.name,b.description,b.goal,b.dataset_ids,b.draft_skill,id,b.revision,b.source_version_id||null,kind]);requireCondition(r.rowCount,409,'草稿已更新或已归档，请保留本地修改后载入最新版本');
    await audit(req.admin!.username,'persona.draft_saved',id,{},db);
   });res.json({ok:true});
  });
@@ -106,16 +109,18 @@ export function registerPersonaAdmin(app:express.Express){
   const id=uuid(req.params.id),b=z.object({revision}).parse(req.body);
   const out=await transaction(async db=>{
    const p=(await db.query('SELECT * FROM personas WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(p&&!p.archived&&p.revision===b.revision,409,'请先保存并载入最新草稿');validateSkill(p.draft_skill,p.skill_name);
+   if(p.kind==='feature')requireCondition(p.draft_skill.length<=6000,400,'特色 Skill 最多6000字符');
    const version=Number((await db.query('SELECT COALESCE(max(version),0)+1 next FROM persona_versions WHERE persona_id=$1',[id])).rows[0].next),versionId=randomUUID();
-   await db.query('INSERT INTO persona_versions(id,persona_id,version,skill_md,sha256,provenance) VALUES($1,$2,$3,$4,$5,$6)',[versionId,id,version,p.draft_skill,digest(p.draft_skill),p.draft_provenance]);
-   await audit(req.admin!.username,'persona.version_published',id,{version},db);return {id:versionId,version};
+   await db.query('INSERT INTO persona_versions(id,persona_id,version,skill_md,sha256,provenance,kind) VALUES($1,$2,$3,$4,$5,$6,$7)',[versionId,id,version,p.draft_skill,digest(p.draft_skill),p.draft_provenance,p.kind]);
+   const updated_groups=await advanceFollowers(id,versionId,db);
+   await audit(req.admin!.username,'persona.version_published',id,{version,updated_groups},db);return {id:versionId,version,updated_groups};
   });res.status(201).json(out);
  });
  app.post('/api/personas/:id/archive',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({archived:z.boolean(),revision}).parse(req.body);
   await transaction(async db=>{
    await db.query('SELECT id FROM personas WHERE id=$1 FOR UPDATE',[id]);
-   if(b.archived){requireCondition(!(await db.query('SELECT 1 FROM groups g JOIN persona_versions v ON v.id=g.persona_version_id WHERE v.persona_id=$1',[id])).rowCount,409,'请先解除或更换使用此 Persona 的群');
+   if(b.archived){requireCondition(!(await db.query('SELECT 1 FROM groups g JOIN persona_versions v ON v.id=g.persona_version_id WHERE v.persona_id=$1 UNION ALL SELECT 1 FROM group_persona_features WHERE persona_id=$1',[id])).rowCount,409,'请先解除或更换使用此 Persona 的群');
     requireCondition(!(await db.query("SELECT 1 FROM persona_jobs WHERE persona_id=$1 AND status IN ('pending','processing')",[id])).rowCount,409,'生成任务完成后再归档');}
    const r=await db.query('UPDATE personas SET archived=$1,revision=revision+1 WHERE id=$2 AND revision=$3',[b.archived,id,b.revision]);requireCondition(r.rowCount,409,'Persona 版本已变化，请重新载入');
    await audit(req.admin!.username,'persona.archive_changed',id,{archived:b.archived},db);
@@ -130,12 +135,29 @@ export function registerPersonaAdmin(app:express.Express){
   const v=(await pool.query('SELECT v.*,p.skill_name FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE v.id=$1',[uuid(req.params.id)])).rows[0];requireCondition(v,404,'版本不存在');
   res.type('application/gzip').attachment(v.skill_name+'-v'+v.version+'.tar.gz').send(skillArchive(v.skill_name,v.skill_md,v.provenance));
  });
+ app.get('/api/persona-bindings/:id',async(req,res)=>{
+  const group=(await pool.query('SELECT id,persona_version_id,policy FROM groups WHERE id=$1',[uuid(req.params.id)])).rows[0];requireCondition(group,404,'群不存在');
+  const bundle=await runtimePersonaBundle(group);
+  const text=renderPersonaComposition(bundle.persona_skill,bundle.persona_feature_skills,group.policy.persona==='gt-persona'?'【内置基础】由机器人加载 GT Persona。':'【内置基础】中性自然表达。');
+  res.json({...bundle,text,characters:text.length});
+ });
  app.put('/api/persona-bindings/:id',async(req,res)=>{
-  const b=z.object({revision,version_id:z.uuid().nullable()}).parse(req.body),groupId=uuid(req.params.id);
+  const b=z.object({revision,version_id:z.uuid().nullable(),follow_latest:z.boolean().default(false),features:z.array(z.object({version_id:z.uuid(),follow_latest:z.boolean().default(false)})).max(5).optional()}).parse(req.body),groupId=uuid(req.params.id);
   await transaction(async db=>{
-   if(b.version_id){const v=(await db.query('SELECT p.id,p.archived FROM personas p JOIN persona_versions v ON v.persona_id=p.id WHERE v.id=$1 FOR SHARE OF p',[b.version_id])).rows[0];requireCondition(v&&!v.archived,400,'请先发布 Persona，且不能选择已归档人设');}
-   const r=await db.query('UPDATE groups SET persona_version_id=$1,revision=revision+1 WHERE id=$2 AND revision=$3',[b.version_id,groupId,b.revision]);requireCondition(r.rowCount,409,'群配置已变化，请刷新后重新应用');
-   await audit(req.admin!.username,'persona.group_bound',groupId,{version_id:b.version_id},db);
+   const current=(await db.query('SELECT * FROM groups WHERE id=$1',[groupId])).rows[0];requireCondition(current,404,'群不存在');
+   const inputFeatures=b.features??(await featureBindings(groupId,db)).map(f=>({version_id:f.version_id,follow_latest:f.follow_latest}));
+   // Consistent lock ordering prevents two multi-skill edits locking personas in reverse order.
+   const selections=[...(b.version_id?[{version_id:b.version_id,kind:'base' as const,follow_latest:b.follow_latest}]:[]),...inputFeatures.map(f=>({...f,kind:'feature' as const}))];
+   const ids=selections.map(v=>v.version_id);
+   await db.query('SELECT p.id FROM personas p WHERE p.id IN(SELECT persona_id FROM persona_versions WHERE id=ANY($1::uuid[])) ORDER BY p.id FOR SHARE',[ids]);
+   const base=b.version_id?await resolveBindingVersion(b.version_id,'base',b.follow_latest,db):null;
+   const features=await Promise.all(inputFeatures.map(f=>resolveBindingVersion(f.version_id,'feature',f.follow_latest,db)));
+   validateComposition(base,features);
+   const changed=await db.query('UPDATE groups SET persona_version_id=$1,persona_follow_latest=$2,revision=revision+1 WHERE id=$3 AND revision=$4',[base?.version_id||null,!!base&&b.follow_latest,groupId,b.revision]);
+   requireCondition(changed.rowCount,409,'群配置已变化，请刷新后重新应用');
+   await db.query('DELETE FROM group_persona_features WHERE group_id=$1',[groupId]);
+   for(const [position,f] of features.entries())await db.query('INSERT INTO group_persona_features(group_id,persona_id,version_id,position,follow_latest) VALUES($1,$2,$3,$4,$5)',[groupId,f.persona_id,f.version_id,position,inputFeatures[position].follow_latest]);
+   await audit(req.admin!.username,'persona.group_composed',groupId,{version_id:base?.version_id||null,follow_latest:b.follow_latest,features:features.map((f,i)=>({version_id:f.version_id,follow_latest:inputFeatures[i].follow_latest}))},db);
   });res.json({ok:true});
  });
 }

@@ -3,3 +3,5 @@
 .persona-archive-toggle{display:flex;align-items:center;gap:9px;margin:16px 0;font-size:13px}.persona-archive-toggle input[type=checkbox]{width:16px;height:16px;margin:0;flex-shrink:0}
 
 .persona-sender-rank{display:inline-block;min-width:3ch;font-weight:600;font-variant-numeric:tabular-nums;color:var(--purple,#755bc2)}
+
+.persona-feature-list{margin:20px 0}.persona-feature-choice{padding:14px;border:1px solid var(--border,#e4e6ec);border-radius:10px;margin:10px 0}.persona-feature-choice.selected{background:#f8f7ff;border-color:#cfc6f6}.persona-feature-choice small{display:block;color:#737786;margin-top:4px}.persona-composition-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:460px;overflow:auto;background:#f7f8fb;padding:16px;border-radius:10px;font:13px/1.7 system-ui}.persona-feature-choice .policy-grid{margin-top:10px}
