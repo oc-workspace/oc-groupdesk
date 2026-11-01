@@ -20,7 +20,7 @@ os.umask(0o077)
 root=Path('/opt/docker/oc-projects/maibot-wechat');persist=Path('/opt/persist/maibot-wechat')
 sdk=root/'.build/wechat-adapter/bowxt';package=Path(__file__).resolve().parent
 manifest=json.loads(args.manifest.read_text());names=list(manifest['candidate'])
-assert manifest['sdk_tests']==153 and manifest['native_tests']==280
+assert manifest['sdk_tests']==158 and manifest['native_tests']==280
 def run(command,**kwargs):return subprocess.run(command,check=True,**kwargs)
 def output(command):return subprocess.check_output(command,text=True)
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -29,7 +29,8 @@ def container_hashes():
     return {Path(line.split()[1]).name:line.split()[0] for line in lines.splitlines()}
 for name,value in manifest['baseline'].items():assert digest(sdk/'src/bowxt'/name)==value,'Host SDK baseline changed'
 assert container_hashes()==manifest['baseline'],'Container SDK baseline changed'
-assert not (sdk/'src/bowxt/frame_identity.py').exists(),'Already installed or unexpected module'
+if 'frame_identity.py' not in manifest['baseline']:
+    assert not (sdk/'src/bowxt/frame_identity.py').exists(),'Unexpected module'
 for name,value in manifest['candidate'].items():assert digest(args.stage/'src/bowxt'/name)==value,'Untested SDK source'
 assert digest(root/'build-wechat-adapter.sh')==manifest['build_script_sha'],'Build script changed'
 image='wechat-bot:frame-identities-'+args.release[:12]
@@ -52,6 +53,7 @@ shutil.copy2(args.manifest,backup/'validation.json')
 for name in manifest['baseline']:
     dest=backup/'before'/name;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(sdk/'src/bowxt'/name,dest)
 for name in ['.env','build-wechat-adapter.sh']:shutil.copy2(root/name,backup/'before'/name)
+if (sdk/'tests/test_frame_identity.py').exists():shutil.copy2(sdk/'tests/test_frame_identity.py',backup/'before/test_frame_identity.py')
 control=persist/'bridge/control.json';original_control=control.read_bytes()
 maintenance=(json.dumps({**json.loads(original_control),'enabled':False})+'\n').encode()
 (backup/'control.json').write_bytes(original_control)
@@ -99,6 +101,7 @@ try:
         path=args.stage/'src/bowxt'/name;atomic(sdk/'src/bowxt'/name,path.read_bytes());copy_runtime(name,path)
     shutil.copy2(package/'test_frame_identity.py',sdk/'tests/test_frame_identity.py')
     build=(root/'build-wechat-adapter.sh').read_text();anchor='python3 wechat-adapter/patch-responsiveness.py "$context/bowxt"'
+    build=''.join(line for line in build.splitlines(keepends=True) if not ('/package/install-frame-identity.py' in line or '/package/test_frame_identity.py' in line))
     assert build.count(anchor)==1,'Unknown SDK build hook'
     hook=f'\npython3 "{backup}/package/install-frame-identity.py" "$context/bowxt" "{backup}/package/baseline.json"\ncp "{backup}/package/test_frame_identity.py" "$context/bowxt/tests/"'
     atomic(root/'build-wechat-adapter.sh',build.replace(anchor,anchor+hook,1).encode(),0o755)
@@ -119,8 +122,11 @@ except BaseException:
         supervise('-d');down=True;wait_down()
         for name in manifest['baseline']:
             path=backup/'before'/name;atomic(sdk/'src/bowxt'/name,path.read_bytes());copy_runtime(name,path)
-        (sdk/'src/bowxt/frame_identity.py').unlink(missing_ok=True);(sdk/'tests/test_frame_identity.py').unlink(missing_ok=True)
-        run(['docker','exec','wechat-bot','rm','-f','/opt/bowxt/src/bowxt/frame_identity.py'],stdout=subprocess.DEVNULL)
+        for name in set(names)-set(manifest['baseline']):
+            (sdk/'src/bowxt'/name).unlink(missing_ok=True)
+            run(['docker','exec','wechat-bot','rm','-f','/opt/bowxt/src/bowxt/'+name],stdout=subprocess.DEVNULL)
+        if (backup/'before/test_frame_identity.py').exists():shutil.copy2(backup/'before/test_frame_identity.py',sdk/'tests/test_frame_identity.py')
+        else:(sdk/'tests/test_frame_identity.py').unlink(missing_ok=True)
         for name in ['.env','build-wechat-adapter.sh']:shutil.copy2(backup/'before'/name,root/name)
     if down:supervise('-u');wait_ready()
     restore_control();raise
