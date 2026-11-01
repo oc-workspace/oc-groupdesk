@@ -14,6 +14,8 @@ import {identityInstructions} from './identity.js';
 import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute} from './models.js';
 import {registerPersonaAdmin,runtimePersona} from './personas-api.js';
 import {registerModelAdmin} from './models-api.js';
+import {registerRuntimeHealth} from './runtime-health.js';
+import {registerNotificationAdmin,registerNotificationRuntime} from './notifications.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
 declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];}}}
@@ -128,7 +130,7 @@ export function createApp(){
     });
   });
   app.get('/api/groups/status',async(_req,res)=>{
-    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled FROM groups ORDER BY id')).rows);
+    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled,runtime_health,runtime_health_at FROM groups ORDER BY id')).rows);
   });
   app.post('/api/groups',async(req,res)=>{
     const body=z.object({name:text(120).min(1)}).parse(req.body),groupId=randomUUID();
@@ -323,6 +325,7 @@ export function createApp(){
     });res.json({ok:true});
   });
   registerModelAdmin(app);
+  registerNotificationAdmin(app);
   registerPersonaAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
@@ -350,6 +353,8 @@ export function createApp(){
 }
 
 function registerRuntime(app:express.Express){
+  registerRuntimeHealth(app);
+  registerNotificationRuntime(app);
   app.post('/api/runtime/model-credentials',async(req,res)=>{
     const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);
     const output=await transaction(async db=>{

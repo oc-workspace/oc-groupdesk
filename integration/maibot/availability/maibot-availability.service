@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly WeChat/MaiBot availability inspection and bounded recovery
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/docker/oc-projects/maibot-wechat/availability/monitor.py
+TimeoutStartSec=420
+UMask=0077
+Nice=10

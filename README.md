@@ -98,3 +98,5 @@ Compose项目名保持groupdesk。
 
 浏览器验收创建的GroupDesk使用指南包含后台操作说明与适配器接入说明，未关联任何群，
 不含真实群聊天记录或个人资料。
+
+微信在线巡检及分级恢复见[integration/maibot/availability](integration/maibot/availability/README.md)。微信在线状态和配置应用确认分开显示；巡检每小时运行，不影响消息采集和配置同步频率。
