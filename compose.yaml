@@ -64,6 +64,7 @@ services:
   worker:
     <<: *app
     command: [npm, run, worker]
+    networks: [internal, model-egress]
     depends_on:
       app:
         condition: service_healthy
@@ -86,6 +87,8 @@ services:
     mem_limit: 256m
     cpus: 0.5
 networks:
+  model-egress:
+    driver: bridge
   internal:
     driver: bridge
     internal: true
