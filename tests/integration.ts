@@ -457,6 +457,11 @@ test('independent WeChat notifications encrypt credentials and bind them to exac
 });
 
 test('AI topic assistance authenticates, fills the draft and never saves topics or changes group settings',async()=>{
+ // Start a fresh HTTP application for this suite; keep the database and login session.
+ // Earlier regressions already consume nearly the production 240/minute IP window.
+ await new Promise<void>(resolve=>server.close(()=>resolve()));
+ server=createServer(createApp({topicDraftCaller:(...args)=>topicDraftReply(...args)}));
+ await new Promise<void>(resolve=>server.listen(0,'0.0.0.0',resolve));base='http://127.0.0.1:'+(server.address() as {port:number}).port;
  const before=(await request('/overview')).data,topicCount=before.topics.length;
  assert.equal((await fetch(base+'/api/topics/draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).status,401);
  assert.equal((await request('/topics/draft','POST',{},false,'wrong')).status,403);
