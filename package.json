@@ -12,10 +12,11 @@
     "start": "tsx server/index.ts",
     "worker": "tsx server/worker.ts",
     "test": "tsx --test tests/*.test.ts",
-    "test:integration": "tsx --test tests/integration.ts",
+    "test:integration": "tsx --test --test-concurrency=1 tests/integration.ts tests/interactions-integration.ts",
     "migrate": "tsx server/migrate.ts",
     "admin:reset": "tsx server/reset-admin.ts",
-    "catalog:check": "tsx scripts/export-schemas.ts"
+    "catalog:check": "tsx scripts/export-schemas.ts",
+    "interactions:worker": "tsx server/interactions/templates.ts"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

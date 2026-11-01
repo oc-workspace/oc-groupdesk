@@ -29,8 +29,11 @@ export class GroupDeskClient {
     if(requiredTimeoutVersion!==undefined&&(![1,2].includes(requiredTimeoutVersion)||applied?.timeout_policy_version!==requiredTimeoutVersion)){
       throw new Error('Adapter must apply per-group time budgets before acknowledging this configuration');
     }
+    if(config.interactions?.bindings?.length&&(![1].includes(config.interactions_contract_version)||applied?.interactions_policy_version!==config.interactions_contract_version)){
+      throw new Error('Adapter must apply group interactions before acknowledging this configuration');
+    }
     // Send acknowledgement only AFTER the adapter applied this exact version.
-    const capabilities=Object.fromEntries(['timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
+    const capabilities=Object.fromEntries(['timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256','interactions_policy_version'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
     await this.request('/ack',{group_id:config.id,revision:config.revision,...capabilities});
     return config;
   }

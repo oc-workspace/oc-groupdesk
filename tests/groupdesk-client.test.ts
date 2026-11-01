@@ -27,3 +27,10 @@ test('a v1 adapter cannot confirm the v2 per-group apology setting',async()=>{
 test('the updated client can still apply an older v1 backend configuration',async()=>{
  const {client,calls}=fixture({...config,timeout_policy_contract_version:1});await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:1}));assert.equal(calls[1].body.timeout_policy_version,1);
 });
+
+test('enabled interactions require the adapter capability before acknowledgement',async()=>{
+ const bundle={...config,interactions_contract_version:1,interactions:{bindings:[{id:'synthetic-binding'}]}};
+ const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/interactions/);assert.equal(calls.length,1);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,interactions_policy_version:1}));assert.equal(calls.at(-1)!.body.interactions_policy_version,1);
+});

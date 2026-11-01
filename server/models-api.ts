@@ -23,7 +23,7 @@ export function registerModelAdmin(app:express.Express){
       await db.query('UPDATE model_credentials SET name=$1,base_url=$2,enabled=$3,revision=revision+1,catalog_error=NULL,client_type=$5 WHERE id=$4',[body.name,endpoint,body.enabled,id,protocol]);
       if(body.api_key)await db.query('UPDATE model_credentials SET key_ciphertext=$1,key_hint=$2,key_digest=$3,catalog_synced_at=NULL WHERE id=$4',[sealKey(body.api_key),'••••'+body.api_key.slice(-4),digest(body.api_key),id]);
       if(endpoint!==current.base_url||body.api_key||protocol!==current.client_type){await db.query('UPDATE credential_models SET listed=false WHERE credential_id=$1',[id]);await db.query('UPDATE model_credentials SET catalog_synced_at=NULL WHERE id=$1',[id]);}
-      await db.query(`UPDATE groups g SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM jsonb_each(g.model_routes) r WHERE (r.value->>'mode'='custom' AND r.value->>'credential_id'=$1) OR (r.value->>'mode'='inherit' AND (SELECT routes->r.key->>'credential_id' FROM model_settings WHERE singleton=true)=$1))`,[id]);
+      await db.query(`UPDATE groups g SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM jsonb_each(g.model_routes) r WHERE (r.value->>'mode'='custom' AND r.value->>'credential_id'=$1) OR (r.value->>'mode'='inherit' AND (SELECT routes->r.key->>'credential_id' FROM model_settings WHERE singleton=true)=$1)) OR EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND (b.config->>'enabled')::boolean AND b.config->'model_route'->>'mode'='custom' AND b.config->'model_route'->>'credential_id'=$1)`,[id]);
       await audit(req.admin!.username,'model.credential_updated',id,{rotated:!!body.api_key,enabled:body.enabled},db);
     });res.json({ok:true});
   });
