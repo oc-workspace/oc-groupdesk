@@ -65,6 +65,8 @@ def validate_persona_bundle(bundle):
     return skill
 
 def validate_bundle(bundle,external_id):
+    from banter import validate as validate_conversation
+    validate_conversation(bundle)
     validate_persona_bundle(bundle)
     from interactions_runtime import validate_bundle as validate_interactions
     validate_interactions(bundle)
@@ -113,7 +115,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 
@@ -155,6 +157,8 @@ def anchor_background(db,p,chat,refs,now):
 
 def generation_rules(p,names=(),short=False):
     policy=p['policy'];lang=policy['language'];pieces=[p.get('participation_skill','')]
+    from banter import guide as conversation_guide
+    if conversation_guide(p):pieces.append(conversation_guide(p))
     pieces.append('本群话题范围='+policy['topic_scope']+'；参与程度='+policy['participation']+'。')
     if policy['topic_scope']=='all':pieces.append('点名也只回答已选话题；其他请求简短说明范围。')
     else:pieces.append('主动插话按已选话题及启用的基础提问/社交；明确点名可回答其他一般问题。')
@@ -202,3 +206,8 @@ def language_allowed(p,text):
     scores={lang:len(tokens&words) for lang,words in dictionaries.items()};best=max(scores,key=scores.get)
     if scores[best]>=3 and scores[best]>=max([v for k,v in scores.items() if k!=best],default=0)+2 and best not in allowed:return False
     return True
+
+
+def banter_candidate(db,p,chat,seq,text,now,topics):
+    from banter import candidate
+    return candidate(db,p,chat,seq,text,now,topics)

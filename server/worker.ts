@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {processPersonaJob} from './persona-generation.js';
+import {processConversationJob} from './conversation-insights.js';
 import {pool,transaction} from './db.js';
 import {splitText} from './search.js';
 
@@ -49,7 +50,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
   process.on('SIGTERM',()=>{running=false;});process.on('SIGINT',()=>{running=false;});
   console.log('GroupDesk worker ready');
   while(running){
-    try{if(!await processNext()&&!await processPersonaJob())await new Promise(r=>setTimeout(r,2000));}
+    try{if(!await processNext()&&!await processPersonaJob()&&!await processConversationJob())await new Promise(r=>setTimeout(r,2000));}
     catch{console.error('worker_retry');await new Promise(r=>setTimeout(r,3000));}
   }
   await pool.end();

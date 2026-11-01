@@ -70,12 +70,12 @@ export function registerPersonaAdmin(app:express.Express){
  });
  app.post('/api/persona-datasets',async(req,res)=>{
   const b=datasetBody.parse(req.body),id=randomUUID();
-  await pool.query('INSERT INTO persona_datasets(id,collection_id,name,sender_ids,since,until_time) VALUES($1,$2,$3,$4,$5,$6)',[id,b.collection_id,b.name,b.sender_ids,b.since,b.until_time]);
+  await pool.query('INSERT INTO persona_datasets(id,collection_id,name,sender_ids,since,until_time,contains_any) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,b.collection_id,b.name,b.sender_ids,b.since,b.until_time,b.contains_any]);
   await audit(req.admin!.username,'persona.dataset_created',id);res.status(201).json({id});
  });
  app.put('/api/persona-datasets/:id',async(req,res)=>{
   const b=datasetBody.parse(req.body),id=uuid(req.params.id);
-  const r=await pool.query('UPDATE persona_datasets SET name=$1,sender_ids=$2,since=$3,until_time=$4 WHERE id=$5 AND collection_id=$6',[b.name,b.sender_ids,b.since,b.until_time,id,b.collection_id]);requireCondition(r.rowCount,409,'数据集不存在或素材库已变化');
+  const r=await pool.query('UPDATE persona_datasets SET name=$1,sender_ids=$2,since=$3,until_time=$4,contains_any=$7 WHERE id=$5 AND collection_id=$6',[b.name,b.sender_ids,b.since,b.until_time,id,b.collection_id,b.contains_any]);requireCondition(r.rowCount,409,'数据集不存在或素材库已变化');
   await audit(req.admin!.username,'persona.dataset_updated',id);res.json({ok:true});
  });
  app.get('/api/persona-datasets/:id/export',async(req,res)=>{

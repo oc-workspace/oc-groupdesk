@@ -44,7 +44,7 @@ export async function queuePersonaJob(personaId:string,revision:number,selection
   const rows=[...records.values()].sort((a,b)=>Number(a.timestamp)-Number(b.timestamp)||a.source_id.localeCompare(b.source_id));
   const sample=representativeSample(rows);requireCondition(sample.selected.length,400,'所选数据集没有可用于生成的正文');
   const id=randomUUID(),filename=id+'.job.json';
-  const provenance={dataset_ids:p.dataset_ids,datasets:datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,since:d.since,until_time:d.until_time})),
+  const provenance={dataset_ids:p.dataset_ids,datasets:datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,contains_any:d.contains_any||[],since:d.since,until_time:d.until_time})),
    total_records:rows.length,eligible_records:sample.eligible,sampled_records:sample.selected.length,sampled_characters:sample.characters,
    strategy:'按时间等距抽取最多500条正文，合计最多10万字符；不使用引用或分享正文；这是Skill归纳，不是模型微调',
    source_digest:digest(JSON.stringify(sample.selected.map(r=>[r.collection_id,r.id,r.content_hash]))),
