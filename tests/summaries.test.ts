@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {summaryDefaults,instant,resolveWindow,nextOccurrence} from '../shared/summaries.js';
-import {sourceStats,reportParts} from '../server/summaries/generation.js';
+import {sourceStats,reportParts,completeReport} from '../server/summaries/generation.js';
 test('summary defaults grant no automatic publication',()=>{assert.equal(summaryDefaults().enabled,false);assert.equal(summaryDefaults().model_route.mode,'inherit');});
 test('day windows and minute windows use explicit zones and exclusive ends',()=>{
  const now=Date.parse('2026-11-02T03:00:00Z');
@@ -29,6 +29,7 @@ test('rankings count captured messages and retain fifth-place ties with competit
  assert.deepEqual(sourceStats([{sender:null,time_kind:'capture'}]).rankings,[]);assert.equal(s.count,9);assert.equal(s.capture_time_count,4);assert.deepEqual(s.rankings.map(x=>x.rank),[1,2,3,3,3,3]);
 });
 test('delivery adds provenance, preserves source counts, and bounds every segment',()=>{
+ for(const [value,protocol] of [[{choices:[{finish_reason:'length',message:{content:'A partial report'}}]},'openai'],[{candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'partial'}]}}]},'gemini'],[{status:'incomplete',output:[]},'openai_responses']] as const)assert.throws(()=>completeReport(value,protocol));
  const job={group_name:'Synthetic',external_id:'synthetic',config:{language:'en',timezone:'UTC'},template:{slug:'ranking'},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'A meaningful synthetic discussion. '.repeat(150),source:{stats:{count:4,capture_time_count:2,rankings:[{rank:1,name:'Synthetic person',count:4}]}}};
  const p=reportParts(job);assert(p.length>1);assert(p.every(t=>t.length<=2000));assert(p[0].includes('not guaranteed complete'));assert(p.join('').includes('Synthetic person'));
  assert.throws(()=>reportParts({...job,report:'x'.repeat(16000)}));
