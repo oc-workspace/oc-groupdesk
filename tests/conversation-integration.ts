@@ -15,7 +15,8 @@ const material=(id:string,text:string,sender='author')=>({id,group_id:'archive-A
 const rows=[material('1','Alex left a funny message'),material('2','Ask Alex-Z how to debug this'),material('3','Alexander has a different name'),material('4','Alex left a funny message','other')];
 async function load(){return (await req('/conversation-insights/'+dataset)).data;}
 async function enqueue(){return req('/conversation-insights/'+dataset+'/analyze','POST',{credential_id:credential,model_id:'mock-text',limit:40});}
-async function caller(_c:any,_m:any,_s:string,input:string){
+async function caller(_c:any,_m:any,_s:string,input:string,options?:any){
+ if(options){assert.equal(options.jsonOutput,true);assert.equal(options.timeoutMs,90000);}
  const v=JSON.parse(input);assert(!input.includes('quoted third-party'));assert(!input.includes('sender_id'));
  return {choices:[{message:{content:JSON.stringify({items:v.items.map((r:any)=>({id:r.id,tone:r.id===0?'playful':'mixed',substantive:r.id!==0,confidence:.9,reason:'Synthetic context cue'}))})}}]};
 }
