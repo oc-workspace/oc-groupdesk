@@ -46,3 +46,5 @@ swap只是峰值缓冲，不能修复持续增长。保留每小时内存/swap�
 monitor状态保存在/opt/persist/maibot-wechat/availability/state.json，权限0600。查看：systemctl status maibot-availability.timer、journalctl -u maibot-availability.service。停止巡检：systemctl disable --now maibot-availability.timer。日常维护仍使用原ops.py pause/resume。
 
 测试：安装钩子后的既有limits代码加入PYTHONPATH，再运行python3 -m unittest discover -s integration/maibot/availability -q；单独monitor测试不依赖MaiBot。故障测试使用Fake驱动，不断开真实微信、不发送测试消息、不调用模型。实际登录点击只在真实故障出现时触发。
+
+后续生效参数更新：点名与跟进采用首次采集起共用420秒截止，来源首次入站及普通插话仍保留90秒限制；Planner300秒、HTTP310秒和两分钟致歉详见[慢模型等待策略](../long-wait/README.md)。恢复补答同样使用当前点名门控。
