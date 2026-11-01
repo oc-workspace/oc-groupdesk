@@ -3,7 +3,7 @@ import {fileURLToPath} from 'node:url';
 import {writeFile} from 'node:fs/promises';
 import {pool,transaction,audit} from '../db.js';
 import {digest,requireCondition} from '../security.js';
-import {runtimePersona} from '../personas-api.js';
+import {runtimePersona,runtimePersonaBundle,renderPersonaComposition,compositionDigest} from '../persona-composition.js';
 import {callTextModel,generationText} from '../model-generation.js';
 import {baseTemplate,parseInteractionTemplate,type Outcome,interactionVariables} from './copy.js';
 import {groupForInteraction,interactionSettings,interactionModel,interactionDay,type Db} from './config.js';
@@ -14,8 +14,10 @@ async function context(group:any,binding:any,locale:string,outcome:Outcome,db:Db
   const row=(await db.query("SELECT v.id FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE p.skill_name='gt-persona' AND NOT p.archived ORDER BY v.version DESC LIMIT 1")).rows[0];
   if(row)persona=await runtimePersona(row.id,db);
  }
- const style=persona?.skill_md?.slice(0,6000)||(group.policy.persona==='gt-persona'?'简短、机智、有分寸，略带调侃，不说教，不冒充GT真人。':'简短、友善、自然。');
- const key=digest(JSON.stringify({binding:binding.id,definition_revision:binding.definition_revision,locale,outcome,instructions:binding.instructions,extra:binding.config.reply_instructions,fixed:binding.config.fixed_reply,persona:persona?.sha256||style,identity:group.policy.identity,route}));
+ const featureBundle=await runtimePersonaBundle(group,db);
+ const fallback=(group.policy.persona==='gt-persona'?'简短、机智、有分寸，略带调侃，不说教，不冒充GT真人。':'简短、友善、自然。');
+ const style=renderPersonaComposition(persona,featureBundle.persona_feature_skills,fallback);
+ const key=digest(JSON.stringify({binding:binding.id,definition_revision:binding.definition_revision,locale,outcome,instructions:binding.instructions,extra:binding.config.reply_instructions,fixed:binding.config.fixed_reply,persona:compositionDigest(persona,featureBundle.persona_feature_skills),identity:group.policy.identity,route}));
  return {key,route,style};
 }
 export async function interactionTemplate(group:any,binding:any,locale:string,outcome:Outcome,db:Db){

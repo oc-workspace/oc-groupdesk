@@ -23,3 +23,5 @@ Gemini 3.8 Flash兼容修正：针对固定MaiBot基线，用patch-gemini-client
 慢模型等待与五分钟致歉：见 [运行策略与安装验证](long-wait/README.md)。Planner 300秒、HTTP 310秒、点名从首次采集起共用420秒，普通插话保留短时效。
 
 群互动（签到、娱乐积分、兑换与可复用文案）：见[群互动配置和运维](../../docs/group-interactions.md)。原生共享模块和受摘要约束的桥接安装脚本位于interactions目录；新契约需要能力确认，未启用的群保持原流程。
+
+基础 Persona 与多特色组合：见[维护、契约与回退](../../docs/persona-composition.md)。新版groupdesk_runtime.py验证完整组合再ACK；persona_runtime.py把基础和特色合并到同一个系统绑定，切群或版本变更时替换旧绑定，不增加每特色模型调用。

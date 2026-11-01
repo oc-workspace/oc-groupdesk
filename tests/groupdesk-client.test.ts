@@ -40,3 +40,12 @@ test('conversation recognition is acknowledged only after the adapter applies it
  await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/conversation policy/);assert.equal(calls.length,1);
  await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,conversation_policy_version:1}));assert.equal(calls.at(-1)!.body.conversation_policy_version,1);
 });
+
+test('feature composition requires a matching complete-combination acknowledgement',async()=>{
+ const bundle={...config,persona_feature_skills:[{version_id:'f1'}],persona_composition_contract_version:1,persona_composition_sha256:'a'.repeat(64)};
+ const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/complete persona composition/);assert.equal(calls.length,1);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,persona_composition_version:1,persona_composition_sha256:'b'.repeat(64)})),/complete persona composition/);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,persona_composition_version:1,persona_composition_sha256:bundle.persona_composition_sha256}));
+ assert.equal(calls.at(-1)!.body.persona_composition_sha256,bundle.persona_composition_sha256);
+});

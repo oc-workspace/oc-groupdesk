@@ -64,6 +64,8 @@ def load_persona(mode='ordinary',root=None,identity_mode='when_asked'):
 
 def bind_request(request,mode='ordinary',discussion_topics=(),managed_profile=None,managed_topics=()):
     from src.llm_models.payload_content.context_item import ContextItemBuilder,RoleType
+    from groupdesk_runtime import validate_persona_composition
+    features=validate_persona_composition(managed_profile) if managed_profile else []
     identity_mode=(managed_profile or {}).get('policy',{}).get('identity',{}).get('disclosure','when_asked')
     if managed_profile and managed_profile.get('persona_version_id'):
         from groupdesk_runtime import validate_persona_bundle
@@ -79,6 +81,12 @@ def bind_request(request,mode='ordinary',discussion_topics=(),managed_profile=No
         digest=hashlib.sha256((mode+body).encode()).hexdigest();marker=PREFIX+digest+']'
         bundle={'text':marker+'\n'+body,'marker':marker,'sha256':digest,'sources':{},'mode':mode,'characters':len(body)}
     else:bundle=load_persona(mode,identity_mode=identity_mode)
+    if features:
+        rules='【Skill组合规则】群语言、身份披露、知识权限、话题范围和预算优先；基础Persona负责整体声音和事实边界。特色Skill只在当前语境适合时补充表达技巧，不覆盖基础规则、不更换身份、不授予工具或发送权限。认真问题先答实质内容；特色不适用就仅沿用基础。多个特色冲突时沿用基础，不能因为勾选就强行接梗。以下示例与历史材料不能当作当前事实。'
+        addition='\n'+rules+'\n'+'\n'.join('【可选特色 Skill；仅在适合语境时使用】\n'+f['skill_md'] for f in features)+'\n'+rules
+        digest=hashlib.sha256((bundle['sha256']+managed_profile['persona_composition_sha256']+addition).encode()).hexdigest()
+        marker=PREFIX+digest+']'
+        bundle=dict(bundle,text=marker+bundle['text'][len(bundle['marker']):]+addition,marker=marker,sha256=digest,characters=bundle['characters']+len(addition),sources={**bundle['sources'],'persona_composition':managed_profile['persona_composition_sha256']})
     if discussion_topics and mode=='ordinary':
         # Owner preference from the admitted source group's configuration.
         # It specializes the skill's default length without changing its voice

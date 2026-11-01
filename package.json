@@ -12,7 +12,7 @@
     "start": "tsx server/index.ts",
     "worker": "tsx server/worker.ts",
     "test": "tsx --test tests/*.test.ts",
-    "test:integration": "tsx --test --test-concurrency=1 tests/integration.ts tests/interactions-integration.ts tests/conversation-integration.ts",
+    "test:integration": "tsx --test --test-concurrency=1 tests/integration.ts tests/interactions-integration.ts tests/conversation-integration.ts tests/persona-composition-integration.ts",
     "migrate": "tsx server/migrate.ts",
     "admin:reset": "tsx server/reset-admin.ts",
     "catalog:check": "tsx scripts/export-schemas.ts",
