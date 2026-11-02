@@ -15,7 +15,7 @@
 
 遵循项目开发服务器oc-push、生产发布桥oc-prod-release、核对PR准确head及diff并合并后部署的既有流程。prepare-inputs.py验证inputs.lock.json中的公开源码、wheel和离线依赖摘要；inputs不入库。
 
-1. 在可用构建机准备已校验inputs，离线构建Dockerfile的test/production目标，运行33项隔离合成测试。
+1. 在可用构建机准备已校验inputs，离线构建Dockerfile的test/production目标，运行读取器全套隔离合成测试。
 2. 在root2使用build.sh构建一次性bootstrap工具镜像。基础镜像ID由脚本核对，不从外网拉取。离线验证gdb能追踪同容器UID1000的测试子进程。
 3. sender镜像基于已验证微信基础镜像，inputs/native-bowxt须来自当前生产公共源码，经native-patch.py修改。完整SDK测试通过后固定镜像ID；禁止仅复制单文件而丢失既有热修复。
 4. 从已合并生产提交导出本目录及相邻maibot/chatlog_runtime.py；manage.py prepare --image sha256:... --bootstrap sha256:... 创建白名单、保密目录和密钥公私钥。不会开始取钥。
@@ -32,3 +32,14 @@ Docker Compose永久服务使用compose.yaml与外置.env。token只给bridge，
 原maibot项目使用`compose.yaml`与`compose.chatlog-reader.yaml`叠加管理bridge。维护时不要用只含基础compose的force-recreate覆盖bridge配置。已更新WECHAT_IMAGE为包含全部当前修复和send_only的新镜像，下次重建微信仍可用；构建脚本末段保留幂等补丁钩子。
 
 回滚：`python3 manage.py rollback --backup <cutover输出的私有备份目录>`。先核对manifest摘要，恢复公开源码、旧镜像设置和旧模式，不回滚积分/消息/发送账本，避免重复回复或积分倒退。新加密数据可保留供诊断；不要删除微信持久目录。
+
+
+## 微信写入事件触发
+
+读取器使用Linux inotify监听原微信账号的message/contact目录及密钥信封目录。微信写入数据库或WAL、创建新分片、替换文件时唤醒读取；短暂合并连续写入事件后仍使用原一致性快照与增量游标。正常空闲时阻塞等待事件，没有2秒或15秒定时数据库扫描。
+
+启动恢复、用户主动请求历史总结、系统通知队列溢出时做一致性核对；已触发操作失败才最多有限重试5次。事件监听失效时健康检查失败，不把旧数据当作实时数据。监听注册、进程/线程活性和内存错误状态用于健康检查，不读取微信库或存档库；last_checked表示监听活性检查，last_reconciled单独表示最后实际同步时间。空的实时拉取从内存水位返回。
+
+通知源是微信落库引起的Linux文件事件，不是微信官方收消息SDK回调。SQLite的内存映射默认用于只读访问，新消息提交写入数据库或WAL。文件通知不能作为通用文件系统零丢失保证；覆盖范围以实际监听的数据库目录与服务器已同步消息为准。
+
+依据：[SQLite Memory-Mapped I/O](https://www.sqlite.org/mmap.html)、[SQLite WAL](https://www.sqlite.org/wal.html)、[Linux inotify](https://man7.org/linux/man-pages/man7/inotify.7.html)。

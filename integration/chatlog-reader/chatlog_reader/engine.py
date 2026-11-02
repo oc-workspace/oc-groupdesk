@@ -40,6 +40,10 @@ class Engine:
         self.source = Path(source) / configuration['account'] / 'db_storage'
         self.secrets = Path(secrets)
         self.store = Store(Path(state) / 'archive.sqlite3', configuration['account'], configuration['groups'])
+        self.tracking = None
+        self.cached_epoch = self.store.epoch
+        self.cached_counts = {}
+        self.cached_watermarks = {}
         self.key = None
         self.key_stamp = None
         self.contacts = {}
@@ -52,11 +56,13 @@ class Engine:
 
     def status(self):
         with self.lock:
-            ready = self.key is not None and time.time() - self.last_success < 30
+            observed = self.tracking() if self.tracking else False
+            ready = self.key is not None and (bool(observed and self.last_success and not self.last_error) if self.tracking else time.time()-self.last_success<30)
             return {'ok': ready, 'source': 'chatlog-keeper', 'contract': 1,
                     'state': 'ready' if ready else self.last_error or 'stale',
-                    'last_checked': self.last_success, 'epoch': self.store.epoch,
-                    'counts': self.store.counts() if ready else {}}
+                    'last_checked': time.time() if ready and observed else self.last_success,
+                    'last_reconciled': self.last_success, 'epoch': self.cached_epoch,
+                    'counts': dict(self.cached_counts) if ready else {}}
 
     def load_key(self):
         path = self.secrets / 'wechat-key.enc'
@@ -208,6 +214,12 @@ class Engine:
                     self.refresh_shard(source)
                 if not self.self_id:
                     raise RuntimeError('self_identity_unavailable')
+                with self.store.connect() as db:
+                    summary=list(db.execute('SELECT chat_id,count(*),max(seq) FROM messages GROUP BY chat_id'))
+                self.cached_counts={str(chat):0 for chat in self.store.allowed}
+                self.cached_watermarks={chat:0 for chat in self.store.allowed}
+                for chat,count,maximum in summary:
+                    if chat in self.store.allowed:self.cached_counts[str(chat)]=count;self.cached_watermarks[chat]=maximum
                 self.last_success, self.last_error = time.time(), None
             except Exception as exc:
                 allowed = {'awaiting_key','key_invalid','database_snapshot_unavailable','group_mapping_ambiguous',
@@ -218,10 +230,15 @@ class Engine:
                     self.last_success = 0
 
     def page(self, chat, after, limit, start=None, end=None):
-        if not self.status()['ok']:
-            raise RuntimeError('source_unavailable')
-        result = self.store.page(chat,after,limit,start,end)
-        for row in result['messages']:
-            row['sender'] = self.contacts.get(row['sender_id'])
-        result['last_checked'] = self.last_success
-        return result
+        with self.lock:
+            status=self.status()
+            if not status['ok']:raise RuntimeError('source_unavailable')
+            if chat not in self.store.allowed:raise KeyError('Unknown group')
+            # Empty live pulls are served from memory, without either database.
+            if start is None and after>=self.cached_watermarks.get(chat,0):
+                return {'epoch':self.cached_epoch,'watermark':self.cached_watermarks.get(chat,0),
+                        'messages':[],'next_after':None,'last_checked':status['last_checked']}
+            result = self.store.page(chat,after,limit,start,end)
+            for row in result['messages']:row['sender'] = self.contacts.get(row['sender_id'])
+            result['last_checked'] = status['last_checked']
+            return result
