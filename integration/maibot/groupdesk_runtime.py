@@ -132,7 +132,7 @@ def sync():
     for chat,external in conf['groups'].items():
         try:
             b=api('/config/'+urllib.parse.quote(external,safe=''));validate_bundle(b,external)
-            if b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):
+            if b.get('enabled') and b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):
                 private=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']
                 from model_routing import validate_private_route
                 validate_private_route(b,private);b['private_text_route']=private
