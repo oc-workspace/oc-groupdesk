@@ -51,3 +51,8 @@ test('summary provenance exposes missing names and separates capture coverage',(
  const job={group_name:'Synthetic',external_id:'synthetic',config:{language:'zh-CN',timezone:'Asia/Singapore'},template:{slug:'comprehensive'},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'A synthetic report.',source:{stats:{count:3,capture_time_count:2,unknown_sender_count:1,rankings:[]}}};
  assert(reportParts(job)[0].includes('1条未获取发送者昵称'));assert(reportParts({...job,config:{...job.config,language:'en'}})[0].includes('1 have no captured sender name'));
 });
+
+test('database summaries identify the verified database source in all supported languages',()=>{
+ const job={group_name:'Synthetic',external_id:'synthetic',config:{language:'zh-CN',timezone:'Asia/Shanghai'},template:{slug:'comprehensive'},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'Synthetic report.',source:{origin:'wechat-database-chatlog-keeper',stats:{count:3,capture_time_count:0,unknown_sender_count:1,rankings:[]}}};
+ for(const language of ['zh-CN','en','ja']){const text=reportParts({...job,config:{...job.config,language}}).join('');assert(text.includes('Chatlog Reader'));assert(!text.includes('not guaranteed complete WeChat history'));}
+});

@@ -17,7 +17,7 @@ async function save(g:any,extra:any={}){const s=await settings(g.id);const r=awa
 async function create(g=a,publish=false){const r=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'previous_day'},publish,request_id:randomUUID()});assert.equal(r.status,202,JSON.stringify(r.data));return r.data.id;}
 async function claim(kind='source',g=a,override?:string){return req('/runtime/summaries/claim','POST',{external_id:g.external_id,kind},true,override);}
 async function job(id:string){return (await pool.query('SELECT * FROM summary_jobs WHERE id=$1',[id])).rows[0];}
-async function source(id:string){const c=(await claim()).data.job;assert.equal(c.id,id);const at=new Date(new Date(c.start).getTime()+60000).toISOString();const records=[{seq:1,sender:'Alice',text:'A synthetic question about testing.',at,time_kind:'original'},{seq:2,sender:'Bob',text:'A synthetic explanation with a test.',at,time_kind:'capture'}];const r=await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,messages:records},true);assert.equal(r.status,200,JSON.stringify(r.data));return {c,records};}
+async function source(id:string,kind="ui_archive"){const c=(await claim()).data.job;assert.equal(c.id,id);const at=new Date(new Date(c.start).getTime()+60000).toISOString();const records=[{seq:1,sender:'Alice',text:'A synthetic question about testing.',at,time_kind:'original'},{seq:2,sender:'Bob',text:'A synthetic explanation with a test.',at,time_kind:'capture'}];const r=await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,source_kind:kind,messages:records},true);assert.equal(r.status,200,JSON.stringify(r.data));return {c,records};}
 const caller=async()=>({choices:[{message:{content:report}}]});
 before(async()=>{
  await pool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await migrate();
@@ -70,3 +70,8 @@ test('model input separates original display times from capture-only rows and re
  assert.equal((await job(bad)).status,'failed');assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[bad])).rowCount,0);
 });
 test('a group revision change blocks publication even for a prepared report',async()=>{const id=await create();await source(id);await processSummary(caller);await pool.query('UPDATE groups SET revision=revision+1 WHERE id=$1',[a.id]);assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report})).status,409);await req('/summaries/jobs/'+id+'/cancel','POST',{});});
+
+test('database provenance survives generation and is exposed to administrators',async()=>{
+ const id=await create();await source(id,'wechat_database');assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');await processSummary(caller);assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');assert(!(await job(id)).source.messages);
+ const list=(await req('/summaries')).data.jobs.find((j:any)=>j.id===id);assert.equal(list.source_origin,'wechat-database-chatlog-keeper');await req('/summaries/jobs/'+id+'/cancel','POST',{});
+});

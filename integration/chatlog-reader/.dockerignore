@@ -1,0 +1,10 @@
+__pycache__
+**/__pycache__
+*.pyc
+.env
+secrets
+data
+backups
+*.sqlite3
+*.db
+inputs/*.tar.gz

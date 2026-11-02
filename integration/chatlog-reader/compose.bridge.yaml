@@ -1,0 +1,13 @@
+name: maibot-wechat
+services:
+  wechat-bridge:
+    environment:
+      CHATLOG_READER_URL: http://chatlog-reader:5030
+      CHATLOG_READER_TOKEN_FILE: /reader-client/api-token
+    volumes:
+      - /opt/persist/chatlog-reader/client:/reader-client:ro
+    networks: [bot,reader-data]
+networks:
+  reader-data:
+    external: true
+    name: chatlog-reader-data

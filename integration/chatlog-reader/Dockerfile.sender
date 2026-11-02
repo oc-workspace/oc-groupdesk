@@ -1,0 +1,7 @@
+ARG BASE_IMAGE=wechat-bot:identity-recovery-0425bab7ba67
+FROM ${BASE_IMAGE}
+USER root
+COPY inputs/native-bowxt /opt/bowxt
+COPY inputs/native-launcher.py /opt/bowxt-launcher.py
+COPY test_send_only.py /opt/bowxt/tests/test_send_only.py
+RUN cd /opt/bowxt && PYTHONPATH=src:tests /usr/bin/python3 -W error::ResourceWarning -m unittest discover -s tests

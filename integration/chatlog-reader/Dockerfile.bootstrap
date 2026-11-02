@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=wechat-bot-base:4.1.13.23-selkies0.0.17
+FROM ${BASE_IMAGE}
+USER root
+COPY inputs/bootstrap-debs /packages
+RUN mkdir -p /opt/validation-deps && for package in /packages/*.deb; do dpkg-deb -x "$package" /opt/validation-deps; done && rm -rf /packages
+COPY gdb-wrapper /opt/validation-bin/gdb
+RUN chmod 755 /opt/validation-bin/gdb
+COPY inputs/wheels /wheels
+RUN /usr/bin/python3 -c "import glob,zipfile; [zipfile.ZipFile(p).extractall('/opt/reader-python') for p in glob.glob('/wheels/*.whl')]" && rm -rf /wheels
+COPY inputs/upstream/chatlog_keeper /opt/chatlog-keeper/chatlog_keeper
+COPY inputs/upstream/LICENSE /opt/chatlog-keeper/LICENSE
+COPY chatlog_reader /app/chatlog_reader
+ENV PYTHONPATH=/app:/opt/chatlog-keeper:/opt/reader-python:/opt/validation-deps/usr/lib/python3/dist-packages PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH=/opt/validation-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+USER 1000:1000
+WORKDIR /config
+ENTRYPOINT ["/usr/bin/python3","-m","chatlog_reader.bootstrap"]
