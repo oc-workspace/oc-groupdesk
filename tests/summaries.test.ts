@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {summaryDefaults,instant,resolveWindow,nextOccurrence} from '../shared/summaries.js';
-import {sourceStats,reportParts,completeReport} from '../server/summaries/generation.js';
+import {sourceStats,reportParts,completeReport,summaryMessages,validateReportTimes} from '../server/summaries/generation.js';
 test('summary defaults grant no automatic publication',()=>{assert.equal(summaryDefaults().enabled,false);assert.equal(summaryDefaults().model_route.mode,'inherit');});
 test('day windows and minute windows use explicit zones and exclusive ends',()=>{
  const now=Date.parse('2026-11-02T03:00:00Z');
@@ -33,4 +33,21 @@ test('delivery adds provenance, preserves source counts, and bounds every segmen
  const job={group_name:'Synthetic',external_id:'synthetic',config:{language:'en',timezone:'UTC'},template:{slug:'ranking'},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'A meaningful synthetic discussion. '.repeat(150),source:{stats:{count:4,capture_time_count:2,rankings:[{rank:1,name:'Synthetic person',count:4}]}}};
  const p=reportParts(job);assert(p.length>1);assert(p.every(t=>t.length<=2000));assert(p[0].includes('not guaranteed complete'));assert(p.join('').includes('Synthetic person'));
  assert.throws(()=>reportParts({...job,report:'x'.repeat(16000)}));
+});
+
+test('capture-only rows never expose UTC or local capture clocks as speaking times',()=>{
+ const input=[{seq:1,sender:null,text:'Synthetic private follow-up',at:'2026-11-01T15:10:36Z',time_kind:'capture'}];
+ const data=summaryMessages(input,'Asia/Singapore');assert.equal(data[0].sent_time,null);assert.equal(data[0].sender,null);assert.equal(data[0].sender_status,'unavailable');assert(!JSON.stringify(data).includes('15:10'));assert(!JSON.stringify(data).includes('23:10'));
+ assert.throws(()=>validateReportTimes('15:10 someone offered to send it privately.',input,'Asia/Singapore'));
+ assert.throws(()=>validateReportTimes('23:10 someone offered to send it privately.',input,'Asia/Singapore'));
+ validateReportTimes('A message offered to send it privately; sender name and original time unavailable.',input,'Asia/Singapore');
+});
+test('known original times are formatted once in the configured zone',()=>{
+ const rows=[{seq:2,sender:'Synthetic member',text:'A synthetic message',at:'2026-11-01T23:48:16Z',time_kind:'original'}];
+ assert.equal(summaryMessages(rows,'Asia/Singapore')[0].sent_time,'2026-11-02 07:48 (Asia/Singapore)');
+ validateReportTimes('07:48 Synthetic member asked a question.',rows,'Asia/Singapore');assert.throws(()=>validateReportTimes('23:48 Synthetic member asked a question.',rows,'Asia/Singapore'));
+});
+test('summary provenance exposes missing names and separates capture coverage',()=>{
+ const job={group_name:'Synthetic',external_id:'synthetic',config:{language:'zh-CN',timezone:'Asia/Singapore'},template:{slug:'comprehensive'},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'A synthetic report.',source:{stats:{count:3,capture_time_count:2,unknown_sender_count:1,rankings:[]}}};
+ assert(reportParts(job)[0].includes('1条未获取发送者昵称'));assert(reportParts({...job,config:{...job.config,language:'en'}})[0].includes('1 have no captured sender name'));
 });

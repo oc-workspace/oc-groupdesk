@@ -58,4 +58,13 @@ class UiLockTests(unittest.TestCase):
  def test_same_ui_lock_alert_is_deduplicated_and_manual_pause_still_wins(self):
   f=Fake(snapshot(ui_input_blocked=True));run(f,{'notified':'degraded:ui_window_blocked','incident':'prior'},10000);self.assertFalse(f.notices)
   self.assertEqual(classify(snapshot(ui_input_blocked=True,paused=True)),('maintenance','manual_pause'))
+class IdentityReadMonitorTests(unittest.TestCase):
+ def test_unresolved_identity_is_degraded_without_restarting_wechat(self):
+  f=Fake(snapshot(identity_unresolved=1));r=run(f,{},10000)
+  self.assertEqual((r['state'],r['reason']),('degraded','message_identity_incomplete'));self.assertFalse(f.actions);self.assertEqual(len(f.notices),1)
+ def test_identity_warning_is_deduplicated_and_pending_alone_does_not_alert(self):
+  f=Fake(snapshot(identity_unresolved=2));run(f,{'notified':'degraded:message_identity_incomplete'},10000);self.assertFalse(f.notices)
+  self.assertEqual(classify(snapshot(identity_unresolved=0)),('online','ok'));self.assertEqual(classify(snapshot(identity_unresolved=2,paused=True)),('maintenance','manual_pause'))
+ def test_incomplete_identity_does_not_disable_repair_of_other_real_failures(self):
+  self.assertEqual(next_action(snapshot(identity_unresolved=1,bridge=False)),'restart_bridge')
 if __name__=='__main__':unittest.main()
