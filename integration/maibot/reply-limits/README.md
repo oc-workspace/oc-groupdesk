@@ -16,3 +16,10 @@ MaiBot原生admission、跟进识别、上下文轮数及成功发送后的计�
 安装使用install-policy.py对policy.py的精确基线做幂等补丁，与上级banter.py、groupdesk_runtime.py、reply_limits.py同批发布。保留私有policy.json、模型配置与额度台账。deploy-native.py先做摘要与活动任务检查，再只重建MaiBot和bridge两个Docker容器；WeChat不重启。原生先升级以兼容旧后端，再发布后台；最后核对两群新revision均被确认。失败回滚仍恢复原收发开关。
 
 自动化验证使用合成消息、独立SQLite/PostgreSQL、固定镜像断网运行；不向真实群发送测试。操作者授权的单条补答须另行核验来源、权限、当前Persona、配额、去重和verified回执。
+
+
+## 点名模式下的同人跟进
+
+`install-followup.py` 是既有策略的第二步受摘要约束升级：仅从已知 `policy-baseline.json` 的完成基线安装，使用 `followup-baseline.json` 记录升级前后摘要，可重复运行，未知源码拒绝改写。它允许已被判定为 `direct` 的同人跟进通过“仅点名”门控；未获回复的其他人、其他群或窗口外消息仍不能借此获得回复。安静模式、轮数、语言、话题、配额和发送门控继续生效。
+
+跟进窗口从成功回复结束时间起算，排队预留不提前消耗跟进窗口。只有发送状态确认为 sent 的既有轮次才能产生免点名跟进。界面 unverified 本身不授予此资格；数据库源可在唯一匹配时补充独立送达确认，见[数据库读取器](../../chatlog-reader/README.md)。

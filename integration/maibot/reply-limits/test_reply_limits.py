@@ -70,5 +70,30 @@ class GroupExecutionTests(unittest.TestCase):
  def test_count_at_send_boundary_uses_this_groups_reset_gap(self):
   self.limits('26992')['reset_seconds']=30;self.send();self.now+=41;self.send(text='继续展开说说')
   with self.p.db() as db:self.assertEqual(self.p.conversation_for(db,'26992')['rounds'],1)
+ def test_mention_mode_allows_confirmed_same_person_followup_through_send_gate(self):
+  self.cfg['managed_groups']['26992']['interaction']='mention'
+  self.send();self.now+=31;turn=self.send(text='哈哈你真幽默')
+  self.assertFalse(turn['explicit']);self.assertEqual(turn['kind'],'direct')
+ def test_mention_followup_does_not_extend_to_other_people_groups_or_expired_windows(self):
+  self.cfg['managed_groups']['26992']['interaction']='mention';self.send();self.now+=31
+  self.assertEqual(self.ingest('哈哈你真幽默',sender='Bob'),'filtered')
+  self.assertEqual(self.ingest('哈哈你真幽默',chat='1'),'filtered')
+  self.now+=200;self.assertEqual(self.ingest('哈哈你真幽默'),'filtered')
+ def test_quiet_mode_and_round_limit_still_stop_non_mention_followups(self):
+  self.cfg['managed_groups']['26992']['interaction']='mention';self.send();self.now+=31
+  self.cfg['managed_groups']['26992']['policy']['participation']='quiet'
+  self.assertEqual(self.ingest('哈哈你真幽默'),'mention_only')
+  self.cfg['managed_groups']['26992']['policy']['participation']='active'
+  self.limits('26992')['max_rounds']=1
+  self.assertEqual(self.ingest('再接着说说'),'conversation_rounds')
+ def test_unverified_send_alone_does_not_authorize_a_followup(self):
+  self.cfg['managed_groups']['26992']['interaction']='mention';turn=self.send();self.now+=31
+  with self.p.db() as db:db.execute('UPDATE sends SET status="unverified" WHERE turn_id=?',(turn['id'],))
+  self.assertEqual(self.ingest('哈哈你真幽默'),'filtered')
+ def test_followup_window_starts_after_successful_delivery_not_queue_reservation(self):
+  self.cfg['managed_groups']['26992']['interaction']='mention'
+  self.assertEqual(self.ingest(),'queued');self.now+=5;turn=self.p.dispatch()
+  sid='slow-send-'+turn['id'];self.p.reserve_send(sid,turn['id']);self.now+=60;self.p.finish_send(sid,'sent')
+  self.now+=160;self.assertEqual(self.ingest('哈哈你真幽默'),'queued')
 
 if __name__=='__main__':unittest.main()

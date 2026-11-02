@@ -1,6 +1,7 @@
 """One database source for live ingress and summaries; UI sends stay unchanged."""
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
+from dataclasses import is_dataclass,replace
 import hashlib
 import json
 import math
@@ -26,12 +27,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class ReaderAgent:
     source_kind='wechat_database'
-    def __init__(self, delegate, state, url, token_file, clock=time.time):
+    def __init__(self, delegate, state, url, token_file, clock=time.time, sleeper=time.sleep):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != 'http' or parsed.hostname not in {'chatlog-reader','localhost','127.0.0.1'} or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
             raise ValueError('Reader must use the dedicated local endpoint')
         self.delegate,self.consumer = delegate,delegate.consumer
         self.url,self.token_file,self.clock = url.rstrip('/'),Path(token_file),clock
+        self.sleeper=sleeper
         self.path = str(Path(state) / 'delivery.sqlite3')
         self.namespaces={}
         self.source_status = {'source':'chatlog-keeper','connected':False,'checked_at':0}
@@ -39,9 +41,108 @@ class ReaderAgent:
             db.execute('CREATE TABLE IF NOT EXISTS reader_epochs(id INTEGER PRIMARY KEY AUTOINCREMENT,epoch TEXT NOT NULL UNIQUE)')
             db.execute('''CREATE TABLE IF NOT EXISTS reader_cursors(chat_id INTEGER PRIMARY KEY,epoch TEXT NOT NULL,
                 after_seq INTEGER NOT NULL,cutover REAL NOT NULL,pending_seq INTEGER,retry_until REAL NOT NULL DEFAULT 0)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS reader_send_checks(
+                queued_seq INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,client_id TEXT NOT NULL,
+                epoch TEXT NOT NULL,after_seq INTEGER NOT NULL,started REAL NOT NULL,text_sha256 TEXT NOT NULL,
+                ui_status TEXT,source_seq INTEGER,server_id TEXT,confirmed_at REAL,
+                UNIQUE(epoch,chat_id,server_id))''')
 
     def __getattr__(self, name):
         return getattr(self.delegate, name)
+
+    def send_text(self, chat, text, **kwargs):
+        # Keep the original guarded UI sender. A pre-send source watermark
+        # only permits independent confirmation; it never authorizes a retry.
+        anchor=None
+        if type(chat) is int and isinstance(text,str) and kwargs.get('client_id'):
+            try:
+                tail=self.request('/v1/stream',{'chat':chat,'after':'tail','limit':1})
+                if (type(tail['watermark']) is int and 0<=tail['watermark']<STRIDE
+                    and re.fullmatch(r'[a-f0-9]{32}',tail['epoch'])
+                    and math.isfinite(float(tail['cutover_at']))
+                    and abs(self.clock()-float(tail['cutover_at']))<=5):anchor=tail
+            except Exception:pass
+        queued=self.delegate.send_text(chat,text,**kwargs)
+        if anchor and type(getattr(queued,'seq',None)) is int and getattr(queued,'delivery_status',None)=='pending':
+            try:
+                created=datetime.fromisoformat(queued.timestamp.replace('Z','+00:00'))
+                if (created.tzinfo is not None and float(anchor['cutover_at'])-2<=created.timestamp()<=self.clock()+2
+                    and getattr(queued,'chat_id',None)==chat and getattr(queued,'client_id',None)==kwargs['client_id']):
+                    with self.db() as db:
+                        db.execute('INSERT OR IGNORE INTO reader_send_checks(queued_seq,chat_id,client_id,epoch,after_seq,started,text_sha256) VALUES(?,?,?,?,?,?,?)',
+                            (queued.seq,chat,kwargs['client_id'],anchor['epoch'],anchor['watermark'],float(anchor['cutover_at']),hashlib.sha256(text.strip().encode()).hexdigest()))
+            except (AttributeError,TypeError,ValueError,sqlite3.Error):pass
+        return queued
+
+    def _source_confirmation(self, anchor):
+        after=anchor['after_seq'];upper=None;matches=[]
+        for _ in range(5):
+            page=self.request('/v1/stream',{'chat':anchor['chat_id'],'after':after,'limit':200})
+            if page['epoch']!=anchor['epoch']:return None
+            if upper is None:
+                upper=page['watermark']
+                if type(upper) is not int or not anchor['after_seq']<=upper<STRIDE:return None
+            previous=after
+            for row in page['messages']:
+                seq=row.get('seq')
+                if type(seq) is not int or seq<=previous or row.get('chat_id')!=anchor['chat_id']:return None
+                previous=seq
+                if seq>upper:break
+                at=float(row['source_at']);observed=float(row['observed_at'])
+                if not math.isfinite(at) or not math.isfinite(observed):return None
+                if (type(row.get('is_self')) is int and row['is_self']==1 and row.get('msg_type')==1
+                    and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or ''))
+                    and math.ceil(anchor['started'])<=at<=min(self.clock()+2,anchor['started']+180)
+                    and anchor['started']<=observed<=self.clock()+2
+                    and isinstance(row.get('content'),str)
+                    and hashlib.sha256(row['content'].strip().encode()).hexdigest()==anchor['text_sha256']):
+                    matches.append(row)
+            next_after=page.get('next_after')
+            if next_after is None:break
+            if type(next_after) is not int or not after<next_after<=previous:return None
+            if next_after>=upper:break
+            after=next_after
+        else:return None
+        return matches[0] if len(matches)==1 else None
+
+    def wait_delivery(self, message, *, timeout=30.0):
+        receipt=self.delegate.wait_delivery(message,timeout=timeout)
+        if getattr(receipt,'delivery_status',None)!='unverified':return receipt
+        with self.db() as db:
+            found=db.execute('SELECT * FROM reader_send_checks WHERE queued_seq=?',(receipt.seq,)).fetchone()
+        if not found:return receipt
+        anchor=dict(found)
+        if (receipt.seq!=message.seq or receipt.chat_id!=anchor['chat_id']
+            or receipt.client_id!=anchor['client_id'] or receipt.direction!='outgoing'
+            or receipt.message_type!='text' or not isinstance(receipt.content,str)
+            or hashlib.sha256(receipt.content.strip().encode()).hexdigest()!=anchor['text_sha256']):return receipt
+        with self.db() as db:db.execute('UPDATE reader_send_checks SET ui_status=? WHERE queued_seq=?',(receipt.delivery_status,receipt.seq))
+        confirmed=anchor['source_seq'] is not None
+        if not confirmed:
+            with self.db() as db:
+                overlap=db.execute('SELECT 1 FROM reader_send_checks WHERE queued_seq<? AND chat_id=? AND epoch=? AND text_sha256=? AND started>=? AND source_seq IS NULL LIMIT 1',
+                    (receipt.seq,anchor['chat_id'],anchor['epoch'],anchor['text_sha256'],anchor['started']-180)).fetchone()
+            if overlap:return receipt
+        # Bounded post-send checks read the event-fed archive, never reconcile
+        # raw databases and never run while idle.
+        if not confirmed:
+            for delay in (0,.25,.5,1,2):
+                if not 0<=self.clock()-anchor['started']<=180:break
+                if delay:self.sleeper(delay)
+                if not 0<=self.clock()-anchor['started']<=180:break
+                try:row=self._source_confirmation(anchor)
+                except Exception:break
+                if row:
+                    try:
+                        with self.db() as db:
+                            db.execute('UPDATE reader_send_checks SET ui_status=?,source_seq=?,server_id=?,confirmed_at=? WHERE queued_seq=?',
+                                (receipt.delivery_status,row['seq'],str(row['server_id']),self.clock(),receipt.seq))
+                        confirmed=True
+                    except sqlite3.Error:pass
+                    break
+        if not confirmed:return receipt
+        if is_dataclass(receipt):return replace(receipt,delivery_status='sent',verified=True,delivery_error=None)
+        return SimpleNamespace(**{**vars(receipt),'delivery_status':'sent','verified':True,'delivery_error':None})
 
     @contextmanager
     def db(self):

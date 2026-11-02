@@ -43,3 +43,12 @@ Docker Compose永久服务使用compose.yaml与外置.env。token只给bridge，
 通知源是微信落库引起的Linux文件事件，不是微信官方收消息SDK回调。SQLite的内存映射默认用于只读访问，新消息提交写入数据库或WAL。文件通知不能作为通用文件系统零丢失保证；覆盖范围以实际监听的数据库目录与服务器已同步消息为准。
 
 依据：[SQLite Memory-Mapped I/O](https://www.sqlite.org/mmap.html)、[SQLite WAL](https://www.sqlite.org/wal.html)、[Linux inotify](https://man7.org/linux/man-pages/man7/inotify.7.html)。
+
+
+## 发送后的独立送达确认
+
+文字仍由原 Bowxt 微信界面发送。带幂等 client_id 的新发送在排队前保存本群来源 epoch、水位、时间及正文哈希，UI 队列 ID 与 client_id 一同绑定；不增加第二条发送通路。
+
+当界面回执为 unverified 时，客户端可在有界的发送后检查中读取事件驱动归档的 `/v1/stream`，只接受同群、本人、文字、完整正文一致、发送水位之后、原始时间窗口内且具有服务器消息 ID 的唯一记录。分页必须检查完整；其他群、历史同文、多个候选、账户 epoch 变化、已有同文待确认任务或已被其他 UI 队列认领的消息均不补确认。检查仅发生于这次发送之后，不触发原库同步、不增加空闲轮询，不重发消息。
+
+原始界面回执保持不变，独立证据存于桥接私有账本 `reader_send_checks`；应用内有效回执仅在有唯一依据时视为 sent，供连续跟进和回执结算使用。确认不充分时维持 unverified，不能把超时、失败或仍排队的消息猜测为已发送。
