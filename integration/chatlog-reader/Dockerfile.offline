@@ -1,0 +1,11 @@
+# Reuse a verified offline runtime containing the locked upstream codec/wheels.
+ARG VERIFIED_RUNTIME
+FROM ${VERIFIED_RUNTIME} AS runtime
+COPY chatlog_reader /app/chatlog_reader
+
+FROM runtime AS test
+COPY tests /tests
+COPY inputs/chatlog_runtime.py /app/chatlog_runtime.py
+ENTRYPOINT ["python","-W","error::ResourceWarning","-m","unittest","discover","-s","/tests","-v"]
+
+FROM runtime AS production

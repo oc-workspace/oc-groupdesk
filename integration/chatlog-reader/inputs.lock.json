@@ -1,0 +1,11 @@
+{
+  "upstream_commit": "2225294fd0761e10ce15540f21e7dbb2ac304c3c",
+  "upstream_archive_sha256": "7beed277d9bcb9d6a3715e5634a5f8ccda69af8c546030a098d170cddef48f31",
+  "bootstrap_debs_sha256": "557e2eb9b726389b959c0cd0020e03ab67864192e38aaf42a0c5ea6c86b28fd5",
+  "python_image": "python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337",
+  "bootstrap_image": "wechat-bot-base:4.1.13.23-selkies0.0.17@sha256:3aaa32335e65e5a39dffbea0781f8dae99e5f664a47f4ebc6816e2f00c2a4ded",
+  "wheels": {
+    "pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575",
+    "zstandard-0.22.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "466e6ad8caefb589ed281c076deb6f0cd330e8bc13c5035854ffb9c2014b118c"
+  }
+}

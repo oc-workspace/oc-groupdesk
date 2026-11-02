@@ -1,0 +1,239 @@
+"""One database source for live ingress and summaries; UI sends stay unchanged."""
+from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sqlite3
+import time
+from types import SimpleNamespace
+import urllib.error
+import urllib.parse
+import urllib.request
+
+OFFSET = 1_000_000_000_000
+STRIDE = 10_000_000_000
+
+class ReaderUnavailable(RuntimeError):
+    pass
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+class ReaderAgent:
+    source_kind='wechat_database'
+    def __init__(self, delegate, state, url, token_file, clock=time.time):
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != 'http' or parsed.hostname not in {'chatlog-reader','localhost','127.0.0.1'} or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError('Reader must use the dedicated local endpoint')
+        self.delegate,self.consumer = delegate,delegate.consumer
+        self.url,self.token_file,self.clock = url.rstrip('/'),Path(token_file),clock
+        self.path = str(Path(state) / 'delivery.sqlite3')
+        self.namespaces={}
+        self.source_status = {'source':'chatlog-keeper','connected':False,'checked_at':0}
+        with self.db() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS reader_epochs(id INTEGER PRIMARY KEY AUTOINCREMENT,epoch TEXT NOT NULL UNIQUE)')
+            db.execute('''CREATE TABLE IF NOT EXISTS reader_cursors(chat_id INTEGER PRIMARY KEY,epoch TEXT NOT NULL,
+                after_seq INTEGER NOT NULL,cutover REAL NOT NULL,pending_seq INTEGER,retry_until REAL NOT NULL DEFAULT 0)''')
+
+    def __getattr__(self, name):
+        return getattr(self.delegate, name)
+
+    @contextmanager
+    def db(self):
+        db = sqlite3.connect(self.path, timeout=15)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def request(self, route, query):
+        try:
+            token = self.token_file.read_text().strip()
+            if not re.fullmatch(r'[a-f0-9]{64}', token):
+                raise ReaderUnavailable('Reader token unavailable')
+            request = urllib.request.Request(self.url+route+'?'+urllib.parse.urlencode(query),
+                headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
+            with urllib.request.build_opener(NoRedirect()).open(request,timeout=20) as response:
+                body = response.read(4_000_001)
+            if len(body)>4_000_000:
+                raise OverflowError('Source response too large')
+            value = json.loads(body)
+            if not re.fullmatch(r'[a-f0-9]{32}', value.get('epoch','')) or not isinstance(value.get('messages'),list):
+                raise ReaderUnavailable('Invalid source contract')
+            checked = float(value['last_checked'])
+            if not math.isfinite(checked) or not -15 <= self.clock()-checked < 30:
+                raise ReaderUnavailable('Source snapshot stale')
+            self.source_status = {'source':'chatlog-keeper','connected':True,'checked_at':self.clock(),'source_checked_at':checked}
+            return value
+        except urllib.error.HTTPError as exc:
+            self.source_status.update(connected=False,error='reader_http_'+str(exc.code))
+            if exc.code == 413:
+                raise OverflowError('Source window too large') from None
+            raise ReaderUnavailable('Reader rejected request') from None
+        except OverflowError:
+            raise
+        except Exception:
+            self.source_status.update(connected=False,error='reader_unavailable')
+            raise ReaderUnavailable('Reader unavailable') from None
+
+    def cursor(self, chat, reset=False):
+        with self.db() as db:
+            row = db.execute('SELECT * FROM reader_cursors WHERE chat_id=?',(chat,)).fetchone()
+        if row and not reset:
+            return dict(row)
+        tail = self.request('/v1/stream', {'chat':chat,'after':'tail','limit':1})
+        after,cutover = tail['watermark'],tail['cutover_at']
+        if type(after) is not int or not 0 <= after < STRIDE or not math.isfinite(float(cutover)):
+            raise ReaderUnavailable('Invalid initial watermark')
+        with self.db() as db:
+            db.execute('INSERT INTO reader_cursors(chat_id,epoch,after_seq,cutover) VALUES(?,?,?,?) ON CONFLICT(chat_id) DO UPDATE SET epoch=excluded.epoch,after_seq=excluded.after_seq,cutover=excluded.cutover,pending_seq=NULL,retry_until=0',
+                (chat,tail['epoch'],after,cutover))
+        return {'chat_id':chat,'epoch':tail['epoch'],'after_seq':after,'cutover':cutover,'pending_seq':None,'retry_until':0}
+
+    def namespace(self,epoch):
+        if epoch not in self.namespaces:
+            with self.db() as db:
+                db.execute('INSERT OR IGNORE INTO reader_epochs(epoch) VALUES(?)',(epoch,))
+                number=db.execute('SELECT id FROM reader_epochs WHERE epoch=?',(epoch,)).fetchone()[0]
+            value=OFFSET+number*STRIDE
+            if value+STRIDE>=2**53:
+                raise ReaderUnavailable('Reader namespace exhausted')
+            self.namespaces[epoch]=value
+        return self.namespaces[epoch]
+
+    def message(self, row, chat, epoch, live=False):
+        seq = row.get('seq')
+        if type(seq) is not int or not 0<seq<STRIDE or row.get('chat_id')!=chat or row.get('is_self') not in (0,1):
+            raise ReaderUnavailable('Cross-group or invalid source record')
+        timestamp,observed = float(row['source_at']),float(row['observed_at'])
+        if not math.isfinite(timestamp) or timestamp<=0 or not math.isfinite(observed) or observed<=0:
+            raise ReaderUnavailable('Invalid original timestamp')
+        text,sender,sender_id = row['content'],row.get('sender'),row.get('sender_id')
+        if not isinstance(text,str) or sender is not None and not isinstance(sender,str):
+            raise ReaderUnavailable('Invalid message data')
+        if live and not sender and sender_id:
+            sender = '昵称未同步-'+hashlib.sha256(str(sender_id).encode()).hexdigest()[:8]
+        own = bool(row['is_self'])
+        return SimpleNamespace(seq=self.namespace(epoch)+seq,source_seq=seq,chat_id=chat,content=text,
+            sender=sender,sender_id=sender_id,message_type='text' if row['msg_type']==1 else 'media',
+            timestamp=datetime.fromtimestamp(timestamp,timezone.utc).isoformat(),
+            observed_at=datetime.fromtimestamp(observed,timezone.utc).isoformat(),
+            direction='outgoing' if own else 'incoming' if sender_id else 'unknown',
+            is_at_me=False,source_kind='wechat_database',
+            client_id='groupdesk-summary-native' if row.get('is_summary') else None,
+            delivery_status='sent' if own and row.get('server_id') else 'observed' if not own else 'unknown')
+
+    def claim(self, *, chat_ids=(),limit=4,lease_seconds=120,timeout=3,require_sender=True,require_at_me=False,replay_existing=False):
+        if replay_existing or require_at_me:
+            raise ValueError('Live database ingress never replays history')
+        deliveries = []
+        for chat in sorted(set(map(int,chat_ids))):
+            if len(deliveries)>=limit:
+                break
+            cursor = self.cursor(chat)
+            if self.clock()<cursor['retry_until']:
+                continue
+            page = self.request('/v1/stream', {'chat':chat,'after':cursor['after_seq'],'limit':200})
+            if page['epoch']!=cursor['epoch']:
+                self.cursor(chat,reset=True)
+                continue
+            previous = cursor['after_seq']
+            for row in page['messages']:
+                message = self.message(row,chat,page['epoch'],live=True)
+                if message.source_seq<=previous:
+                    raise ReaderUnavailable('Source pagination did not advance')
+                previous = message.source_seq
+                stale = datetime.fromisoformat(message.timestamp).timestamp()<cursor['cutover']
+                eligible = message.direction=='incoming' and message.message_type=='text' and not stale
+                eligible = eligible and (not require_sender or bool(message.sender)) and not require_at_me
+                if not eligible:
+                    with self.db() as db:
+                        db.execute('UPDATE reader_cursors SET after_seq=?,pending_seq=NULL,retry_until=0 WHERE chat_id=? AND epoch=?', (message.source_seq,chat,cursor['epoch']))
+                    continue
+                with self.db() as db:
+                    db.execute('UPDATE reader_cursors SET pending_seq=? WHERE chat_id=? AND epoch=?',(message.source_seq,chat,cursor['epoch']))
+                deliveries.append(SimpleNamespace(consumer=self.consumer,message=message,reader_epoch=cursor['epoch']))
+                # Exactly one unacknowledged record per group: later successes
+                # cannot jump over a failed earlier message.
+                break
+        return deliveries
+
+    def finish(self, delivery, acknowledged, retry_delay=10):
+        if delivery.consumer!=self.consumer:
+            raise ValueError('Wrong reader consumer')
+        message=delivery.message
+        with self.db() as db:
+            row=db.execute('SELECT * FROM reader_cursors WHERE chat_id=?',(message.chat_id,)).fetchone()
+            if not row or row['epoch']!=delivery.reader_epoch or row['pending_seq']!=message.source_seq:
+                raise ValueError('Stale or unordered reader delivery')
+            if acknowledged:
+                db.execute('UPDATE reader_cursors SET after_seq=?,pending_seq=NULL,retry_until=0 WHERE chat_id=?',(message.source_seq,message.chat_id))
+            else:
+                db.execute('UPDATE reader_cursors SET retry_until=? WHERE chat_id=?',(self.clock()+max(1,min(60,float(retry_delay))),message.chat_id))
+
+    def ack(self, delivery):
+        self.finish(delivery,True)
+
+    def nack(self, delivery, _reason, retry_delay=10):
+        self.finish(delivery,False,retry_delay)
+
+    def get_history(self, chat, *, duration_seconds, until=None):
+        identifier=int(chat.id if hasattr(chat,'id') else chat)
+        end=until or datetime.now(timezone.utc)
+        if end.tzinfo is None or not 0<float(duration_seconds)<=31*86400:
+            raise ValueError('Invalid history window')
+        start=end-timedelta(seconds=float(duration_seconds))
+        after,epoch,result,size=0,None,[],0
+        while True:
+            page=self.request('/v1/history',{'chat':identifier,'start':start.timestamp(),'end':end.timestamp(),'after':after,'limit':200})
+            if epoch and page['epoch']!=epoch:
+                raise ReaderUnavailable('Source account changed during history read')
+            epoch=page['epoch']
+            for row in page['messages']:
+                message=self.message(row,identifier,page['epoch'])
+                if not start.timestamp()<=float(row['source_at'])<end.timestamp():
+                    raise ReaderUnavailable('History escaped requested window')
+                if message.source_seq<=after:
+                    raise ReaderUnavailable('History did not advance')
+                result.append(message);size+=len(message.content.encode())
+                if len(result)>5000 or size>1_200_000:
+                    raise OverflowError('Summary source too large')
+            next_after=page.get('next_after')
+            if next_after is None:
+                return result
+            if type(next_after) is not int or next_after<=after:
+                raise ReaderUnavailable('History pagination did not advance')
+            after=next_after
+
+def attach_reader(delegate,state):
+    url=os.environ.get('CHATLOG_READER_URL','').strip()
+    return ReaderAgent(delegate,state,url,os.environ.get('CHATLOG_READER_TOKEN_FILE','/reader-client/api-token')) if url else delegate
+
+if __name__=='__main__':
+    arguments=__import__('sys').argv[1:]
+    if os.environ.get('CHATLOG_READER_URL') and arguments and arguments[0] in {'prepare','recovery'}:
+        state=Path(os.environ.get('BRIDGE_STATE','/state'))
+        agent=attach_reader(SimpleNamespace(consumer='maibot-gt'),state)
+        groups=json.loads((state/'groups.json').read_text()).values()
+        if arguments==['prepare']:
+            for group in groups:agent.cursor(int(group['chat_id']))
+            print(json.dumps({'reader_cursors_prepared':True}))
+        elif arguments[0]=='recovery' and len(arguments)==2:
+            end=datetime.fromtimestamp(float(arguments[1]),timezone.utc)
+            rows=[]
+            for group in groups:
+                for message in agent.get_history(int(group['chat_id']),duration_seconds=12*3600,until=end):
+                    if message.direction=='incoming' and message.message_type=='text' and message.sender:
+                        rows.append({'seq':message.seq,'chat_id':str(message.chat_id),'sender':message.sender,'content':message.content,
+                            'message_type':'text','direction':'incoming','source_at':datetime.fromisoformat(message.timestamp).timestamp(),'is_at_me':False})
+            print(json.dumps({'rows':rows},ensure_ascii=False))
+        else:raise SystemExit('Invalid reader maintenance command')
+    else:
+        raise SystemExit('Use prepare with the configured reader')

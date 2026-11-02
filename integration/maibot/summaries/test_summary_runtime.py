@@ -40,6 +40,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
  async def test_source_uses_existing_server_history_without_any_send(self):
   with patch.object(s.gd,'api',side_effect=self.api):await s.source(self.bridge,self.chat,self.job)
   self.assertEqual(self.sent,[]);self.assertEqual(self.calls[0][1]['messages'][0]['text'],'Synthetic discussion')
+ async def test_database_source_kind_is_propagated_without_sending(self):
+  self.bridge.agent.source_kind='wechat_database'
+  with patch.object(s.gd,'api',side_effect=self.api):await s.source(self.bridge,self.chat,self.job)
+  self.assertEqual(self.calls[0][1]['source_kind'],'wechat_database');self.assertEqual(self.sent,[])
  async def test_empty_and_failed_sources_report_failure_without_generation_or_send(self):
   for fn,error in [(lambda *a,**k:[],'no_messages'),(lambda *a,**k:(_ for _ in ()).throw(OSError()),'source_unavailable')]:
    self.bridge.agent.get_history=fn

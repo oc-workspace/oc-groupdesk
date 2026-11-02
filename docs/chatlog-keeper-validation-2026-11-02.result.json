@@ -1,0 +1,18 @@
+{
+  "method": "authorized-online-startup",
+  "key_found": true,
+  "hmac_verified": true,
+  "decrypted": true,
+  "observer_hits": 1,
+  "observer_candidates": 1,
+  "observer_error": "",
+  "database_hmac_checked": 3,
+  "database_hmac_passed": 3,
+  "sqlite_quick_check": "ok",
+  "conversation_tables": 4,
+  "stored_message_rows": 1021,
+  "parsed_messages": 752,
+  "parsed_text_messages": 727,
+  "elapsed_seconds": 226.22,
+  "normal_client_started": true
+}

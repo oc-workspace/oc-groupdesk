@@ -1,0 +1,3 @@
+#!/bin/sh
+export LD_LIBRARY_PATH=/opt/validation-deps/usr/lib/x86_64-linux-gnu
+exec /opt/validation-deps/usr/bin/gdb --data-directory=/opt/validation-deps/usr/share/gdb -iex 'unset environment LD_LIBRARY_PATH' "$@"

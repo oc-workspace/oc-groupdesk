@@ -1,0 +1,74 @@
+name: chatlog-reader
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  reader:
+    image: ${CHATLOG_READER_IMAGE:?Set the verified image}
+    pull_policy: never
+    container_name: chatlog-reader
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      TZ: Asia/Singapore
+    volumes:
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/config:/config:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/secrets:/secrets:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/client:/client:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/data:/state
+      - ${WECHAT_ACCOUNT_DATABASES:?Select one account db_storage}:/wechat/${READER_ACCOUNT:?Select the verified account}/db_storage:ro
+    tmpfs:
+      - /work:rw,nosuid,nodev,size=536870912,uid=1000,gid=1000,mode=700
+      - /tmp:rw,nosuid,nodev,size=16777216,mode=1777
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 64
+    ulimits:
+      core: 0
+    expose: ["5030"]
+    healthcheck:
+      test: ["CMD","python","-m","chatlog_reader","health"]
+      interval: 15s
+      timeout: 8s
+      start_period: 30s
+      retries: 4
+    logging: *logging
+    networks: [data]
+
+  credentials:
+    image: ${CHATLOG_READER_IMAGE:?Set the verified image}
+    pull_policy: never
+    profiles: [ops]
+    restart: "no"
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    command: [init]
+    volumes:
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/config:/config:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/secrets:/secrets
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/client:/client
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/key-import:/imports:ro
+      - ${WECHAT_ACCOUNT_DATABASES:?Select one account db_storage}:/wechat/${READER_ACCOUNT:?Select the verified account}/db_storage:ro
+    tmpfs:
+      - /work:rw,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=700
+    mem_limit: 256m
+    pids_limit: 32
+    ulimits:
+      core: 0
+    logging: *logging
+
+networks:
+  data:
+    name: chatlog-reader-data
+    internal: true

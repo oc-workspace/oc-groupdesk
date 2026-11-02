@@ -67,4 +67,9 @@ class IdentityReadMonitorTests(unittest.TestCase):
   self.assertEqual(classify(snapshot(identity_unresolved=0)),('online','ok'));self.assertEqual(classify(snapshot(identity_unresolved=2,paused=True)),('maintenance','manual_pause'))
  def test_incomplete_identity_does_not_disable_repair_of_other_real_failures(self):
   self.assertEqual(next_action(snapshot(identity_unresolved=1,bridge=False)),'restart_bridge')
+class ReaderMonitorTests(unittest.TestCase):
+ def test_reader_failure_alerts_without_restarting_the_desktop(self):
+  f=Fake(snapshot(reader_required=True,reader_ok=False));r=run(f,{},10000)
+  self.assertEqual((r['state'],r['reason']),('degraded','chatlog_reader_unavailable'));self.assertEqual(f.actions,[])
+ def test_reader_ready_remains_online(self):self.assertEqual(classify(snapshot(reader_required=True,reader_ok=True)),('online','ok'))
 if __name__=='__main__':unittest.main()

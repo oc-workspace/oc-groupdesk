@@ -1,0 +1,43 @@
+name: chatlog-reader
+services:
+  bootstrap:
+    image: ${CHATLOG_BOOTSTRAP_IMAGE:?Set the verified one-shot image}
+    pull_policy: never
+    profiles: [bootstrap]
+    restart: "no"
+    init: true
+    user: "1000:1000"
+    read_only: true
+    network_mode: container:wechat-bot
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HOME: /config
+      DISPLAY: ${READER_DISPLAY:?Select the existing desktop display}
+      DBUS_SESSION_BUS_ADDRESS: ${READER_DBUS:?Select the existing desktop session}
+      XDG_RUNTIME_DIR: /config/.XDG
+      LC_ALL: zh_CN.UTF-8
+      QT_LINUX_ACCESSIBILITY_ALWAYS_ON: "1"
+      NO_AT_BRIDGE: "0"
+      QTWEBENGINE_DISABLE_SANDBOX: "1"
+      READER_ACCOUNT: ${READER_ACCOUNT:?Select the verified account}
+    volumes:
+      - /opt/persist/maibot-wechat/wechat:/config
+      - ${WECHAT_DESKTOP_ROOT:?Existing container root}/tmp/.X11-unix:/tmp/.X11-unix
+      - ${WECHAT_DESKTOP_ROOT:?Existing container root}${READER_DBUS_SOCKET:?Existing session socket}:${READER_DBUS_SOCKET}
+      - ${WECHAT_DESKTOP_ROOT:?Existing container root}/etc/machine-id:/etc/machine-id:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/secrets/vault-public.pem:/bootstrap/vault-public.pem:ro
+      - ${READER_PERSIST:-/opt/persist/chatlog-reader}/key-import:/imports
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=67108864,mode=1777
+      - /run:rw,nosuid,nodev,size=16777216,mode=1777
+    shm_size: 192m
+    mem_limit: 1280m
+    memswap_limit: 2048m
+    cpus: 0.75
+    pids_limit: 256
+    ulimits:
+      core: 0
+    logging:
+      driver: json-file
+      options: {max-size: "1m",max-file: "1"}

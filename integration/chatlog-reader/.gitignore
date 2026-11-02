@@ -1,0 +1,5 @@
+/inputs/
+.env
+secrets/
+data/
+__pycache__/

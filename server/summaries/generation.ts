@@ -27,7 +27,9 @@ export function reportParts(job:any){
  const en=job.config.language==='en',ja=job.config.language==='ja',stat=job.source?.stats||{};
  const zone=job.config.timezone,format=(v:string)=>new Intl.DateTimeFormat('sv-SE',{timeZone:zone,dateStyle:'short',timeStyle:'short'}).format(new Date(v));
  const header=(en?'Group archive summary':ja?'グループの保存記録まとめ':'群聊存档总结')+' · '+JSON.stringify(job.group_name||job.external_id)+'\n'+format(job.window_start)+' — '+format(job.window_end)+' ('+zone+')\n';
- const note=en?`Based on ${stat.count} captured messages; ${stat.capture_time_count} use capture time. ${stat.unknown_sender_count||0} have no captured sender name. This is the server archive, not guaranteed complete WeChat history.\n\n`:ja?`保存済み${stat.count}件、うち${stat.capture_time_count}件は取得時刻を使用。送信者名不明${stat.unknown_sender_count||0}件。微信の全履歴を保証するものではありません。\n\n`:`基于服务器已采集的${stat.count}条记录，其中${stat.capture_time_count}条按采集时间归档，${stat.unknown_sender_count||0}条未获取发送者昵称；不代表微信完整历史。\n\n`;
+ const database=job.source?.origin==='wechat-database-chatlog-keeper';
+ const databaseNote=en?`Based on ${stat.count} messages from the bot server's local WeChat database (Chatlog Reader); ${stat.capture_time_count} use capture time. ${stat.unknown_sender_count||0} have no available sender nickname. Messages not synchronized to this server are outside coverage.\n\n`:ja?`Botサーバーの微信データベース（Chatlog Reader）から${stat.count}件を取得。取得時刻使用${stat.capture_time_count}件、送信者名不明${stat.unknown_sender_count||0}件。サーバー未同期の履歴は対象外です。\n\n`:`基于Bot服务器微信数据库（Chatlog Reader）读取的${stat.count}条记录，其中${stat.capture_time_count}条按采集时间归档，${stat.unknown_sender_count||0}条未获取发送者昵称；不包含尚未同步到服务器的微信历史。\n\n`;
+ const note=database?databaseNote:en?`Based on ${stat.count} captured messages; ${stat.capture_time_count} use capture time. ${stat.unknown_sender_count||0} have no captured sender name. This is the server archive, not guaranteed complete WeChat history.\n\n`:ja?`保存済み${stat.count}件、うち${stat.capture_time_count}件は取得時刻を使用。送信者名不明${stat.unknown_sender_count||0}件。微信の全履歴を保証するものではありません。\n\n`:`基于服务器已采集的${stat.count}条记录，其中${stat.capture_time_count}条按采集时间归档，${stat.unknown_sender_count||0}条未获取发送者昵称；不代表微信完整历史。\n\n`;
  let body=header+note+job.report;
  if(['ranking','entertainment','news'].includes(job.template.slug))body+='\n\n'+(en?'Message count ranking (captured display names)':ja?'発言数ランキング（取得した表示名）':'发言条数排名（按采集显示名，缺少发言人的记录不参与）')+'\n'+stat.rankings.map((r:any)=>r.rank+'. '+JSON.stringify(r.name)+' · '+r.count).join('\n');
  const parts:string[]=[];while(body){let end=Math.min(1700,body.length);if(end<body.length){const p=body.lastIndexOf('\n',end);if(p>850)end=p;const code=body.charCodeAt(end-1);if(code>=0xD800&&code<=0xDBFF)end--; }parts.push(body.slice(0,end));body=body.slice(end).replace(/^\n/,'');}
@@ -48,7 +50,7 @@ export async function processSummary(caller=callTextModel,signal?:AbortSignal){
   validateReportTimes(report,job.source.messages,job.config.timezone);
   await transaction(async db=>{
    await valid(job,db,job.wants_publish);const locked=(await db.query('SELECT status FROM summary_jobs WHERE id=$1 FOR UPDATE',[job.id])).rows[0];requireCondition(locked?.status==='generating',409,'任务已取消或超时');
-   const source={stats:job.source.stats,origin:'bot-server-captured',fetched_at:job.source.fetched_at};
+   const source={stats:job.source.stats,origin:job.source.origin||'bot-server-captured',fetched_at:job.source.fetched_at};
    if(job.wants_publish)await prepareParts(db,{...job,report,source,group_name:g.name});
    await db.query('UPDATE summary_jobs SET report=$2,source=$3,status=$4,lease_until=NULL,finished_at=CASE WHEN $4=\'preview\' THEN now() ELSE NULL END WHERE id=$1',[job.id,report,source,job.wants_publish?'delivery_ready':'preview']);
   });
