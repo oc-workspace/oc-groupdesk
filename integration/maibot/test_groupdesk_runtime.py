@@ -1,4 +1,4 @@
-import copy,json,tempfile,time,unittest
+import copy,json,tempfile,time,unittest,urllib.error
 from pathlib import Path
 from unittest.mock import patch
 import groupdesk_runtime as gd
@@ -32,6 +32,42 @@ class PureTests(unittest.TestCase):
    c=Path(d)/'connection.json';c.write_text(json.dumps({'url':'https://example.invalid','token':'x'*32,'groups':{'1':'example-room'}}));snapshot=Path(d)/'snapshot.json'
    with patch.object(gd,'CONNECTION',c),patch.object(gd,'SNAPSHOT',snapshot),patch.object(gd,'api',side_effect=OSError('offline')):gd.sync()
    saved=snapshot.read_text();self.assertNotIn('x'*32,saved);self.assertFalse(json.loads(saved)['groups']['1']['enabled'])
+ def sync_model_bundle(self,enabled,credential_error=False):
+  b=bundle(enabled=enabled)
+  route={'available':True,'source':'default','credential_id':'test-credential','credential_revision':1,'model_id':'test-model','client_type':'openai'}
+  b.update(model_routing_contract_version=1,model_routing={'text':route})
+  private={**route,'api_key':'synthetic-test-key','base_url':'https://example.invalid/v1'}
+  calls=[]
+  def api(path,body=None):
+   calls.append((path,body))
+   if path=='/config/example-room':return b
+   if path=='/model-credentials':
+    if not enabled or credential_error:raise urllib.error.HTTPError('https://example.invalid',409,'Group disabled or stale revision',{},None)
+    return {'text_route':private}
+   if path=='/ack':return {'ok':True}
+   raise AssertionError('Unexpected runtime endpoint')
+  with tempfile.TemporaryDirectory() as d:
+   connection=Path(d)/'connection.json';connection.write_text(json.dumps({'url':'https://example.invalid','token':'synthetic-adapter-token','groups':{'1':'example-room'}}))
+   snapshot=Path(d)/'snapshot.json'
+   with patch.object(gd,'CONNECTION',connection),patch.object(gd,'SNAPSHOT',snapshot),patch.object(gd,'api',side_effect=api):result=gd.sync()
+   return result,json.loads(snapshot.read_text())['groups']['1'],calls
+ def test_disabled_group_acknowledges_saved_revision_without_requesting_credentials(self):
+  result,saved,calls=self.sync_model_bundle(False)
+  self.assertEqual(result['1'],{'revision':7,'enabled':False})
+  self.assertEqual([path for path,_ in calls],['/config/example-room','/ack'])
+  self.assertEqual(calls[-1][1]['revision'],7)
+  self.assertNotIn('private_text_route',saved)
+  self.assertFalse(gd.available(saved,time.time()))
+ def test_enabled_group_still_requires_verified_credentials_before_ack(self):
+  result,saved,calls=self.sync_model_bundle(True)
+  self.assertEqual([path for path,_ in calls],['/config/example-room','/model-credentials','/ack'])
+  self.assertEqual(saved['private_text_route']['api_key'],'synthetic-test-key')
+  self.assertTrue(result['1']['enabled'])
+ def test_enabled_group_credential_rejection_remains_fail_closed_without_ack(self):
+  result,saved,calls=self.sync_model_bundle(True,credential_error=True)
+  self.assertEqual([path for path,_ in calls],['/config/example-room','/model-credentials'])
+  self.assertEqual(result['1'],{'revision':'unavailable','enabled':False})
+  self.assertNotIn('private_text_route',saved)
  def test_language_checks_preserve_quotes_and_reject_clear_mismatches(self):
   p=bundle();p['policy']['language']={'mode':'restricted','allowed':['en'],'fallback':'en','allow_requested':True}
   self.assertTrue(gd.language_allowed(p,'This is the word "汤" in Chinese.'))
