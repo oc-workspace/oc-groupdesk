@@ -44,6 +44,7 @@ class HTTPTests(unittest.TestCase):
         store=Store(Path(self.folder.name)/'archive.db','synthetic',[{'chat_id':1,'name':'Synthetic'}])
         class Fake:
             def status(self):return {'ok':True,'source':'chatlog-keeper','state':'ready','epoch':store.epoch,'last_checked':time.time()}
+            def sync(self):pass
             def page(self,*args):return {**store.page(*args),'last_checked':time.time()}
         engine=Fake();engine.store=store
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
@@ -71,6 +72,18 @@ class HTTPTests(unittest.TestCase):
         self.rejects('/v1/stream?chat=1&chat=2',400)
         self.rejects('/v1/history?chat=1&start=NaN&end=1',400)
         self.rejects('/v1/history?chat=1&start=1&end=99999999',400)
+    def test_history_reconciles_on_demand_after_authorization(self):
+        from unittest.mock import Mock
+        self.server.engine.sync=Mock()
+        path='/v1/history?chat=1&start='+str(time.time()-60)+'&end='+str(time.time()-1)
+        self.rejects(path,401,False);self.server.engine.sync.assert_not_called()
+        self.get(path);self.server.engine.sync.assert_called_once()
+    def test_event_monitor_metadata_requires_authentication(self):
+        from types import SimpleNamespace
+        self.server.monitor=SimpleNamespace(snapshot=lambda:{'mode':'inotify','periodic_scan_seconds':None})
+        self.assertEqual(self.get('/v1/status')['monitor']['mode'],'inotify')
+        self.rejects('/v1/status',401,False)
+        self.assertNotIn('monitor',self.get('/healthz',False))
     def test_tail_is_empty_and_creates_a_fresh_cutover_boundary(self):
         result=self.get('/v1/stream?chat=1&after=tail')
         self.assertEqual(result['messages'],[]);self.assertGreater(result['cutover_at'],0)

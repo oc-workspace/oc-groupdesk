@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
+from .watch import FileChanges,synchronize
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'ChatlogReader/1'
@@ -34,6 +35,7 @@ class Handler(BaseHTTPRequestHandler):
             if not hmac.compare_digest(supplied, 'Bearer ' + self.server.token):
                 self.reply(401, {'error':'unauthorized'});return
             if target.path == '/v1/status':
+                if getattr(self.server,'monitor',None):status['monitor']=self.server.monitor.snapshot()
                 self.reply(200 if status['ok'] else 503,status);return
             if target.path not in {'/v1/stream','/v1/history'}:
                 self.reply(404, {'error':'not_found'});return
@@ -60,6 +62,7 @@ class Handler(BaseHTTPRequestHandler):
                 start,end = float(query['start'][0]),float(query['end'][0])
                 if not math.isfinite(start) or not math.isfinite(end) or not 0 < end-start <= 31*86400 or end > time.time()+15:
                     raise ValueError('Invalid history window')
+            if target.path=='/v1/history':self.server.engine.sync()
             self.reply(200,self.server.engine.page(chat,after,limit,start,end))
         except (ValueError, KeyError):
             self.reply(400, {'error':'invalid_request'})
@@ -75,14 +78,19 @@ def serve(engine, token, host='0.0.0.0', port=5030):
     server = ThreadingHTTPServer((host,port), Handler)
     server.daemon_threads = True
     server.engine,server.token = engine,token
-    def synchronize():
-        while not stop.is_set():
-            engine.sync()
-            stop.wait(2)
-    worker = threading.Thread(target=synchronize, daemon=True)
+    changes=FileChanges(engine.source,engine.secrets)
+    server.monitor=changes
+    engine.tracking=changes.tracking
+    def run_listener():
+        try:synchronize(engine,stop,changes)
+        except Exception:
+            stop.set()
+            threading.Thread(target=server.shutdown,daemon=True).start()
+    worker = threading.Thread(target=run_listener,daemon=True)
     worker.start()
     def shutdown(*_args):
         stop.set()
+        changes.wake()
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -90,6 +98,8 @@ def serve(engine, token, host='0.0.0.0', port=5030):
         server.serve_forever()
     finally:
         stop.set()
+        changes.wake()
         server.server_close()
         worker.join(timeout=15)
+        changes.close()
         engine.key = None
