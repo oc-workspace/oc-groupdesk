@@ -1,5 +1,6 @@
 """Root-only Docker deployment operations. Never emits credentials or chat bodies."""
-import argparse,hashlib,json,os,re,shutil,sqlite3,subprocess,time,urllib.request
+import argparse,hashlib,json,os,re,shutil,sqlite3,subprocess,time,urllib.request,uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT=Path('/opt/docker/oc-projects/chatlog-reader')
@@ -83,47 +84,80 @@ def prepare(image,bootstrap):
     reader('config','--quiet');reader('--profile','ops','run','--rm','credentials','init')
     print(json.dumps({'prepared':True,'scoped_group_count':len(groups),'key_present':(PERSIST/'secrets/wechat-key.enc').exists()}))
 
+@contextmanager
+def bootstrap_tools(desktop):
+    # Stage only public files from the locked Docker image. Running the
+    # one-shot observer inside the existing WeChat container reuses its real
+    # desktop sockets without exposing the desktop to another container.
+    tag=uuid.uuid4().hex
+    prefix='/opt/groupdesk-chatlog-bootstrap-'+tag
+    imports=BOT/'wechat/bowxt'/('reader-key-'+tag)
+    inside='/config/bowxt/'+imports.name
+    artifacts='chatlog-reader-bootstrap-artifacts'
+    compose=['docker','compose','--env-file',ROOT/'.env','-f',CODE/'compose.bootstrap.yaml','--profile','bootstrap']
+    if subprocess.run(['docker','inspect',artifacts],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise RuntimeError('Bootstrap artifact staging already exists')
+    imports.mkdir(mode=0o700);os.chown(imports,1000,1000)
+    try:
+        run(compose+['create','bootstrap-artifacts'])
+        run(['docker','exec','wechat-bot','mkdir','-p',prefix+'/bin'])
+        for source in ['/opt/validation-deps','/opt/chatlog-keeper','/opt/reader-python','/app/chatlog_reader']:
+            producer=subprocess.Popen(['docker','cp',artifacts+':'+source,'-'],stdout=subprocess.PIPE)
+            try:run(['docker','cp','-','wechat-bot:'+prefix+'/'],stdin=producer.stdout)
+            finally:
+                producer.stdout.close()
+                if producer.wait()!=0:raise RuntimeError('Public bootstrap staging failed')
+        run(['docker','cp',PERSIST/'secrets/vault-public.pem','wechat-bot:'+prefix+'/vault-public.pem'])
+        wrapper=("#!/bin/sh\nexport LD_LIBRARY_PATH="+prefix+"/validation-deps/usr/lib/x86_64-linux-gnu\nexec "+prefix+"/validation-deps/usr/bin/gdb --data-directory="+prefix+"/validation-deps/usr/share/gdb -iex 'unset environment LD_LIBRARY_PATH' \"$@\"\n")
+        writer="import pathlib,sys;p=pathlib.Path(sys.argv[1]);p.write_bytes(sys.stdin.buffer.read());p.chmod(0o755)"
+        run(['docker','exec','-i','wechat-bot','/usr/bin/python3','-c',writer,prefix+'/bin/gdb'],input=wrapper.encode())
+        run(['docker','exec','wechat-bot','chown','1000:1000',prefix+'/vault-public.pem'])
+        env={**desktop,'HOME':'/config','PYTHONDONTWRITEBYTECODE':'1','PYTHONUNBUFFERED':'1',
+            'PYTHONPATH':':'.join([prefix,prefix+'/chatlog-keeper',prefix+'/reader-python',prefix+'/validation-deps/usr/lib/python3/dist-packages']),
+            'PATH':prefix+'/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'READER_ACCOUNT':json.loads((PERSIST/'config/reader.json').read_text())['account'],
+            'READER_BOOTSTRAP_PUBLIC_PATH':prefix+'/vault-public.pem','READER_BOOTSTRAP_IMPORT_PATH':inside+'/encrypted-key.json'}
+        command=['docker','exec','--user','abc']
+        for key,value in env.items():command+=['--env',key+'='+value]
+        command+=['wechat-bot']
+        probe="import hashlib,pathlib,subprocess;from Crypto.Cipher import AES;from chatlog_keeper import linux_key;assert hashlib.sha256(pathlib.Path('/opt/wechat/wechat').read_bytes()).hexdigest()=='2ca28ea56b1a400543d0128ebaf0b93f88172dd66dc0426d3d74fdb971eab959';r=subprocess.run(['gdb','--batch','-ex','run','--args','/bin/true'],capture_output=True,text=True,check=True);assert 'exited normally' in r.stdout;print('bootstrap_tools_verified_inside_wechat_docker')"
+        run(command+['/usr/bin/python3','-c',probe],timeout=45)
+        yield command,imports/'encrypted-key.json'
+    finally:
+        run(['docker','exec','wechat-bot','rm','-rf',prefix])
+        subprocess.run(['docker','rm','-f',artifacts],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        shutil.rmtree(imports)
+
 def capture():
     container=json.loads(output(['docker','inspect','wechat-bot']))[0]
     container_id=container['Id']
-    pidroot=Path('/proc')/str(container['State']['Pid'])/'root'
     mains=[]
     for cmd in Path('/proc').glob('[0-9]*/cmdline'):
         try:
-            argv=cmd.read_bytes().split(b'\0')
             if os.readlink(cmd.with_name('exe'))=='/opt/wechat/wechat' and container_id in cmd.with_name('cgroup').read_text():mains.append(cmd)
-        except (OSError,IndexError):continue
+        except OSError:continue
     if len(mains)!=1:raise RuntimeError('Expected one current WeChat main process')
     main=mains[0]
     environment=dict(part.split(b'=',1) for part in main.with_name('environ').read_bytes().split(b'\0') if b'=' in part)
     allowed=['DISPLAY','DBUS_SESSION_BUS_ADDRESS','XDG_RUNTIME_DIR','XAUTHORITY','LC_ALL','LANG','QT_LINUX_ACCESSIBILITY_ALWAYS_ON','NO_AT_BRIDGE']
     desktop={k:environment[k.encode()].decode() for k in allowed if k.encode() in environment}
-    # These are desktop transport parameters, never WeChat authentication data.
     argv=[v.decode() for v in main.read_bytes().split(b'\0') if v];argv[0]='/opt/wechat/wechat'
-    env=dict(os.environ)
-    for line in (ROOT/'.env').read_text().splitlines():
-        if '=' in line:k,v=line.split('=',1);env[k]=v
-    bus=desktop['DBUS_SESSION_BUS_ADDRESS'];match=re.match(r'unix:path=([^,]+)',bus)
-    if not match:raise RuntimeError('Expected existing Unix desktop bus')
-    if not (pidroot/match[1].lstrip('/')).is_socket():raise RuntimeError('Desktop session socket missing')
-    env.update(READER_DISPLAY=desktop['DISPLAY'],READER_DBUS=bus,READER_DBUS_SOCKET=match[1],WECHAT_DESKTOP_ROOT=str(pidroot))
-    command=['docker','compose','--env-file',ROOT/'.env','-f',CODE/'compose.bootstrap.yaml','--profile','bootstrap']
-    run(command+['config','--quiet'],env=env)
-    saved=pause();saved.update(desktop=desktop,argv=argv);save(STATE,saved)
-    (PERSIST/'key-import/encrypted-key.json').unlink(missing_ok=True)
-    stopped=False
-    try:
-        namespace_pid=next(line.split()[-1] for line in main.with_name('status').read_text().splitlines() if line.startswith('NSpid:'))
-        run(['docker','exec','--user','abc','wechat-bot','kill','-TERM',namespace_pid]);stopped=True
-        deadline=time.time()+30
-        while main.exists() and time.time()<deadline:time.sleep(.5)
-        if main.exists():raise RuntimeError('WeChat did not stop normally')
-        run(command+['run','--rm','bootstrap'],env=env,timeout=660)
-        reader('--profile','ops','run','--rm','credentials','import-key')
-    finally:
-        if stopped:start_wechat()
-        # A failed capture still restores the old working source and switches.
-        resume()
+    with bootstrap_tools(desktop) as (command,encrypted):
+        saved=pause();saved.update(desktop=desktop,argv=argv);save(STATE,saved)
+        stopped=False
+        try:
+            namespace_pid=next(line.split()[-1] for line in main.with_name('status').read_text().splitlines() if line.startswith('NSpid:'))
+            run(['docker','exec','--user','abc','wechat-bot','kill','-TERM',namespace_pid]);stopped=True
+            deadline=time.time()+30
+            while main.exists() and time.time()<deadline:time.sleep(.5)
+            if main.exists():raise RuntimeError('WeChat did not stop normally')
+            run(command+['/usr/bin/python3','-m','chatlog_reader.bootstrap'],timeout=660)
+            envelope=encrypted.read_bytes()
+            if len(envelope)>2048:raise RuntimeError('Invalid encrypted key envelope')
+            target=PERSIST/'key-import/encrypted-key.json';atomic(target,envelope);os.chown(target,1000,1000)
+            reader('--profile','ops','run','--rm','credentials','import-key')
+        finally:
+            if stopped:start_wechat()
+            resume()
     reader('up','-d','reader')
 
 def start_wechat():

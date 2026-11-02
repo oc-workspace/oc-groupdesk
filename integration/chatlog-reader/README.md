@@ -16,14 +16,14 @@
 遵循项目开发服务器oc-push、生产发布桥oc-prod-release、核对PR准确head及diff并合并后部署的既有流程。prepare-inputs.py验证inputs.lock.json中的公开源码、wheel和离线依赖摘要；inputs不入库。
 
 1. 在可用构建机准备已校验inputs，离线构建Dockerfile的test/production目标，运行33项隔离合成测试。
-2. 在root2使用build.sh构建一次性bootstrap。基础镜像ID由脚本核对，不从外网拉取。离线验证gdb能追踪同容器UID1000的测试子进程。
+2. 在root2使用build.sh构建一次性bootstrap工具镜像。基础镜像ID由脚本核对，不从外网拉取。离线验证gdb能追踪同容器UID1000的测试子进程。
 3. sender镜像基于已验证微信基础镜像，inputs/native-bowxt须来自当前生产公共源码，经native-patch.py修改。完整SDK测试通过后固定镜像ID；禁止仅复制单文件而丢失既有热修复。
 4. 从已合并生产提交导出本目录及相邻maibot/chatlog_runtime.py；manage.py prepare --image sha256:... --bootstrap sha256:... 创建白名单、保密目录和密钥公私钥。不会开始取钥。
 5. 用户已明确授权加密保存与受控启动时，manage.py capture暂停新任务、等已接纳任务完成、暂停发送及巡检；同桌面可见启动取钥，可能需要本人手机确认。结束后恢复原微信与旧数据源，失败也恢复；UI未恢复时保持发送暂停，并提示运维执行resume。
 6. reader健康后manage.py cutover --sender-image sha256:...，校验所有公开代码基线，备份配置及账本，切换内部网络与客户端令牌；首次游标从当前尾部建立，不重放历史。send_only保留原发送队列、暂停和输入安全锁，停止自动UI读消息与资料卡补读。
 7. 检查源健康、群隔离、游标和容器重启复用密钥；总结只做SSH群预览，不向Shanghai发送测试。
 
-所有运行进程均在Docker中；manage.py仅是主机部署命令，不新增主机常驻采集进程。bootstrap及credentials是一次性Compose profile，平时不运行。
+所有运行进程均在Docker中；manage.py仅是主机部署命令，不新增主机常驻采集进程。credentials为一次性Compose profile；bootstrap-artifacts是仅提供公开工具的固定Docker镜像容器，平时不创建。取钥时临时在原微信Docker内以UID1000运行，复用真实桌面连接，结束即清理工具及加密中转目录，不把桌面套接字共享给其他容器。
 
 ## 运维
 

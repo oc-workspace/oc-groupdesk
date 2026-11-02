@@ -29,8 +29,8 @@ def main():
         key=linux_key.extract_wechat_key_active(db_path=str(database),timeout=600)
         if not key or not wechat_db._verify_key_v4(key,wechat_db._read_stable_page1(database)):
             raise RuntimeError('No database-verified key')
-        encrypted=wrap(key,account,'/bootstrap/vault-public.pem')
-        private_write('/imports/encrypted-key.json',encrypted)
+        encrypted=wrap(key,account,os.environ.get('READER_BOOTSTRAP_PUBLIC_PATH','/bootstrap/vault-public.pem'))
+        private_write(os.environ.get('READER_BOOTSTRAP_IMPORT_PATH','/imports/encrypted-key.json'),encrypted)
         print(json.dumps({'encrypted_key_ready':True,'database_hmac':True}),flush=True)
     finally:
         key=None
