@@ -42,8 +42,8 @@ test('interaction administration requires authentication and CSRF; adapter capab
  assert.equal((await req('/interactions/definitions','POST',{},false,{'X-CSRF-Token':'wrong'})).status,403);
  const config=await req('/runtime/config/'+a.external_id,'GET',undefined,true);assert.equal(config.data.interactions_contract_version,1);assert.equal(config.data.interactions.bindings.length,1);
  assert(!JSON.stringify(config.data.interactions).includes('key_ciphertext'));
- assert.equal((await req('/runtime/ack','POST',{group_id:a.id,revision:config.data.revision,timeout_policy_version:2},true)).status,409);
- assert.equal((await req('/runtime/ack','POST',{group_id:a.id,revision:config.data.revision,timeout_policy_version:2,interactions_policy_version:1},true)).status,200);
+ assert.equal((await req('/runtime/ack','POST',{group_id:a.id,revision:config.data.revision,reply_limits_version:1,timeout_policy_version:2},true)).status,409);
+ assert.equal((await req('/runtime/ack','POST',{group_id:a.id,revision:config.data.revision,reply_limits_version:1,timeout_policy_version:2,interactions_policy_version:1},true)).status,200);
 });
 test('each message is idempotent and each member earns only one daily award',async()=>{
  const first=await event(a);assert.equal(first.status,200);assert.equal(first.data.outcome,'checked_in');

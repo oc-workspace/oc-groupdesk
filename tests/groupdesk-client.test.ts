@@ -49,3 +49,9 @@ test('feature composition requires a matching complete-combination acknowledgeme
  await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,persona_composition_version:1,persona_composition_sha256:bundle.persona_composition_sha256}));
  assert.equal(calls.at(-1)!.body.persona_composition_sha256,bundle.persona_composition_sha256);
 });
+
+test('per-group reply limits must be applied before the adapter acknowledges',async()=>{
+ const bundle={...config,reply_limits_contract_version:1};const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/reply limits/);assert.equal(calls.length,1);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_limits_version:1}));assert.equal(calls.at(-1)!.body.reply_limits_version,1);
+});

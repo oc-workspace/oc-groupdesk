@@ -4,9 +4,11 @@ import hashlib
 def validate(p):
     c=p.get('policy',{}).get('conversation')
     if c is None:return
-    if not isinstance(c,dict) or set(c)!={'enabled','banter_replies','frequency','instructions'}:raise ValueError('Invalid conversation policy')
+    if not isinstance(c,dict) or not {'enabled','banter_replies','frequency','instructions'}<=set(c)<={'enabled','banter_replies','frequency','instructions','reply_limits'}:raise ValueError('Invalid conversation policy')
     if type(c['enabled']) is not bool or type(c['banter_replies']) is not bool or c['frequency'] not in ['low','normal','high'] or not isinstance(c['instructions'],str) or len(c['instructions'])>1500:raise ValueError('Invalid conversation policy')
     if c['enabled'] and p.get('conversation_policy_contract_version')!=1:raise ValueError('Unknown conversation contract')
+    from reply_limits import validate_bundle
+    validate_bundle(p)
 
 def guide(p):
     c=p.get('policy',{}).get('conversation') or {}

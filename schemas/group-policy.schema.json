@@ -108,7 +108,13 @@
         "enabled": false,
         "banter_replies": false,
         "frequency": "low",
-        "instructions": ""
+        "instructions": "",
+        "reply_limits": {
+          "enabled": true,
+          "max_rounds": 2,
+          "reset_seconds": 180,
+          "followup_seconds": 180
+        }
       },
       "type": "object",
       "properties": {
@@ -129,13 +135,50 @@
         "instructions": {
           "type": "string",
           "maxLength": 1500
+        },
+        "reply_limits": {
+          "default": {
+            "enabled": true,
+            "max_rounds": 2,
+            "reset_seconds": 180,
+            "followup_seconds": 180
+          },
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "reset_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 1800
+            },
+            "followup_seconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 1800
+            }
+          },
+          "required": [
+            "enabled",
+            "max_rounds",
+            "reset_seconds",
+            "followup_seconds"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
         "enabled",
         "banter_replies",
         "frequency",
-        "instructions"
+        "instructions",
+        "reply_limits"
       ],
       "additionalProperties": false
     },

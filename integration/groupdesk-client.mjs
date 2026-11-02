@@ -32,11 +32,12 @@ export class GroupDeskClient {
     if(config.interactions?.bindings?.length&&(![1].includes(config.interactions_contract_version)||applied?.interactions_policy_version!==config.interactions_contract_version)){
       throw new Error('Adapter must apply group interactions before acknowledging this configuration');
     }
+    if(config.reply_limits_contract_version!==undefined&&(config.reply_limits_contract_version!==1||applied?.reply_limits_version!==1))throw new Error('Adapter must apply per-group reply limits before acknowledging this configuration');
     if(config.policy?.conversation?.enabled&&(config.conversation_policy_contract_version!==1||applied?.conversation_policy_version!==1))throw new Error('Adapter must apply conversation policy before acknowledging this configuration');
     if(config.persona_feature_skills?.length&&(config.persona_composition_contract_version!==1||applied?.persona_composition_version!==1||applied?.persona_composition_sha256!==config.persona_composition_sha256))throw new Error('Adapter must apply complete persona composition before acknowledging this configuration');
     if(config.newcomer_welcome_contract_version!==undefined&&(config.newcomer_welcome_contract_version!==1||applied?.newcomer_welcome_policy_version!==1))throw new Error('Adapter must apply newcomer welcome scheduling before acknowledging this configuration');
     // Send acknowledgement only AFTER the adapter applied this exact version.
-    const capabilities=Object.fromEntries(['newcomer_welcome_policy_version','timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256','persona_composition_version','persona_composition_sha256','interactions_policy_version','conversation_policy_version'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
+    const capabilities=Object.fromEntries(['reply_limits_version','newcomer_welcome_policy_version','timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256','persona_composition_version','persona_composition_sha256','interactions_policy_version','conversation_policy_version'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
     await this.request('/ack',{group_id:config.id,revision:config.revision,...capabilities});
     return config;
   }
