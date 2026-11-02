@@ -28,12 +28,13 @@ def classify(s):
     if not s['wechat']:return 'degraded','wechat_unavailable'
     if not s['maibot']:return 'degraded','maibot_unavailable'
     if not s['bridge']:return 'degraded','bridge_unavailable'
+    if s.get('identity_unresolved',0):return 'degraded','message_identity_incomplete'
     return 'online','ok'
 
 def next_action(s):
-    state,_=classify(s)
+    state,reason=classify(s)
     if state in {'online','maintenance','needs_phone','needs_unlock','offline'}:return None
-    if s.get('ui_input_blocked'):return None
+    if s.get('ui_input_blocked') or reason=='message_identity_incomplete':return None
     if s.get('desktop')=='login_ready':return 'click_login'
     if s.get('desktop')=='process_missing':return 'start_wechat'
     if not s['wechat']:return 'restart_adapter'
@@ -63,7 +64,7 @@ class Driver:
             except Exception:pass
         wechat=bool(status.get('wechat_connected') and status.get('running') and not status.get('ui_input_blocked'))
         result={'paused':not control.get('enabled') or not control.get('send_enabled'),'running':running,
-                'wechat':wechat,'ui_input_blocked':bool(status.get('ui_input_blocked')),'bridge':bool(running['bridge'] and health.get('connected') and time.time()-health.get('updated_at',0)<120),
+                'wechat':wechat,'identity_unresolved':int(status.get('identity_resolution',{}).get('unresolved',0)),'ui_input_blocked':bool(status.get('ui_input_blocked')),'bridge':bool(running['bridge'] and health.get('connected') and time.time()-health.get('updated_at',0)<120),
                 'maibot':bool(running['maibot'] and containers['maibot']['State'].get('Health',{}).get('Status')=='healthy')}
         if not wechat and running['wechat'] and not result['paused']:result['desktop']=self.desktop()
         try:
@@ -98,6 +99,7 @@ class Driver:
         message='GT小跟班：'+labels.get(state,'运行状态需要检查')+'。\n巡检频率：每小时一次。'
         if state in {'needs_phone','needs_unlock'}:message+='\n远程桌面：http://127.0.0.1:18080 （需已连接SSH转发）'
         if reason=='ui_window_blocked':message+='\n微信残留窗口未能安全清理，请打开远程桌面检查；没有自动重启微信。\nhttp://127.0.0.1:18080 （需已连接SSH转发）'
+        if reason=='message_identity_incomplete':message+='\n部分消息的收发方向或发送者昵称仍未识别，已耗尽有限重试；请检查采集界面。没有自动重启微信，也没有猜测人名。'
         message+='\n状态原因：'+reason
         from zoneinfo import ZoneInfo
         day=datetime.datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()

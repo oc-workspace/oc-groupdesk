@@ -1,0 +1,111 @@
+--- a/src/bowxt/client.py
++++ b/src/bowxt/client.py
+@@ -290,8 +290,13 @@
+                         updates = {}
+                         raw = dict(item.raw)
+                         if item.direction is Direction.UNKNOWN and item.bounds:
+-                            updates["direction"] = snapshot.classify(item.bounds)
++                            direction = snapshot.classify(item.bounds)
+                             raw["direction_source"] = "window_pixels"
++                            if direction is Direction.UNKNOWN:
++                                from .identity_recovery import avatar_direction
++                                direction = avatar_direction(snapshot,item.bounds,message_list.bounds)
++                                if direction is not Direction.UNKNOWN:raw["direction_source"] = "avatar_gutter_pixels"
++                            updates["direction"] = direction
+                         if item.type is MessageType.IMAGE and item.bounds:
+                             image_bounds = snapshot.locate_image(item.bounds)
+                             image = snapshot.read_image(image_bounds) if image_bounds else None
+--- a/src/bowxt/service.py
++++ b/src/bowxt/service.py
+@@ -126,6 +126,8 @@
+         self.events = EventBroker()
+         self._client_factory = client_factory or self._default_client
+         self._commands: queue.Queue[_SendCommand] = queue.Queue(maxsize=128)
++        from .identity_recovery import init as init_identity
++        init_identity(self.store)
+         self._sender_retries = {}
+         self._sender_jobs: deque[_SenderJob] = deque()
+         self._sender_job_keys: set[tuple[int, str]] = set()
+@@ -192,6 +194,8 @@
+         value["action_delay"] = self.action_delay
+         value["queue_depth"] = self._commands.qsize()
+         value["sender_queue_depth"] = len(self._sender_jobs)
++        from .identity_recovery import stats as identity_stats
++        value["identity_resolution"] = identity_stats(self.store)
+         value["image_queue_depth"] = len(self._image_jobs)
+         return value
+ 
+@@ -687,7 +691,8 @@
+     def _queue_sender_job(self, chat_id: int, message_id: str) -> None:
+         key = (int(chat_id), str(message_id))
+         from .transient_recovery import sender_ready
+-        if not sender_ready(self,key):return
++        from .identity_recovery import ready as identity_ready
++        if not sender_ready(self,key) or not identity_ready(self.store,*key):return
+         if key in self._sender_job_keys or len(self._sender_jobs) >= 512:
+             return
+         self._sender_jobs.append(_SenderJob(*key))
+@@ -748,6 +753,8 @@
+         timings={'queue_wait_s':max(0.0,started-job.queued_at)}
+         from .transient_recovery import sender_started, sender_finished
+         sender_started(self,(job.chat_id,job.message_id))
++        from . import identity_recovery as identity
++        identity.attempt(self.store,job.chat_id,job.message_id,'read_attempt')
+         try:
+             chat = self.store.get_chat(job.chat_id)
+             self._set_status(active_chat=chat.name)
+@@ -760,16 +767,25 @@
+             timings['read_visible_s']=time.monotonic()-phase
+             target = next((item for item in messages if item.id == job.message_id), None)
+             if target is None:
++                identity.reason(self.store,job.chat_id,job.message_id,'not_in_current_viewport')
+                 return
+             phase=time.monotonic()
+             if target.direction is Direction.UNKNOWN and target.id.startswith(('arrival:','appearance:')):
+                 stored, _ = self.store.save_message(target)
+                 if stored.direction=='incoming':target=replace(target,direction=Direction.INCOMING)
++            if target.direction is not Direction.INCOMING:
++                identity.reason(self.store,job.chat_id,job.message_id,'direction_not_confirmed')
++                return
+             enriched = [target] if target.sender else client.enrich_visible_senders([target], chat=chat.name)
+             timings['profile_lookup_s']=time.monotonic()-phase
+             if not enriched or enriched[0].sender is None:
++                identity.reason(self.store,job.chat_id,job.message_id,'profile_name_unavailable')
+                 return
++            # Preserve this arrival's identity; UI enrichment is an update,
++            # never a new message with a fresh observed_at.
++            enriched[0]=replace(enriched[0],id=job.message_id)
+             stored, _created = self.store.save_message(enriched[0])
++            identity.observe(self.store,stored)
+             sender_finished(self,(job.chat_id,job.message_id))
+             timings['worker_total_s']=time.monotonic()-started
+             timings['capture_to_sender_s']=max(0.0,(datetime.now(timezone.utc)-datetime.fromisoformat(stored.observed_at)).total_seconds())
+@@ -865,6 +881,9 @@
+                     # it must not be appended as a new arrival.
+                     continue
+                 stored, created = self.store.save_message(message)
++                if stored.sender:
++                    from .identity_recovery import observe as observe_identity
++                    observe_identity(self.store,stored)
+                 sender_update = bool(
+                     (message.sender is not None or message.sender_organization is not None)
+                     and stored.seq not in self._sender_event_seqs
+@@ -890,10 +909,17 @@
+                     uia_sender
+                     and not stored.sender
+                     and message.chat_type is ChatType.GROUP
+-                    and stored.direction == 'incoming'
++                    and stored.direction in {'incoming','unknown'}
++                    and message.type is MessageType.TEXT
+                     and stored.seq>self.sender_profile_cutoffs.get(str(chat.id),0)
+                     and not self.store.sender_profile_checked(stored.seq)
+                 ):
++                    from . import identity_recovery as identity
++                    from .transient_recovery import sender_ready
++                    if identity.observe(self.store,stored):
++                        self._sender_retries.pop((chat.id,message.id),None)
++                    if not sender_ready(self,(chat.id,message.id)) or not identity.ready(self.store,chat.id,message.id):
++                        continue
+                     if created:
+                         new_sender_candidates.append(message)
+                     elif backlog_candidate is None:
