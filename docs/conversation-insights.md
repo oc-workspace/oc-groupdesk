@@ -17,3 +17,7 @@ Gemini分析显式请求application/json输出，参考[官方GenerationConfig](
 迁移010只增加关键词字段及分析任务/标注表，不更改旧群版本和现有人设。启用语境配置后需conversation_policy_version=1的适配器确认。原生安装器校验policy.py基线并幂等加入唯一接梗判断入口；banter.py与groupdesk_runtime.py同批更新，只重建MaiBot和桥接，不重启微信。发布沿用oc-push、隔离生产PR及Docker流程。
 
 普通worker同时处理Persona和语境分析，需访问管理员选中的公网HTTPS模型服务。它连接数据库internal隔离网及独立model-egress桥接网，不加入共享edge网络，也不发布对外端口；模型传输继续校验公网地址、固定DNS解析结果并验证TLS。新增出站权限已获管理员明确授权，沿用既定PR及Docker流程发布。失败任务不自动重试，恢复连接后由管理员重新发起。
+
+## 连续回复与跟进参数
+
+群配置中的「连续回复与跟进」控制实际执行的轮数、重置间隔、同一成员的免点名跟进窗口，独立于下方玩笑识别开关。按群保存，不修改全局默认文件；初始值沿用2轮、180秒重置、180秒跟进，也可单独关闭轮数限制。仍须等待机器人确认配置版本。详细语义、迁移与原生部署见[integration/maibot/reply-limits/README.md](../integration/maibot/reply-limits/README.md)。

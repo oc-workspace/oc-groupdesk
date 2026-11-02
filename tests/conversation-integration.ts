@@ -70,6 +70,27 @@ test('per-group recognition stays opt in and requires an adapter that applied it
  a=(await req('/groups/'+a.id,'PUT',{...a,policy:{...a.policy,conversation:{enabled:true,banter_replies:true,frequency:'low',instructions:'Synthetic rule'}}})).data;
  assert.equal((await req('/runtime/config/'+a.external_id,'GET',undefined,true)).data.conversation_policy_contract_version,1);
  const other=(await req('/runtime/config/'+b.external_id,'GET',undefined,true)).data;assert.equal(other.policy.conversation.enabled,false);assert.equal(other.conversation_policy_contract_version,undefined);
- const ack={group_id:a.id,revision:a.revision,timeout_policy_version:2};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
+ const ack={group_id:a.id,revision:a.revision,reply_limits_version:1,timeout_policy_version:2};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...ack,conversation_policy_version:1},true)).status,200);
+});
+
+test('reply limits are editable per group, persistent, validated and require execution acknowledgement',async()=>{
+ const readGroup=async(id:string)=>(await req('/overview')).data.groups.find((g:any)=>g.id===id);
+ let current=await readGroup(a.id);const oldB=await readGroup(b.id);
+ const limits={enabled:true,max_rounds:4,reset_seconds:300,followup_seconds:240};
+ const saved=await req('/groups/'+a.id,'PUT',{...current,policy:{...current.policy,conversation:{...current.policy.conversation,reply_limits:limits}}});assert.equal(saved.status,200,JSON.stringify(saved.data));
+ current=saved.data;const fetched=await readGroup(a.id);assert.deepEqual(fetched.policy.conversation.reply_limits,limits);
+ assert.deepEqual((await readGroup(b.id)).policy.conversation.reply_limits,oldB.policy.conversation.reply_limits);
+ const runtime=(await req('/runtime/config/'+a.external_id,'GET',undefined,true)).data;assert.equal(runtime.reply_limits_contract_version,1);assert.deepEqual(runtime.policy.conversation.reply_limits,limits);
+ const ack={group_id:a.id,revision:current.revision,timeout_policy_version:2,conversation_policy_version:1};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);assert.equal((await req('/runtime/ack','POST',{...ack,reply_limits_version:1},true)).status,200);
+ const invalid=await req('/groups/'+a.id,'PUT',{...current,policy:{...current.policy,conversation:{...current.policy.conversation,reply_limits:{...limits,max_rounds:0}}}});assert.equal(invalid.status,400);
+});
+
+test('reply limit migration preserves existing tone settings and invalidates old acknowledgements once',async()=>{
+ const {readFile}=await import('node:fs/promises');const sql=await readFile(new URL('../migrations/013_group_reply_limits.sql',import.meta.url),'utf8');
+ await pool.query("UPDATE groups SET policy=policy #- '{conversation,reply_limits}',applied_revision=revision WHERE id=$1",[a.id]);
+ const before=(await pool.query('SELECT * FROM groups WHERE id=$1',[a.id])).rows[0];await pool.query(sql);
+ const after=(await pool.query('SELECT * FROM groups WHERE id=$1',[a.id])).rows[0];assert.equal(after.revision,before.revision+1);assert.equal(after.applied_revision,0);assert.equal(after.bot_seen_at,null);
+ assert.equal(after.policy.conversation.instructions,before.policy.conversation.instructions);assert.equal(after.policy.conversation.enabled,before.policy.conversation.enabled);assert.deepEqual(after.policy.conversation.reply_limits,{enabled:true,max_rounds:2,reset_seconds:180,followup_seconds:180});
+ await pool.query(sql);assert.equal((await pool.query('SELECT revision FROM groups WHERE id=$1',[a.id])).rows[0].revision,after.revision);
 });

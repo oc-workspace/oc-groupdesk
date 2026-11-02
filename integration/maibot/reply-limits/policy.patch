@@ -1,0 +1,47 @@
+--- a/limits/policy.py
++++ b/limits/policy.py
+@@ -16,6 +16,7 @@
+ import uuid
+ import groupdesk_runtime as gd
+ import latency
++import reply_limits
+ import newcomer_welcome as welcome
+ from food_participation import FOOD_TOPIC, authored_text, combination, continuation, rules_for, validate_rules, EXIT
+ 
+@@ -283,7 +284,8 @@
+             if db.execute('SELECT COUNT(*) FROM observed WHERE ts>? AND chat_id=?',(now-60,chat_id)).fetchone()[0] > self.cfg['busy_messages_per_minute']:
+                 return 'busy'
+         conversation=self.conversation_for(db,chat_id)
+-        if not explicit and conversation and now-conversation['last'] < self.cfg.get('conversation_reset_seconds',180) and conversation['rounds'] >= self.cfg.get('conversation_rounds',2):
++        limits=reply_limits.for_group(self.cfg,chat_id)
++        if not explicit and limits['enabled'] and conversation and now-conversation['last'] < limits['reset_seconds'] and conversation['rounds'] >= limits['max_rounds']:
+             return 'conversation_rounds'
+         if table=='sends': return None
+         usage = self.usage(db, now)
+@@ -328,7 +330,7 @@
+                         db.execute('UPDATE pending SET kind="direct",explicit=1 WHERE id=?',(waiting['id'],))
+                     self.count(db,'coalesced_active_reminder' if active else 'coalesced_pending_reminder')
+                     return 'coalesced_reminder'
+-            followup = db.execute('SELECT 1 FROM turns t JOIN sends s ON t.id=s.turn_id WHERE t.sender=? AND s.status="sent" AND s.ts>?', (sender,now-self.cfg['followup_seconds'])).fetchone()
++            followup = db.execute('SELECT 1 FROM turns t JOIN sends s ON t.id=s.turn_id WHERE t.sender=? AND s.status="sent" AND s.ts>?', (sender,now-reply_limits.for_group(self.cfg,chat_id)['followup_seconds'])).fetchone()
+             existing = db.execute('SELECT kind,explicit,fast FROM pending WHERE sender=?',(sender,)).fetchone()
+             explicit = bool(at_me or NAME.search(text) or (existing and existing['explicit']))
+             direct = bool(at_me or NAME.search(text) or followup or (existing and existing['kind']=='direct'))
+@@ -513,7 +515,7 @@
+                 self.count(db,'dispatched_'+row['kind'])
+                 if row['fast']: self.count(db,'dispatched_fast')
+                 conversation=self.conversation_for(db,row['chat_id'])
+-                rounds=conversation['rounds'] if conversation and now-conversation['last']<self.cfg.get('conversation_reset_seconds',180) else 0
++                rounds=conversation['rounds'] if conversation and now-conversation['last']<reply_limits.for_group(self.cfg,row['chat_id'])['reset_seconds'] else 0
+                 topics=priority_topics(self.cfg,row['chat_id'],row['text']) if row['kind']=='passive' else []
+                 if food_anchor and row['kind']=='passive':topics=list(dict.fromkeys(topics+[FOOD_TOPIC]))
+                 if managed is not None:
+@@ -573,7 +575,7 @@
+                 self.count(db,'sends_'+status)
+                 if status=='sent' and row['status']!='sent':
+                     now=self.clock(); previous=self.conversation_for(db,row['chat_id'])
+-                    rounds=1 if row['explicit'] or not previous or now-previous['last']>=self.cfg.get('conversation_reset_seconds',180) else previous['rounds']+1
++                    rounds=1 if row['explicit'] or not previous or now-previous['last']>=reply_limits.for_group(self.cfg,row['chat_id'])['reset_seconds'] else previous['rounds']+1
+                     if row['chat_id']:
+                         db.execute('INSERT INTO group_conversation VALUES (?,?,?) ON CONFLICT(chat_id) DO UPDATE SET last=excluded.last,rounds=excluded.rounds',(row['chat_id'],now,rounds))
+                     else:

@@ -1,4 +1,5 @@
-export const conversationDefaults={enabled:false,banter_replies:false,frequency:'low' as 'low'|'normal'|'high',instructions:''};
+export const replyLimitsDefaults={enabled:true,max_rounds:2,reset_seconds:180,followup_seconds:180};
+export const conversationDefaults={enabled:false,banter_replies:false,frequency:'low' as 'low'|'normal'|'high',instructions:'',reply_limits:replyLimitsDefaults};
 export const toneNames={serious:'认真讨论',playful:'玩笑 / 接梗',mixed:'认真与玩笑混合',uncertain:'暂不确定'};
 export type Tone=keyof typeof toneNames;
 export type ConversationPolicy=typeof conversationDefaults;

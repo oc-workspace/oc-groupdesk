@@ -38,3 +38,11 @@ test('group tone guidance is opt in and never turns jokes into facts or bypasses
  assert.match(conversationGuide({...conversationDefaults,enabled:true}),/不主动接梗/);
  assert.match(conversationGuide({...conversationDefaults,enabled:true,banter_replies:true}),/不把玩笑存成人物事实/);
 });
+
+test('per-group reply limits keep old defaults and validate editable bounds',async()=>{
+ const {conversationPolicySchema}=await import('../server/conversation-policy.js');
+ const legacy={enabled:false,banter_replies:false,frequency:'low',instructions:''};
+ assert.deepEqual(conversationPolicySchema.parse(legacy).reply_limits,{enabled:true,max_rounds:2,reset_seconds:180,followup_seconds:180});
+ const a=conversationPolicySchema.parse({...legacy,reply_limits:{enabled:true,max_rounds:4,reset_seconds:300,followup_seconds:240}});assert.equal(a.reply_limits.max_rounds,4);
+ for(const limits of [{...a.reply_limits,max_rounds:0},{...a.reply_limits,max_rounds:21},{...a.reply_limits,reset_seconds:29},{...a.reply_limits,followup_seconds:1801},{...a.reply_limits,enabled:1}])assert.throws(()=>conversationPolicySchema.parse({...legacy,reply_limits:limits}));
+});
