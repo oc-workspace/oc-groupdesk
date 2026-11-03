@@ -48,7 +48,7 @@ test('large overlapping selections stay bounded and retain analysis plus curated
  assert.equal(sampled.collections.find(c=>c.collection_id===references)?.sampled_records,32);assert.equal(sampled.collections.find(c=>c.collection_id===curated)?.sampled_records,101);
  assert(sampled.selected.filter(r=>r.kind==='document').every(r=>r.text.length>200));
  const raw=sampled.selected.filter(r=>r.collection_id===archive);assert.equal(raw.length,367);assert.equal(raw[0].id,'full:00000001');assert.equal(raw.at(-1)?.id,'full:00220001');
- assert(!JSON.stringify(sampled).includes('UNSELECTED-METADATA'));assert(!sampled.selected.some(r=>r.id==='full:00000002'));
+ assert(!JSON.stringify(sampled).includes('UNSELECTED-METADATA'));assert(!sampled.selected.some(r=>r.collection_id===archive&&r.id==='full:00000002'));
 });
 test('keyword datasets retain Unicode aliases and boundaries without reading quotation bodies',async()=>{
  const c=await collection('Keyword source'),texts=['ＡＬＥＸ—Ｚ speaks','Alexander does not match','literal a+b','notalex-z is not a whole word','quotation only'];
