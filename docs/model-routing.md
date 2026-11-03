@@ -1,5 +1,7 @@
 # 模型配置与按群路由
 
+各文字处理阶段的独立模型、API Key、继承关系和适配器要求见 [分阶段模型配置](model-stages.md)。
+
 模型配置模块管理 OpenAI Chat Completions、OpenAI Responses 和 Gemini 原生 HTTPS 服务。OpenAI 两种使用 Bearer，Gemini 使用 x-goog-api-key，密钥不进入目录查询 URL。API Key 以 AES-256-GCM 密文存入数据库；独立的 MODEL_ENCRYPTION_KEY 保存在生产外部 env，网页只返回名称和末四位，编辑时不回显旧密钥。API 地址变化必须重新输入 Key，目录请求不跟随重定向，解析公网地址后固定连接地址并验证 TLS。
 
 每个 Key 查询 /models，目录只作为服务列出的候选。若服务不提供功能元数据，按名称推测文字/生图/其他/待确认，不能据此保证权限、余额或实际调用成功。管理员可手动登记模型及文字/生图类型。查询失败保留原目录；查询成功也保留此前手动登记/现用模型，不擅自切换路由。本次查询不调用文字生成或图片生成接口。

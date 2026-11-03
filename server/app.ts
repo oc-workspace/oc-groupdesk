@@ -13,7 +13,7 @@ import {pool,transaction,audit} from './db.js';
 import {token,digest,passwordValid,passwordHash,secureEqual,HttpError,requireCondition} from './security.js';
 import {searchKnowledge} from './search.js';
 import {identityInstructions} from './identity.js';
-import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute} from './models.js';
+import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute,privateStageRoutes,hasStageRouting} from './models.js';
 import {registerPersonaAdmin} from './personas-api.js';
 import {runtimePersonaBundle,featureBindings} from './persona-composition.js';
 import {registerConversationAdmin} from './conversation-insights.js';
@@ -159,7 +159,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
       const current=(await db.query('SELECT * FROM groups WHERE id=$1 FOR UPDATE',[groupId])).rows[0];
       requireCondition(current,404,'群不存在');
       requireCondition(body.revision===current.revision,409,'配置已被其他操作更新，请刷新后重试');
-      if(body.model_routes){await validateRoutes(body.model_routes,db);await db.query('UPDATE groups SET model_routes=$1 WHERE id=$2',[body.model_routes,groupId]);}
+      if(body.model_routes){if(body.model_routes.stages===undefined&&current.model_routes.stages!==undefined)body.model_routes.stages=current.model_routes.stages;await validateRoutes(body.model_routes,db);await db.query('UPDATE groups SET model_routes=$1 WHERE id=$2',[body.model_routes,groupId]);}
       await db.query('UPDATE groups SET name=$1,external_id=$2,enabled=$3,language=$4,allow_language_override=$5,interaction=$6,revision=revision+1 WHERE id=$7',
         [body.name,body.external_id||null,body.enabled,body.language,body.allow_language_override,body.interaction,groupId]);
       if(body.policy){
@@ -379,7 +379,8 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
       const group=(await db.query('SELECT id,external_id,revision,enabled,model_routes FROM groups WHERE id=$1 FOR SHARE',[body.group_id])).rows[0];
       requireCondition(group&&(!req.runtimeGroups||req.runtimeGroups.includes(group.external_id)),403,'此适配器未授权该群');
       requireCondition(group.enabled&&group.revision===body.revision,409,'群已停用或配置版本已变化');
-      return {text_route:await privateTextRoute(group,db)};
+      const routes=await effectiveModelRoutes(group,db);
+      return {text_route:hasStageRouting(routes)&&!routes.text.available?null:await privateTextRoute(group,db),...(hasStageRouting(routes)?{stage_routes:await privateStageRoutes(group,db)}:{})};
     });res.json(output);
   });
   app.get('/api/runtime/scenes',async(req,res)=>{
@@ -460,13 +461,14 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     config.interactions=await runtimeInteractions(config);
     config.model_routing_contract_version=1;
     config.model_routing=await effectiveModelRoutes(config);
+    if(hasStageRouting(config.model_routing))config.model_stage_routing_contract_version=1;
     Object.assign(config,await runtimePersonaBundle(config));
     config.identity_instructions=identityInstructions(config.policy.identity,config.persona_skill?'custom':config.policy.persona);
     config.participation_skill=await readFile(new URL('../skills/group-participation/SKILL.md',import.meta.url),'utf8');
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),reply_frequency_version:z.literal(1).optional(),reply_frequency_revision:z.number().int().positive().optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),reply_frequency_version:z.literal(1).optional(),reply_frequency_revision:z.number().int().positive().optional(),model_routing_version:z.literal(1).optional(),model_stage_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,policy,language,allow_language_override,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const composition=await runtimePersonaBundle(routingGroup);
@@ -476,6 +478,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     if(persona)requireCondition(body.persona_skill_version===1&&body.persona_skill_sha256===persona.sha256,409,'请更新机器人并应用正确的 Persona 版本后再确认');
     const routes=await effectiveModelRoutes(routingGroup) as any;
     if(routes.text.source!=='legacy'||routes.image.source!=='disabled')requireCondition(body.model_routing_version===1,409,'请更新机器人以应用模型路由后再确认');
+    if(hasStageRouting(routes))requireCondition(body.model_stage_routing_version===1,409,'请更新机器人并加载分阶段模型配置后再确认');
     if(req.runtimeGroups){
       const group=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
       requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');
