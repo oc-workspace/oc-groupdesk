@@ -1,0 +1,19 @@
+--- a/limits/recovery.py
++++ b/limits/recovery.py
+@@ -83,6 +83,7 @@
+         grouped={}
+         for row in rows:
+             if row['chat_id'] not in allowed:continue
++            if db.execute('SELECT 1 FROM frequency_waiting WHERE seq=? AND status IN ("waiting","pending","coalesced")',(row['seq'],)).fetchone():continue
+             if row['turn_id']:
+                 sends=db.execute('SELECT status FROM sends WHERE turn_id=?',(row['turn_id'],)).fetchall()
+                 if any(s['status']=='sent' for s in sends):continue
+@@ -115,6 +116,8 @@
+     now=p.clock()
+     with p.db() as db:
+         refresh(db,now)
++        from reply_frequency import has_waiting
++        if has_waiting(db,now):return False
+         if db.execute('SELECT 1 FROM pending UNION ALL SELECT 1 FROM turns WHERE status="active" AND expires>?',(now,)).fetchone():return False
+         for batch in db.execute('SELECT * FROM recovery_batches WHERE status="queued" ORDER BY created,id').fetchall():
+             chat=batch['chat_id'];managed=gd.profile(p.cfg,chat)

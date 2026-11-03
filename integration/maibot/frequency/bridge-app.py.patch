@@ -1,0 +1,49 @@
+--- a/bridge/app.py
++++ b/bridge/app.py
+@@ -153,6 +153,9 @@
+             result = db.execute('INSERT OR IGNORE INTO outbound(id,state) VALUES (?,?)', (identifier, 'reserved'))
+             return result.rowcount == 1
+ 
++    def outbound_seen(self,identifier):
++        with self.connect() as db:return bool(db.execute('SELECT 1 FROM outbound WHERE id=?',(identifier,)).fetchone())
++
+     def finish(self, identifier, state, seq=None):
+         with self.connect() as db:
+             db.execute('UPDATE outbound SET state=?,seq=? WHERE id=?', (state, seq, identifier))
+@@ -214,6 +217,11 @@
+                     if not gd.available(managed,time.time()) or not await asyncio.to_thread(gd.check_remote_revision,managed):raise Denied('groupdesk_revision')
+                     if not gd.language_allowed(managed,text):raise Denied('groupdesk_language')
+                 turn_id = (info.additional_config or {}).get('gt_limit_turn')
++                if self.ledger.outbound_seen(identifier):return
++                from reply_frequency import reserve_when_ready
++                article=await reserve_when_ready(self.policy,identifier,turn_id,str(chat.id),refresh=settings,enabled=lambda:self.control()['send_enabled'])
++                self.policy.cfg=settings();managed=gd.profile(self.policy.cfg,str(chat.id))
++                if managed is not None and (not gd.available(managed,time.time()) or not await asyncio.to_thread(gd.check_remote_revision,managed)):raise Denied('groupdesk_revision')
+                 import latency
+                 text,wait_info=latency.decorate(self.policy,turn_id,text,managed)
+                 if managed is not None and not gd.language_allowed(managed,text):raise Denied('groupdesk_language')
+@@ -221,13 +229,14 @@
+                     LOG.warning('Outbound duplicate/uncertain send suppressed')
+                     return
+                 turn_id = (info.additional_config or {}).get('gt_limit_turn')
+-                article = self.policy.reserve_send(identifier, turn_id,chat_id=str(chat.id))
+                 latency.audit(self.policy,turn_id,identifier,wait_info)
+                 limit = 2000 if article else self.policy.cfg['output_chars']
+                 if len(text) > limit:
+                     text = text[:limit - 1].rstrip() + '…'
+                 # Reserve before submission. If the process dies during a send,
+                 # retain it for review instead of automatically sending twice.
++                from reply_frequency import check_submission
++                check_submission(self.policy,turn_id)
+                 queued = await asyncio.to_thread(self.agent.send_text, chat.id, text, client_id='maibot-' + identifier)
+                 result = await asyncio.to_thread(self.agent.wait_delivery, queued, timeout=60)
+                 status = result.delivery_status
+@@ -320,6 +329,8 @@
+                     self.policy.cfg=settings()
+                     if self.control()['send_enabled']:
+                         import recovery
++                        import reply_frequency
++                        reply_frequency.pump(self.policy)
+                         recovery.pump(self.policy)
+                     turn = self.policy.dispatch()
+                     if turn:
