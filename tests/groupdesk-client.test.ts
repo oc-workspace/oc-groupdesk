@@ -2,6 +2,13 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {GroupDeskClient} from '../integration/groupdesk-client.mjs';
 const config={id:'synthetic-group',revision:4,timeout_policy_contract_version:2,policy:{timeouts:{planner_seconds:60,request_seconds:70,direct_ttl_seconds:180,wait_apology_seconds:300}}};
+test('stage model routing requires an explicit applied capability before confirmation',async()=>{
+ const {client,calls}=fixture({...config,model_stage_routing_contract_version:1} as any);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/stage model routing/);
+ assert.equal(calls.length,1);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,model_stage_routing_version:1}));
+ assert.equal(calls.at(-1)!.body.model_stage_routing_version,1);
+});
 function fixture(bundle=config){
  const calls:{path:string;body?:any}[]=[];
  const client=new GroupDeskClient({baseUrl:'https://example.invalid',token:'isolated-adapter-token',fetchImpl:(async(url,init)=>{

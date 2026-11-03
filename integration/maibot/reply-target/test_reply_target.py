@@ -83,6 +83,75 @@ class ReplyTargetTests(unittest.TestCase):
         self.assertIs(send.call_args.kwargs['reply_message'], self.message)
         self.assertEqual(send.call_args.kwargs['processed_plain_text'], 'Good evening.')
 
+    def test_observed_structured_reference_recovers_without_mutating_input(self):
+        arguments = {'reply_reference': {'message_id': self.mid,
+                     'reply_direction': ' Answer the station-food question in English. '},
+                     'reply_text': 'Synthetic answer.'}
+        original = deepcopy(arguments)
+        normalized, recovered = reply_target.normalize_reference(self.runtime, arguments)
+        self.assertTrue(recovered)
+        self.assertEqual(normalized['msg_id'], self.mid)
+        self.assertEqual(normalized['reply_reference'], 'Answer the station-food question in English.')
+        self.assertEqual(arguments, original)
+        self.assertEqual(normalized['reply_text'], original['reply_text'])
+
+    def test_valid_string_reference_is_untouched(self):
+        arguments = {'msg_id': 'existing-target', 'reply_reference': 'Existing direction.'}
+        self.assertEqual(reply_target.normalize_reference(self.runtime, arguments), (arguments, False))
+        self.runtime.find_source_message_by_id.assert_not_called()
+
+    def test_unsupported_reference_shapes_remain_failures(self):
+        for reference in ({}, [], None, 42,
+                {'message_id': self.mid, 'reply_direction': ''},
+                {'message_id': self.mid, 'reply_direction': {'nested': 'text'}},
+                {'message_id': self.mid, 'reply_direction': 'x' * 4001},
+                {'message_id': self.mid, 'reply_direction': 'OK', 'attach_at': ['someone']},
+                {'message_id': [], 'reply_direction': 'OK'}):
+            with self.subTest(reference=reference):
+                arguments = {'reply_reference': reference}
+                self.assertEqual(reply_target.normalize_reference(self.runtime, arguments), (arguments, False))
+
+    def test_structured_reference_cannot_retarget_or_override_explicit_target(self):
+        for nested, supplied in [('other-target', None), (self.mid, 'other-target'), (self.mid, 42)]:
+            arguments = {'reply_reference': {'message_id': nested, 'reply_direction': 'OK'}, 'msg_id': supplied}
+            self.assertEqual(reply_target.normalize_reference(self.runtime, arguments), (arguments, False))
+
+    def test_structured_reference_requires_current_group_and_live_lease(self):
+        arguments = {'reply_reference': {'message_id': self.mid, 'reply_direction': 'OK'}}
+        self.message.message_info.group_info.group_id = 'bowxt:1'
+        self.assertEqual(reply_target.normalize_reference(self.runtime, arguments), (arguments, False))
+        self.message.message_info.group_info.group_id = 'bowxt:26992'
+        self.p.cfg = {'managed_groups': {'26992': dict(enabled=False, valid_until=1100, revision='11')}}
+        self.assertEqual(reply_target.normalize_reference(self.runtime, arguments), (arguments, False))
+
+    def test_native_observed_reference_shape_reaches_guarded_send_once(self):
+        from src.maisaka.builtin_tool import reply
+        self.runtime.session_id = 'synthetic'
+        self.runtime.log_prefix = '[synthetic]'
+        self.runtime.record_planner_reply = Mock()
+        ctx = NS(runtime=self.runtime, build_success_result=Mock(return_value=NS()),
+                 build_failure_result=Mock(side_effect=AssertionError('Unexpected reply failure')))
+        with patch.object(group_guard, 'authorize_fast_reply', return_value=True), \
+             patch.object(reply.send_service, '_send_to_target_with_message', new=AsyncMock(return_value=NS())) as send:
+            result = asyncio.run(reply.execute_reply(ctx, {
+                'reply_reference': {'message_id': self.mid, 'reply_direction': 'Synthetic incident regression.'},
+                'reply_text': 'Synthetic station answer.'}, call_id='synthetic-structured-reference'))
+        self.assertTrue(result.stop_after_execution)
+        send.assert_awaited_once()
+        self.assertIs(send.call_args.kwargs['reply_message'], self.message)
+
+    def test_native_unverified_structured_reference_never_sends(self):
+        from src.maisaka.builtin_tool import reply
+        self.runtime.log_prefix = '[synthetic]'
+        ctx = NS(runtime=self.runtime, build_failure_result=Mock(return_value=NS(success=False)))
+        with patch.object(reply.send_service, '_send_to_target_with_message', new=AsyncMock()) as send:
+            result = asyncio.run(reply.execute_reply(ctx, {
+                'reply_reference': {'message_id': 'different-source', 'reply_direction': 'Do not send.'},
+                'reply_text': 'Must not leave the fixture.'}, call_id='synthetic-bad-reference'))
+        self.assertFalse(result.success)
+        ctx.build_failure_result.assert_called_once()
+        send.assert_not_awaited()
+
 
 if __name__ == '__main__':
     unittest.main()

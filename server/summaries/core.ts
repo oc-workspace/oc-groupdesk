@@ -14,7 +14,7 @@ export async function validateConfig(g:any,c:any,db:Db=pool){
  requireCondition((await db.query('SELECT 1 FROM summary_templates WHERE slug=$1',[c.template])).rowCount,400,'请选择总结模板');
  if(c.model_route.mode==='custom')await validateSelection(c.model_route,'text',db);
 }
-export async function route(g:any,c:any,db:Db=pool){return (await effectiveModelRoutes({model_routes:c.model_route.mode==='inherit'?g.model_routes:{text:c.model_route,image:{mode:'disabled'}}},db)).text as any;}
+export async function route(g:any,c:any,db:Db=pool){const routes=await effectiveModelRoutes({model_routes:c.model_route.mode==='inherit'?g.model_routes:{text:c.model_route,image:{mode:'disabled'}}},db);return c.model_route.mode==='inherit'?routes.stages.summary:routes.text;}
 export async function valid(job:any,db:Db=pool,send=false){const g=await group(job.group_id,db),s=await settings(g.id,db);requireCondition(g.enabled&&g.external_id===job.external_id&&g.revision===job.group_revision&&s.revision===job.settings_revision,409,'群或总结配置已变化，请重新创建任务');if(send)requireCondition(s.config.enabled,409,'本群总结发布已停用');return {g,s};}
 export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolean,requestId:string,now=Date.now(),scheduleId:string|null=null,occurrence:string|null=null){
  await db.query('SELECT id FROM groups WHERE id=$1 FOR UPDATE',[groupId]);

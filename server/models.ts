@@ -5,6 +5,7 @@ import {pool,transaction,audit} from './db.js';
 import {requireCondition,HttpError,digest} from './security.js';
 import {sealKey,openKey,baseUrl,fetchCatalog,type ClientType} from './model-security.js';
 import {parseCatalog,inferCapability} from './model-catalog.js';
+import {modelStageIds,type ModelStage} from '../shared/model-stages.js';
 export {parseCatalog,inferCapability} from './model-catalog.js';
 export const clientType=z.enum(['openai','openai_responses','gemini']);
 
@@ -15,8 +16,13 @@ export const groupRoute=z.discriminatedUnion('mode',[
   z.object({mode:z.literal('inherit')}),z.object({mode:z.literal('disabled')}),
   selection.extend({mode:z.literal('custom')})
 ]);
-export const groupRoutes=z.object({text:groupRoute,image:groupRoute});
-export const defaultRoutes=z.object({text:selection.nullable(),image:selection.nullable()});
+export const stageRoute=z.discriminatedUnion('mode',[
+  z.object({mode:z.literal('inherit')}).strict(),selection.extend({mode:z.literal('custom')}).strict()
+]);
+const stageFields=Object.fromEntries(modelStageIds.map(id=>[id,stageRoute])) as Record<ModelStage,typeof stageRoute>;
+const defaultStageFields=Object.fromEntries(modelStageIds.map(id=>[id,selection.nullable()])) as Record<ModelStage,z.ZodNullable<typeof selection>>;
+export const groupRoutes=z.object({text:groupRoute,image:groupRoute,stages:z.object(stageFields).partial().strict().optional()});
+export const defaultRoutes=z.object({text:selection.nullable(),image:selection.nullable(),stages:z.object(defaultStageFields).partial().strict().optional()});
 export type Routes=z.infer<typeof groupRoutes>;
 type Db=Pick<pg.PoolClient,'query'>;
 export async function modelOverview(db:Db=pool){
@@ -32,24 +38,46 @@ export async function validateSelection(route:z.infer<typeof selection>|null,kin
 }
 export async function validateRoutes(routes:Routes,db:Db){
   for(const kind of ['text','image'] as const)if(routes[kind].mode==='custom')await validateSelection(routes[kind] as z.infer<typeof selection>,kind,db);
+  for(const stage of modelStageIds){const route=routes.stages?.[stage];if(route?.mode==='custom')await validateSelection(route,'text',db);}
+}
+export function configuredModelRoutes(routes:Routes,defaults:z.infer<typeof defaultRoutes>){
+  const base=(kind:'text'|'image')=>{
+    const configured=routes[kind],selected=configured.mode==='custom'?configured:configured.mode==='inherit'?defaults[kind]:null;
+    const source=configured.mode==='disabled'?'disabled':selected?(configured.mode==='inherit'?'default':'group'):kind==='text'&&configured.mode==='inherit'?'legacy':'disabled';
+    return {source,selection:selected?{credential_id:selected.credential_id,model_id:selected.model_id}:null};
+  };
+  const text=base('text'),image=base('image');
+  const stages=Object.fromEntries(modelStageIds.map(stage=>{
+    const configured=routes.stages?.[stage],global=defaults.stages?.[stage];
+    return [stage,text.source==='disabled'?text:configured?.mode==='custom'?{source:'group_stage',selection:{credential_id:configured.credential_id,model_id:configured.model_id}}:global?{source:'default_stage',selection:global}:text];
+  })) as Record<ModelStage,ReturnType<typeof base>>;
+  return {text,image,stages};
 }
 export async function effectiveModelRoutes(group:{model_routes:Routes},db:Db=pool){
   const defaults=(await db.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes;
-  const result:Record<string,unknown>={};
-  for(const kind of ['text','image'] as const){
-    const configured=group.model_routes[kind],route=configured.mode==='custom'?configured:configured.mode==='inherit'?defaults[kind]:null;
-    const source=configured.mode==='disabled'?'disabled':route?(configured.mode==='inherit'?'default':'group'):kind==='text'&&configured.mode==='inherit'?'legacy':'disabled';
+  const configured=configuredModelRoutes(group.model_routes,defaults);
+  async function resolve(value:{source:string;selection:z.infer<typeof selection>|null},kind:'text'|'image'){
+    const {selection:route,source}=value;
     const row=route?(await db.query('SELECT c.id credential_id,c.name,c.enabled,c.revision credential_revision,c.client_type,m.model_id,m.capability FROM model_credentials c JOIN credential_models m ON m.credential_id=c.id WHERE c.id=$1 AND m.model_id=$2',[route.credential_id,route.model_id])).rows[0]:null;
-    result[kind]={source,...(row||{}),available:!!row?.enabled&&row.capability===kind};
+    return {source,...(row||{}),available:!!row?.enabled&&row.capability===kind};
   }
-  return result;
+  const stages=Object.fromEntries(await Promise.all(modelStageIds.map(async stage=>[stage,await resolve(configured.stages[stage],'text')])));
+  return {text:await resolve(configured.text,'text'),image:await resolve(configured.image,'image'),stages};
+}
+export function hasStageRouting(routes:{stages:Record<string,{source:string}>}){return Object.values(routes.stages).some(r=>['group_stage','default_stage'].includes(r.source));}
+async function privateRoute(route:any,db:Db){
+  if(route.source==='legacy')return null;
+  requireCondition(route.source!=='disabled'&&route.available,409,'本群模型已停用或不可用');
+  const credential=(await db.query('SELECT base_url,key_ciphertext,client_type FROM model_credentials WHERE id=$1',[route.credential_id])).rows[0];
+  return {...route,base_url:credential.base_url,api_key:openKey(credential.key_ciphertext),client_type:credential.client_type};
+}
+export async function privateStageRoutes(group:{model_routes:Routes},db:Db=pool){
+  const routes=await effectiveModelRoutes(group,db);
+  return Object.fromEntries(await Promise.all(modelStageIds.filter(stage=>stage!=='summary').map(async stage=>[stage,routes.stages[stage].available?await privateRoute(routes.stages[stage],db):null])));
 }
 export async function privateTextRoute(group:{id:string;model_routes:Routes},db:Db=pool){
   const routes=await effectiveModelRoutes(group,db),route=routes.text as any;
-  if(route.source==='legacy')return null;
-  requireCondition(route.source!=='disabled'&&route.available,409,'本群文字模型已停用或不可用');
-  const credential=(await db.query('SELECT base_url,key_ciphertext,client_type FROM model_credentials WHERE id=$1',[route.credential_id])).rows[0];
-  return {...route,base_url:credential.base_url,api_key:openKey(credential.key_ciphertext),client_type:credential.client_type};
+  return privateRoute(route,db);
 }
 export async function createCredential(input:{name:string;base_url:string;api_key:string;client_type?:ClientType},actor:string){
   keyValue.parse(input.api_key);

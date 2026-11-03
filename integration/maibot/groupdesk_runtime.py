@@ -108,6 +108,7 @@ def validate_bundle(bundle,external_id):
     elif 'timeouts' in bundle.get('policy',{}):validate_timeouts(bundle['policy']['timeouts'])
     if bundle.get('policy_contract_version')!=1 or bundle.get('external_id')!=external_id:raise ValueError('GroupDesk contract/group mismatch')
     if bundle.get('model_routing_contract_version') not in [None,1]:raise ValueError('Unknown model routing contract')
+    if bundle.get('model_stage_routing_contract_version') not in [None,1]:raise ValueError('Unknown stage routing contract')
     if bundle.get('policy',{}).get('persona') not in ['gt-persona','neutral']:raise ValueError('Unsupported persona')
     identity=bundle.get('policy',{}).get('identity',{'disclosure':'when_asked','personal_questions':'tactful'})
     if identity.get('disclosure') not in ['when_asked','proactive','roleplay'] or identity.get('personal_questions') not in ['tactful','plain']:raise ValueError('Unsupported identity policy')
@@ -134,10 +135,16 @@ def sync():
     for chat,external in conf['groups'].items():
         try:
             b=api('/config/'+urllib.parse.quote(external,safe=''));validate_bundle(b,external)
-            if b.get('enabled') and b.get('model_routing_contract_version')==1 and b.get('model_routing',{}).get('text',{}).get('available'):
-                private=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})['text_route']
+            if b.get('enabled') and b.get('model_routing_contract_version')==1 and (b.get('model_routing',{}).get('text',{}).get('available') or b.get('model_stage_routing_contract_version')==1):
+                credentials=api('/model-credentials',{'group_id':b['id'],'revision':b['revision']})
+                private=credentials['text_route']
                 from model_routing import validate_private_route
-                validate_private_route(b,private);b['private_text_route']=private
+                if b.get('model_routing',{}).get('text',{}).get('available'):
+                    validate_private_route(b,private);b['private_text_route']=private
+                if b.get('model_stage_routing_contract_version')==1:
+                    from model_routing import validate_stage_routes
+                    validate_stage_routes(b,credentials.get('stage_routes'))
+                    b['private_stage_routes']=credentials['stage_routes']
             groups[str(chat)]={**b,'valid_until':time.time()+75}
             acks.append((str(chat),b['id'],b['revision']))
         except Exception:groups[str(chat)]={'enabled':False,'valid_until':0,'revision':'unavailable'}
@@ -146,7 +153,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'reply_frequency_version':1,'reply_frequency_revision':groups[chat]['reply_frequency']['revision']} if groups[chat].get('reply_frequency_contract_version')==1 else {}),**({'reply_limits_version':1} if groups[chat].get('reply_limits_contract_version')==1 else {}),**({'newcomer_welcome_policy_version':1} if groups[chat].get('newcomer_welcome_contract_version')==1 else {}),**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {}),**({'persona_composition_version':1,'persona_composition_sha256':groups[chat]['persona_composition_sha256']} if groups[chat].get('persona_feature_skills') else {})})
+        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,**({'model_stage_routing_version':1} if groups[chat].get('model_stage_routing_contract_version')==1 else {}),'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'reply_frequency_version':1,'reply_frequency_revision':groups[chat]['reply_frequency']['revision']} if groups[chat].get('reply_frequency_contract_version')==1 else {}),**({'reply_limits_version':1} if groups[chat].get('reply_limits_contract_version')==1 else {}),**({'newcomer_welcome_policy_version':1} if groups[chat].get('newcomer_welcome_contract_version')==1 else {}),**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {}),**({'persona_composition_version':1,'persona_composition_sha256':groups[chat]['persona_composition_sha256']} if groups[chat].get('persona_feature_skills') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 

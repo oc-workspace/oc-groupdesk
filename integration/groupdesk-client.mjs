@@ -25,6 +25,7 @@ export class GroupDeskClient {
   async applyConfig(trustedExternalGroupId,apply){
     const config=await this.request('/config/'+encodeURIComponent(trustedExternalGroupId));
     const applied=await apply(config);
+    if(config.model_stage_routing_contract_version!==undefined&&(config.model_stage_routing_contract_version!==1||applied?.model_stage_routing_version!==1))throw new Error('Adapter must apply stage model routing before acknowledging this configuration');
     const requiredTimeoutVersion=config.timeout_policy_contract_version;
     if(requiredTimeoutVersion!==undefined&&(![1,2].includes(requiredTimeoutVersion)||applied?.timeout_policy_version!==requiredTimeoutVersion)){
       throw new Error('Adapter must apply per-group time budgets before acknowledging this configuration');
@@ -38,7 +39,7 @@ export class GroupDeskClient {
     if(config.newcomer_welcome_contract_version!==undefined&&(config.newcomer_welcome_contract_version!==1||applied?.newcomer_welcome_policy_version!==1))throw new Error('Adapter must apply newcomer welcome scheduling before acknowledging this configuration');
     // Send acknowledgement only AFTER the adapter applied this exact version.
     if(config.reply_frequency_contract_version!==undefined&&(config.reply_frequency_contract_version!==1||applied?.reply_frequency_version!==1||applied?.reply_frequency_revision!==config.reply_frequency.revision))throw new Error('Adapter must apply current global reply frequency before acknowledging');
-    const capabilities=Object.fromEntries(['reply_frequency_version','reply_frequency_revision','reply_limits_version','newcomer_welcome_policy_version','timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256','persona_composition_version','persona_composition_sha256','interactions_policy_version','conversation_policy_version'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
+    const capabilities=Object.fromEntries(['model_stage_routing_version','reply_frequency_version','reply_frequency_revision','reply_limits_version','newcomer_welcome_policy_version','timeout_policy_version','model_routing_version','persona_skill_version','persona_skill_sha256','persona_composition_version','persona_composition_sha256','interactions_policy_version','conversation_policy_version'].filter(key=>applied?.[key]!==undefined).map(key=>[key,applied[key]]));
     await this.request('/ack',{group_id:config.id,revision:config.revision,...capabilities});
     return config;
   }
