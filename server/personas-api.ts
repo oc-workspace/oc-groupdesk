@@ -1,3 +1,4 @@
+import {isInitialPersonaDraft} from '../shared/persona-editor.js';
 import type express from 'express';
 import multer from 'multer';
 import {randomUUID} from 'node:crypto';
@@ -108,7 +109,7 @@ export function registerPersonaAdmin(app:express.Express){
  app.post('/api/personas/:id/publish',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({revision}).parse(req.body);
   const out=await transaction(async db=>{
-   const p=(await db.query('SELECT * FROM personas WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(p&&!p.archived&&p.revision===b.revision,409,'请先保存并载入最新草稿');validateSkill(p.draft_skill,p.skill_name);
+   const p=(await db.query('SELECT * FROM personas WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(p&&!p.archived&&p.revision===b.revision,409,'请先保存并载入最新草稿');requireCondition(!isInitialPersonaDraft(p.draft_skill),400,'当前仍是初始化模板，请先从素材制作完整草稿或手工完善内容');validateSkill(p.draft_skill,p.skill_name);
    if(p.kind==='feature')requireCondition(p.draft_skill.length<=6000,400,'特色 Skill 最多6000字符');
    const version=Number((await db.query('SELECT COALESCE(max(version),0)+1 next FROM persona_versions WHERE persona_id=$1',[id])).rows[0].next),versionId=randomUUID();
    await db.query('INSERT INTO persona_versions(id,persona_id,version,skill_md,sha256,provenance,kind) VALUES($1,$2,$3,$4,$5,$6,$7)',[versionId,id,version,p.draft_skill,digest(p.draft_skill),p.draft_provenance,p.kind]);

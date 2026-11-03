@@ -12,7 +12,9 @@ export function personaRequestOptions(protocol:ClientType,model:string):Generati
  // Stay below the five-minute job watchdog, leaving time to validate/save.
  return {timeoutMs:240000,...(protocol==='gemini'&&model==='gemini-3.8-flash'?{lowThinking:true}:{})};
 }
-import {datasetRecords,materialRoot,readJobInput} from './persona-materials.js';
+import {materialRoot,readJobInput} from './persona-materials.js';
+import {samplePersonaDatasets} from './persona-sampling.js';
+import {isInitialPersonaDraft} from '../shared/persona-editor.js';
 import {validateSelection} from './models.js';
 
 export const skillName=z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64);
@@ -39,24 +41,22 @@ export function representativeSample(rows:any[],maximum=500,characters=100000){
 }
 export async function queuePersonaJob(personaId:string,revision:number,selection:{credential_id:string;model_id:string},actor:string){
  return transaction(async db=>{
+  await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
   const p=(await db.query('SELECT * FROM personas WHERE id=$1 FOR UPDATE',[personaId])).rows[0];
   requireCondition(p&&!p.archived,404,'Persona 不存在或已归档');requireCondition(p.revision===revision,409,'草稿版本已变化，请先载入最新版本');
   requireCondition(!(await db.query("SELECT 1 FROM persona_jobs WHERE persona_id=$1 AND status IN ('pending','processing')",[personaId])).rowCount,409,'已有生成任务，请先等待完成并手动刷新状态');
   await validateSelection(selection,'text',db);
   const c=(await db.query('SELECT revision FROM model_credentials WHERE id=$1 FOR SHARE',[selection.credential_id])).rows[0];
-  const records=new Map<string,any>(),datasets=[];
   requireCondition(p.dataset_ids.length,400,'请先关联素材数据集并保存');
-  for(const id of p.dataset_ids){const d=await datasetRecords(id,db);datasets.push(d.dataset);for(const row of d.rows)records.set(row.collection_id+':'+row.source_id,row);}
-  const rows=[...records.values()].sort((a,b)=>Number(a.timestamp)-Number(b.timestamp)||a.source_id.localeCompare(b.source_id));
-  const sample=representativeSample(rows);requireCondition(sample.selected.length,400,'所选数据集没有可用于生成的正文');
+  const sample=await samplePersonaDatasets(p.dataset_ids,db);requireCondition(sample.selected.length,400,'所选数据集没有可用于生成的正文');
   const id=randomUUID(),filename=id+'.job.json';
-  const provenance={dataset_ids:p.dataset_ids,datasets:datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,contains_any:d.contains_any||[],since:d.since,until_time:d.until_time})),
-   total_records:rows.length,eligible_records:sample.eligible,sampled_records:sample.selected.length,sampled_characters:sample.characters,
-   strategy:'按时间等距抽取最多500条正文，合计最多10万字符；不使用引用或分享正文；这是Skill归纳，不是模型微调',
+  const provenance={dataset_ids:p.dataset_ids,datasets:sample.datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,contains_any:d.contains_any||[],since:d.since,until_time:d.until_time})),
+   total_records:sample.total_records,eligible_records:sample.eligible,sampled_records:sample.selected.length,sampled_characters:sample.characters,collections:sample.collections,
+   strategy:'先合并同库重叠筛选，再按素材库分层、库内按时间等距抽取最多500条正文，合计最多10万字符；参考文档保留独立篇幅；不使用引用或分享正文；这是Skill归纳，不是模型微调',
    source_digest:digest(JSON.stringify(sample.selected.map(r=>[r.collection_id,r.id,r.content_hash]))),
-   source_import_ids:[...new Set(rows.map(r=>r.import_id))],created_at:new Date().toISOString()};
+   source_import_ids:sample.source_import_ids,created_at:new Date().toISOString()};
   await mkdir(materialRoot(),{recursive:true,mode:0o700});
-  await writeFile(resolve(materialRoot(),filename),JSON.stringify({persona:{name:p.name,skill_name:p.skill_name,description:p.description,goal:p.goal,kind:p.kind,previous_skill:p.draft_skill},samples:sample.selected}),{mode:0o600,flag:'wx'});
+  await writeFile(resolve(materialRoot(),filename),JSON.stringify({persona:{name:p.name,skill_name:p.skill_name,description:p.description,goal:p.goal,kind:p.kind,previous_skill:isInitialPersonaDraft(p.draft_skill)?'':p.draft_skill},samples:sample.selected}),{mode:0o600,flag:'wx'});
   await db.query('INSERT INTO persona_jobs(id,persona_id,draft_revision,credential_id,credential_revision,model_id,input_file,provenance) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,personaId,revision,selection.credential_id,c.revision,selection.model_id,filename,provenance]);
   await audit(actor,'persona.generation_queued',personaId,{job_id:id,sampled_records:sample.selected.length},db);
   return {id,provenance};
