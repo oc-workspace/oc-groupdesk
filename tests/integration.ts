@@ -357,6 +357,10 @@ test('persona archives authenticate, preserve source identity and incrementally 
  assert.equal(referenceArchive.group_id,null);assert.equal(referenceArchive.source_group_id,row.group_id);
 });
 test('standalone archives support personal and ensemble skills without creating or changing runtime groups',async()=>{
+ // Keep this additional workflow's request quota separate from the main suite.
+ const standaloneServer=createServer(createApp());await new Promise<void>(r=>standaloneServer.listen(0,'127.0.0.1',r));
+ const previousBase=base;base='http://127.0.0.1:'+(standaloneServer.address() as {port:number}).port;
+ try{
  const before=(await request('/overview')).data.groups;
  const collection=(await request('/persona-collections','POST',{name:'Standalone historical archive',group_id:null})).data.id;
  const row={id:'standalone:1',group_id:'archived-room-not-configured',sender_id:'archive-speaker-a',timestamp:1700000000,authored_text:'A specific short reply for the standalone persona.'};
@@ -387,6 +391,7 @@ test('standalone archives support personal and ensemble skills without creating 
  const rejected=(await request('/persona-collections','POST',{name:'Mixed standalone sources',group_id:null})).data.id;
  assert.equal((await uploadPersona(rejected,[row,{...row,id:'other',group_id:'foreign'}].map(r=>JSON.stringify(r)).join('\n'))).status,400);
  const empty=(await request('/persona-studio')).data.collections.find((c:any)=>c.id===rejected);assert.equal(empty.message_count,0);assert.equal(empty.source_group_id,null);
+ }finally{base=previousBase;await new Promise<void>(r=>standaloneServer.close(()=>r()));}
 });
 test('personas publish immutable versions and groups pin independent skills with verified acknowledgements',async()=>{
  const {makeSkill}=await import('../server/persona-generation.js');
