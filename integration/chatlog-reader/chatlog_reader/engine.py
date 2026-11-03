@@ -13,6 +13,7 @@ from chatlog_keeper import wechat_db as native
 from chatlog_keeper.core._snapshot import _family_signature
 from .store import Store
 from .vault import unwrap
+from .references import text_reference
 
 logging.getLogger('chatlog_keeper').setLevel(logging.CRITICAL)
 SUMMARY = re.compile(r'^(?:\[\d+/\d+\]\n)?(?:Group archive summary|グループの保存記録まとめ|群聊存档总结) · ')
@@ -154,7 +155,10 @@ class Engine:
         sender_id = names.get(row['real_sender_id'])
         sender_id = str(sender_id) if sender_id else None
         raw = native._decompress_message(row['message_content'])
-        if kind == 1:
+        reference=text_reference(raw) if kind==49 else None
+        if reference is not None:
+            text=reference['content']
+        elif kind == 1:
             first, separator, rest = raw.partition('\n')
             text = rest if separator and first.strip().rstrip(':') == sender_id else raw
         else:
@@ -172,7 +176,9 @@ class Engine:
         return {'native_key': native_key, 'chat_id': group['chat_id'], 'sender_id': sender_id,
                 'sender': self.contacts.get(sender_id), 'content': text, 'source_at': timestamp,
                 'observed_at': time.time(), 'is_self': int(is_self), 'msg_type': kind,
-                'server_id': server or None, 'is_summary': int(is_self and bool(SUMMARY.match(text)))}
+                'server_id': server or None, 'is_summary': int(is_self and bool(SUMMARY.match(text))),
+                'reference_kind':reference['reference_kind'] if reference else None,
+                'reference_server_id':reference['reference_server_id'] if reference else None}
 
     def refresh_shard(self, source):
         signature = _family_signature(source)

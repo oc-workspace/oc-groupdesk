@@ -24,6 +24,10 @@ class Store:
                 CREATE INDEX IF NOT EXISTS messages_stream ON messages(chat_id,seq);
                 CREATE TABLE IF NOT EXISTS positions(shard TEXT NOT NULL,chat_id INTEGER NOT NULL,max_rowid INTEGER NOT NULL,PRIMARY KEY(shard,chat_id));
             ''')
+            columns={r['name'] for r in db.execute('PRAGMA table_info(messages)')}
+            for field in ('reference_kind','reference_server_id'):
+                if field not in columns:db.execute('ALTER TABLE messages ADD COLUMN '+field+' TEXT')
+            db.execute('CREATE INDEX IF NOT EXISTS messages_server_reference ON messages(chat_id,server_id)')
             previous = db.execute('SELECT value FROM meta WHERE key="account"').fetchone()
             if previous and previous[0] != account:
                 raise ValueError('Archive account changed; use a separate data directory')
@@ -74,14 +78,15 @@ class Store:
             raise ValueError('Cross-group index write')
         with self.connect() as db:
             for row in rows:
+                row={**row,'reference_kind':row.get('reference_kind'),'reference_server_id':row.get('reference_server_id')}
                 existing=db.execute('SELECT chat_id FROM messages WHERE native_key=:native_key',row).fetchone()
                 if existing:
                     if existing[0]!=chat:
                         raise ValueError('Native identity crossed groups')
-                    db.execute('UPDATE messages SET sender_id=:sender_id,sender=:sender,content=:content,is_self=:is_self,msg_type=:msg_type,server_id=:server_id,is_summary=:is_summary WHERE native_key=:native_key',row)
+                    db.execute('UPDATE messages SET sender_id=:sender_id,sender=:sender,content=:content,is_self=:is_self,msg_type=:msg_type,server_id=:server_id,is_summary=:is_summary,reference_kind=:reference_kind,reference_server_id=:reference_server_id WHERE native_key=:native_key',row)
                 else:
-                    db.execute('''INSERT INTO messages(native_key,chat_id,sender_id,sender,content,source_at,observed_at,is_self,msg_type,server_id,is_summary)
-                        VALUES(:native_key,:chat_id,:sender_id,:sender,:content,:source_at,:observed_at,:is_self,:msg_type,:server_id,:is_summary)''', row)
+                    db.execute('''INSERT INTO messages(native_key,chat_id,sender_id,sender,content,source_at,observed_at,is_self,msg_type,server_id,is_summary,reference_kind,reference_server_id)
+                        VALUES(:native_key,:chat_id,:sender_id,:sender,:content,:source_at,:observed_at,:is_self,:msg_type,:server_id,:is_summary,:reference_kind,:reference_server_id)''', row)
             db.execute('INSERT INTO positions VALUES(?,?,?) ON CONFLICT(shard,chat_id) DO UPDATE SET max_rowid=excluded.max_rowid', (shard,chat,maximum))
 
     def page(self, chat, after, limit=200, start=None, end=None):
@@ -95,6 +100,14 @@ class Store:
         with self.connect() as db:
             watermark = db.execute('SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_id=?', (chat,)).fetchone()[0]
             rows = [dict(row) for row in db.execute('SELECT * FROM messages WHERE '+' AND '.join(clauses)+' ORDER BY seq LIMIT ?', [*args,limit+1])]
+        with self.connect() as db:
+            for row in rows:
+                if row.get('reference_kind')!='text_reply':continue
+                reference={'kind':'text_reply','server_id':row.get('reference_server_id'),'is_bot':False}
+                if row.get('reference_server_id') and row['is_self']==0:
+                    parents=db.execute('SELECT content FROM messages WHERE chat_id=? AND server_id=? AND is_self=1 LIMIT 2',(chat,row['reference_server_id'])).fetchall()
+                    if len(parents)==1:reference.update(is_bot=True,bot_text=parents[0]['content'][:600])
+                row['reference']=reference
         more = len(rows) > limit
         rows = rows[:limit]
         # A bounded response never silently truncates a message or skips rows.
