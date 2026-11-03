@@ -445,6 +445,8 @@ test('persona generation uses a frozen sample, preserves manual conflicts and ne
 test('different groups select different personas; archive, restore and unbinding preserve history',async()=>{
  const b=(await request('/personas','POST',{name:'Voice B',skill_name:'voice-b',description:'Another independent persona',goal:'',dataset_ids:[]})).data.id;
  let p=(await request('/personas/'+b)).data;
+ const {makeSkill}=await import('../server/persona-generation.js');
+ assert.equal((await request('/personas/'+b,'PUT',{...p,draft_skill:makeSkill(p.skill_name,p.description,'An independent synthetic voice with concise practical replies and grounded factual boundaries.')})).status,200);p.revision++;
  const version=(await request('/personas/'+b+'/publish','POST',{revision:p.revision})).data;
  assert.equal((await request('/personas/'+b+'/archive','POST',{revision:p.revision,archived:true})).status,200);
  p=(await request('/personas/'+b)).data;assert(p.archived);assert.equal(p.versions.length,1);

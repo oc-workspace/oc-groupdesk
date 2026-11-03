@@ -13,7 +13,9 @@ async function req(path:string,method='GET',body?:any,runtime=false){
 }
 async function create(name:string,kind:'base'|'feature'){
  const c=await req('/personas','POST',{name,skill_name:name,description:'Synthetic '+name,goal:'',dataset_ids:[],kind});assert.equal(c.status,201);
- const p=(await req('/personas/'+c.data.id)).data;
+ let p=(await req('/personas/'+c.data.id)).data;
+ const skill=makeSkill(name,p.description,'Synthetic '+kind+' voice for '+name+'. Use practical concise expression and grounded facts, and respect the current context and runtime boundaries.');
+ assert.equal((await req('/personas/'+p.id,'PUT',{...p,draft_skill:skill})).status,200);p={...p,draft_skill:skill,revision:p.revision+1};
  const v=await req('/personas/'+p.id+'/publish','POST',{revision:p.revision});assert.equal(v.status,201);
  return {...p,version_id:v.data.id};
 }

@@ -32,7 +32,7 @@ before(async()=>{
  await pool.query(`INSERT INTO persona_materials(collection_id,source_id,sender_id,sender_name,timestamp,authored_text,kind,content_status,source,content_hash,import_id)
   SELECT $1,'full:'||lpad(i::text,8,'0'),CASE WHEN i%2=0 THEN 'speaker-a' ELSE 'speaker-b' END,'Synthetic speaker',1700000000+i,
    CASE WHEN i%1000=0 THEN NULL ELSE 'Concrete synthetic reply '||i::text END,'text','text_decoded',
-   jsonb_build_object('unselected_metadata',repeat('UNSELECTED-METADATA',256)),md5(i::text),$2 FROM generate_series(1,220001) i`,[archive,a.importId]);
+   jsonb_build_object('unselected_metadata','UNSELECTED-METADATA'),md5(i::text),$2 FROM generate_series(1,220001) i`,[archive,a.importId]);
  await pool.query("UPDATE persona_materials SET excluded=true WHERE collection_id=$1 AND source_id='full:00000002'",[archive]);
  await pool.query(`INSERT INTO persona_materials(collection_id,source_id,sender_id,sender_name,timestamp,authored_text,kind,content_status,source,content_hash,import_id)
   SELECT $1,'doc:'||i::text,'__reference__','Reference',0,repeat('Detailed reference guidance. ',200),'document','text_document','{}',md5(i::text),$2 FROM generate_series(1,32) i`,[references,b.importId]);

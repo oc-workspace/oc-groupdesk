@@ -11,7 +11,8 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-    mem_limit: 384m
+    # Large archive fixtures and their WAL live in tmpfs; production limits are unchanged.
+    mem_limit: 768m
   test:
     build: {context: ., target: test}
     environment:
