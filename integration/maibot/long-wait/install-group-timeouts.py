@@ -1,4 +1,4 @@
-"""Idempotently install the request-local Planner timeout on the reviewed native source."""
+"""Idempotently install the request-local Planner and Replyer timeouts on the reviewed native source."""
 from pathlib import Path
 import ast,hashlib,sys
 path=Path(sys.argv[1]);source=path.read_text()

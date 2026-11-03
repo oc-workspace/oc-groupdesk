@@ -9,7 +9,7 @@ test('existing groups receive the current 300/310/420 second defaults',()=>{
  assert.equal(another.timeouts.planner_seconds,300);assert.equal(timeoutDefaults.planner_seconds,300);
 });
 test('timeout policy accepts distinct bounded budgets for different groups',()=>{
- for(const value of [timeoutDefaults,{...timeoutDefaults,planner_seconds:30,request_seconds:40,direct_ttl_seconds:105},{...timeoutDefaults,planner_seconds:600,request_seconds:660,direct_ttl_seconds:1800}]){
+ for(const value of [timeoutDefaults,{...timeoutDefaults,planner_seconds:30,replyer_seconds:30,request_seconds:40,direct_ttl_seconds:105},{...timeoutDefaults,planner_seconds:600,request_seconds:660,direct_ttl_seconds:1800}]){
   assert.deepEqual(timeoutPolicySchema.parse(value),value);assert.equal(timeoutPolicyIssue(value),'');
  }
 });
