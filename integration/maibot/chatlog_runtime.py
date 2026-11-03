@@ -221,13 +221,16 @@ class ReaderAgent:
             raise ReaderUnavailable('Invalid message data')
         if live and not sender and sender_id:
             sender = '昵称未同步-'+hashlib.sha256(str(sender_id).encode()).hexdigest()[:8]
+        reference=row.get('reference');quoted=(row.get('msg_type')==49 and isinstance(reference,dict) and reference.get('kind')=='text_reply')
+        quoted_bot=bool(quoted and reference.get('is_bot') is True and re.fullmatch(r'[1-9]\d{0,20}',str(reference.get('server_id') or '')))
+        if live and quoted_bot and isinstance(reference.get('bot_text'),str):text+='\n引用 小T 的消息：\n'+reference['bot_text'][:600]
         own = bool(row['is_self'])
         return SimpleNamespace(seq=self.namespace(epoch)+seq,source_seq=seq,chat_id=chat,content=text,
-            sender=sender,sender_id=sender_id,message_type='text' if row['msg_type']==1 else 'media',
+            sender=sender,sender_id=sender_id,message_type='text' if row['msg_type']==1 or quoted else 'media',
             timestamp=datetime.fromtimestamp(timestamp,timezone.utc).isoformat(),
             observed_at=datetime.fromtimestamp(observed,timezone.utc).isoformat(),
             direction='outgoing' if own else 'incoming' if sender_id else 'unknown',
-            is_at_me=False,source_kind='wechat_database',
+            is_at_me=quoted_bot and not own,source_kind='wechat_database',
             client_id='groupdesk-summary-native' if row.get('is_summary') else None,
             delivery_status='sent' if own and row.get('server_id') else 'observed' if not own else 'unknown')
 
