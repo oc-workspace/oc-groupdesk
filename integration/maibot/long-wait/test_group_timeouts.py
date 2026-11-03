@@ -8,8 +8,8 @@ import groupdesk_runtime as gd
 from policy import Policy,settings
 from test_groupdesk_runtime import bundle
 
-SHORT={'planner_seconds':60,'request_seconds':70,'direct_ttl_seconds':180,'wait_apology_seconds':60}
-LONG={'planner_seconds':450,'request_seconds':460,'direct_ttl_seconds':600,'wait_apology_seconds':300}
+SHORT={'planner_seconds':60,'replyer_seconds':60,'request_seconds':70,'direct_ttl_seconds':180,'wait_apology_seconds':60}
+LONG={'planner_seconds':450,'replyer_seconds':300,'request_seconds':460,'direct_ttl_seconds':600,'wait_apology_seconds':300}
 
 class TimeoutContractTests(unittest.TestCase):
  def test_apology_threshold_is_whole_minutes_and_v2_requires_the_field(self):
@@ -24,7 +24,7 @@ class TimeoutContractTests(unittest.TestCase):
   with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
   b['timeout_policy_contract_version']=1;gd.validate_bundle(b,b['external_id'])
  def test_policy_bounds_and_relationships_are_strict(self):
-  for value in [tp.DEFAULTS,SHORT,LONG,{'planner_seconds':30,'request_seconds':40,'direct_ttl_seconds':105},{'planner_seconds':600,'request_seconds':660,'direct_ttl_seconds':1800}]:
+  for value in [tp.DEFAULTS,SHORT,LONG,{'planner_seconds':30,'replyer_seconds':30,'request_seconds':40,'direct_ttl_seconds':105},{'planner_seconds':600,'request_seconds':660,'direct_ttl_seconds':1800}]:
    self.assertEqual(tp.validate(value),{**tp.DEFAULTS,**value})
   for value in [{**SHORT,'planner_seconds':True},{**SHORT,'request_seconds':60},{**SHORT,'direct_ttl_seconds':120},{**SHORT,'planner_seconds':601},{**SHORT,'hidden':1},{'planner_seconds':60}]:
    with self.assertRaises(ValueError):tp.validate(value)
@@ -34,7 +34,12 @@ class TimeoutContractTests(unittest.TestCase):
   for value in [None,{**SHORT,'request_seconds':60}]:
    b['policy']['timeouts']=value
    with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
-  b['timeout_policy_contract_version']=3
+  b['timeout_policy_contract_version']=4
+  with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
+ def test_v3_requires_explicit_replyer_budget(self):
+  b=bundle();b['timeout_policy_contract_version']=3;b['policy']['timeouts']=dict(SHORT)
+  gd.validate_bundle(b,b['external_id'])
+  del b['policy']['timeouts']['replyer_seconds']
   with self.assertRaises(ValueError):gd.validate_bundle(b,b['external_id'])
  def test_sync_ack_declares_applied_timeout_contract(self):
   b=bundle();b['timeout_policy_contract_version']=2;b['policy']['timeouts']=SHORT
@@ -153,8 +158,15 @@ class NativeGroupTimeoutTests(unittest.IsolatedAsyncioTestCase):
  async def test_actual_native_wrapper_uses_the_source_groups_planner_limit(self):
   self.assertEqual(await self.wrapper_timeout(),60)
   self.turn['chat_id']='2';self.assertEqual(await self.wrapper_timeout(),450)
- async def test_replyer_retains_its_existing_sixty_second_hard_timeout(self):
-  self.turn['chat_id']='2';self.assertEqual(await self.wrapper_timeout('replyer'),60)
+ async def test_replyer_uses_its_group_budget_and_retains_legacy_compatibility(self):
+  self.turn['chat_id']='2';self.assertEqual(await self.wrapper_timeout('replyer'),300)
+  del self.profiles['2']['policy']['timeouts']['replyer_seconds']
+  self.assertEqual(await self.wrapper_timeout('replyer'),60)
+ async def test_replyer_retry_uses_remaining_original_deadline(self):
+  self.turn['expires']=150
+  self.assertEqual(await self.wrapper_timeout('replyer'),45)
+  self.now+=20
+  self.assertEqual(await self.wrapper_timeout('replyer'),25)
  async def test_planner_limit_is_shortened_by_the_original_remaining_deadline(self):
   self.turn['expires']=120
   self.assertEqual(await self.wrapper_timeout(),15)

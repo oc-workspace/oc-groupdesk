@@ -66,6 +66,7 @@
     "timeouts": {
       "default": {
         "planner_seconds": 300,
+        "replyer_seconds": 300,
         "request_seconds": 310,
         "direct_ttl_seconds": 420,
         "wait_apology_seconds": 300
@@ -73,6 +74,12 @@
       "type": "object",
       "properties": {
         "planner_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 600
+        },
+        "replyer_seconds": {
+          "default": 300,
           "type": "integer",
           "minimum": 30,
           "maximum": 600
@@ -97,6 +104,7 @@
       },
       "required": [
         "planner_seconds",
+        "replyer_seconds",
         "request_seconds",
         "direct_ttl_seconds",
         "wait_apology_seconds"

@@ -29,7 +29,7 @@ test('save is versioned, no-op is stable, and invalid windows do not change stor
 test('runtime receives shared contract and only matching applied revision can confirm',async()=>{
  const g=(await req('/overview')).data.groups[0];await pool.query('UPDATE groups SET external_id=$1 WHERE id=$2',['frequency-A',g.id]);
  const runtime=(await req('/runtime/config/frequency-A','GET',undefined,true)).data;assert.equal(runtime.reply_frequency_contract_version,1);assert.equal(runtime.reply_frequency.revision,2);
- const ack={group_id:g.id,revision:g.revision,timeout_policy_version:2,reply_limits_version:1};
+ const ack={group_id:g.id,revision:g.revision,timeout_policy_version:3,reply_limits_version:1};
  assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...ack,reply_frequency_version:1,reply_frequency_revision:1},true)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...ack,reply_frequency_version:1,reply_frequency_revision:2},true)).status,200);

@@ -62,3 +62,7 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 ## Persona 组合契约 v1
 
 有特色的群在基础Persona字段之外下发persona_feature_skills、有序组合摘要和persona_composition_contract_version=1。ACK须声明persona_composition_version=1及完整组合摘要，旧适配器不能确认部分应用。基础-only仍兼容原契约；详见[组合与维护](persona-composition.md)。
+
+### 2026-11-03：Replyer 超时与话题长度
+
+当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见 `group-timeouts.md` 和 `topic-policy-guide.md`。

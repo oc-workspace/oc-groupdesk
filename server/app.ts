@@ -216,9 +216,10 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   app.put('/api/topics/:id',async(req,res)=>{
     const topicId=UUID(req.params.id),body=topicSchema.parse(req.body);
     await transaction(async db=>{
-      const current=(await db.query('SELECT revision FROM topics WHERE id=$1 FOR UPDATE',[topicId])).rows[0];
+      const current=(await db.query('SELECT revision,policy FROM topics WHERE id=$1 FOR UPDATE',[topicId])).rows[0];
       requireCondition(current,404,'话题不存在');
       requireCondition(body.revision===undefined||body.revision===current.revision,409,'话题已被其他操作更新，请刷新');
+      if(body.policy&&body.policy.max_reply_chars===undefined&&current.policy.max_reply_chars!==undefined)body.policy.max_reply_chars=current.policy.max_reply_chars;
       await db.query('UPDATE topics SET name=$1,description=$2,instructions=$3,color=$4,policy=COALESCE($5,policy),revision=revision+1 WHERE id=$6',[body.name,body.description,body.instructions,body.color,body.policy||null,topicId]);
       await bumpGroups(db,topicId);
       await audit(req.admin!.username,'topic.updated',topicId,{},db);
@@ -452,7 +453,8 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     const config=await groupDetail(group.id);
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
     config.policy_contract_version=1;
-    config.timeout_policy_contract_version=2;
+    config.timeout_policy_contract_version=3;
+    if(config.topics.some((t:any)=>t.policy.max_reply_chars!=null))config.topic_reply_length_contract_version=1;
     config.reply_limits_contract_version=1;
     config.reply_frequency_contract_version=1;
     config.reply_frequency=await replyFrequency();
@@ -468,7 +470,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),reply_frequency_version:z.literal(1).optional(),reply_frequency_revision:z.number().int().positive().optional(),model_routing_version:z.literal(1).optional(),model_stage_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2),z.literal(3)]).optional(),topic_reply_length_version:z.literal(1).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),reply_frequency_version:z.literal(1).optional(),reply_frequency_revision:z.number().int().positive().optional(),model_routing_version:z.literal(1).optional(),model_stage_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,policy,language,allow_language_override,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const composition=await runtimePersonaBundle(routingGroup);
@@ -483,7 +485,9 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
       const group=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
       requireCondition(group&&req.runtimeGroups.includes(group.external_id),403,'此适配器未授权该群');
     }
-    requireCondition(body.timeout_policy_version===2,409,'请更新机器人以应用本群等待时间和致歉阈值后再确认');
+    requireCondition(body.timeout_policy_version===3,409,'请更新机器人以应用本群 Planner、Replyer 等待时间和致歉阈值后再确认');
+    const lengthTopics=await pool.query('SELECT t.policy FROM topics t JOIN group_topics gt ON gt.topic_id=t.id WHERE gt.group_id=$1',[body.group_id]);
+    if(lengthTopics.rows.some((t:any)=>t.policy.max_reply_chars!=null))requireCondition(body.topic_reply_length_version===1,409,'请更新机器人以应用话题回复字符上限后再确认');
     requireCondition(body.reply_limits_version===1,409,'请更新机器人以应用本群连续回复与跟进限制后再确认');
     if(effectivePolicy(routingGroup).conversation.enabled)requireCondition(body.conversation_policy_version===1,409,'请更新机器人以应用本群玩笑识别与接梗策略后再确认');
     const activeInteractions=(await pool.query("SELECT 1 FROM group_interactions b JOIN interaction_definitions d ON d.id=b.definition_id WHERE b.group_id=$1 AND (b.config->>'enabled')::boolean AND NOT d.archived LIMIT 1",[body.group_id])).rowCount;

@@ -69,3 +69,13 @@ test('shared reply frequency requires matching applied version and revision',asy
  await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_frequency_version:1,reply_frequency_revision:3})),/reply frequency/);
  await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_frequency_version:1,reply_frequency_revision:4}));assert.equal(calls.at(-1)!.body.reply_frequency_revision,4);
 });
+
+test('v3 requires explicit Replyer timeout application and topic caps require a separate capability',async()=>{
+ const bundle={...config,timeout_policy_contract_version:3,topic_reply_length_contract_version:1};
+ const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/time budgets/);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:3})),/reply character limits/);
+ assert.equal(calls.filter(c=>c.path.endsWith('/ack')).length,0);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:3,topic_reply_length_version:1}));
+ assert.equal(calls.at(-1)!.body.topic_reply_length_version,1);
+});

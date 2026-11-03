@@ -37,7 +37,7 @@ test('public contracts show stage selections and never expose keys; private rout
  assert.equal((await req('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision-1},true)).status,409);
 });
 test('stage contract requires an upgraded adapter before acknowledging application',async()=>{
- const ack={group_id:group.id,revision:group.revision,model_routing_version:1,timeout_policy_version:2,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1};
+ const ack={group_id:group.id,revision:group.revision,model_routing_version:1,timeout_policy_version:3,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1};
  const old=await req('/runtime/ack','POST',ack,true);assert.equal(old.status,409);assert.match(old.data.error,/分阶段/);
  assert.equal((await req('/runtime/ack','POST',{...ack,model_stage_routing_version:1},true)).status,200);
 });

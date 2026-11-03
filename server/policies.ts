@@ -18,7 +18,8 @@ export const topicPolicySchema=z.object({
   exclusions:terms.default([]),continuations:terms.default([]),continuation_exclusions:terms.default([]),
   exit_terms:terms.default([]),hard_exit_terms:terms.default([]),
   context:z.object({enabled:z.boolean(),seconds:z.number().int().min(1).max(180),max_intervening_messages:z.number().int().min(1).max(3),anchor_chars:z.number().int().min(1).max(400)}).default({enabled:false,seconds:180,max_intervening_messages:3,anchor_chars:400}),
-  reply_depth:z.enum(['brief','detailed']).default('brief')
+  reply_depth:z.enum(['brief','detailed']).default('brief'),
+  max_reply_chars:z.number().int().min(100).max(4000).nullable().optional()
 }).strict();
 export const groupPolicySchema=z.object({
   schema_version:z.literal(1).default(1),topic_scope:z.enum(['all','proactive']).default('all'),
