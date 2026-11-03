@@ -55,7 +55,7 @@ export async function importMaterial(collectionId:string,buffer:Buffer,name:stri
  }
  let sourceGroup=collection.source_group_id;
  if(format==='jsonl'){
-  requireCondition(collection.group_id,400,'聊天 JSONL 请导入已选择来源群的素材库');
+  // Source identity belongs to the archive; a runtime group is optional.
   if(!sourceGroup){
    try{const first=new TextDecoder('utf-8',{fatal:true}).decode(decoded).replace(/^\uFEFF/,'').split('\n').find(l=>l.trim());sourceGroup=short.parse(JSON.parse(first||'{}').group_id);}
    catch{throw new HttpError(400,'JSONL 缺少有效的来源群 ID');}

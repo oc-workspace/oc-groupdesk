@@ -352,7 +352,46 @@ test('persona archives authenticate, preserve source identity and incrementally 
  const docCollection=(await request('/persona-collections','POST',{name:'General reference files',group_id:null})).data.id;
  assert.equal((await uploadPersona(docCollection,'Reference body','notes.md')).data.added,1);
  assert.equal((await uploadPersona(docCollection,'Revised reference body','notes.md')).data.updated,1);
- assert.equal((await uploadPersona(docCollection,JSON.stringify(row))).status,400);
+ assert.equal((await uploadPersona(docCollection,JSON.stringify(row))).status,200);
+ const referenceArchive=(await request('/persona-studio')).data.collections.find((c:any)=>c.id===docCollection);
+ assert.equal(referenceArchive.group_id,null);assert.equal(referenceArchive.source_group_id,row.group_id);
+});
+test('standalone archives support personal and ensemble skills without creating or changing runtime groups',async()=>{
+ // Keep this additional workflow's request quota separate from the main suite.
+ const standaloneServer=createServer(createApp());await new Promise<void>(r=>standaloneServer.listen(0,'127.0.0.1',r));
+ const previousBase=base;base='http://127.0.0.1:'+(standaloneServer.address() as {port:number}).port;
+ try{
+ const before=(await request('/overview')).data.groups;
+ const collection=(await request('/persona-collections','POST',{name:'Standalone historical archive',group_id:null})).data.id;
+ const row={id:'standalone:1',group_id:'archived-room-not-configured',sender_id:'archive-speaker-a',timestamp:1700000000,authored_text:'A specific short reply for the standalone persona.'};
+ const records=[row,{...row,id:'standalone:2',authored_text:'A second reply from the same exact account.'},{...row,id:'standalone:3',sender_id:'archive-speaker-b',authored_text:'A different voice for the ensemble.'}];
+ const snapshot=records.map(r=>JSON.stringify(r)).join('\n');
+ const imported=await uploadPersona(collection,snapshot);assert.equal(imported.status,200);assert.equal(imported.data.added,3);
+ assert.equal((await uploadPersona(collection,snapshot)).data.reused,true);
+ const overview=(await request('/persona-studio')).data,stored=overview.collections.find((c:any)=>c.id===collection);
+ assert.equal(stored.group_id,null);assert.equal(stored.source_group_id,row.group_id);assert.equal(stored.message_count,3);
+ assert.equal((await uploadPersona(collection,JSON.stringify({...row,id:'foreign',group_id:'another-archive'}))).status,400);
+ assert.equal((await uploadPersona(collection,JSON.stringify({...row,id:'missing',group_id:undefined}))).status,400);
+ const personal=(await request('/persona-datasets','POST',{name:'Standalone person',collection_id:collection,sender_ids:[row.sender_id]})).data.id;
+ const ensemble=(await request('/persona-datasets','POST',{name:'Standalone ensemble',collection_id:collection,sender_ids:[]})).data.id;
+ for(const [id,count]of [[personal,2],[ensemble,3]]as const){
+  const response=await fetch(base+'/api/persona-datasets/'+id+'/export',{headers:{Cookie:cookie}});
+  const exported=(await response.text()).trim().split('\n').map(line=>JSON.parse(line));assert.equal(exported.length,count);
+  assert(exported.every(r=>r.group_id===row.group_id));if(id===personal)assert(exported.every(r=>r.sender_id===row.sender_id));
+ }
+ const {makeSkill}=await import('../server/persona-generation.js');
+ const persona=(await request('/personas','POST',{name:'Standalone reusable voice',skill_name:'standalone-voice',description:'A voice independent of runtime groups',goal:'Use this archived voice in different tasks',dataset_ids:[personal,ensemble]})).data.id;
+ const p=(await request('/personas/'+persona)).data;
+ const skill=makeSkill('standalone-voice','A reusable personal or ensemble voice','Use concrete short replies, preserve uncertainty, and never attribute quoted words to the archive speaker. Runtime tools and group bindings are separate.');
+ assert.equal((await request('/personas/'+persona,'PUT',{...p,draft_skill:skill})).status,200);
+ const saved=(await request('/personas/'+persona)).data;
+ const published=await request('/personas/'+persona+'/publish','POST',{revision:saved.revision});assert.equal(published.status,201);
+ const download=await fetch(base+'/api/persona-versions/'+published.data.id+'/export',{headers:{Cookie:cookie}});assert.equal(download.status,200);assert((await download.arrayBuffer()).byteLength>0);
+ assert.deepEqual((await request('/overview')).data.groups,before);
+ const rejected=(await request('/persona-collections','POST',{name:'Mixed standalone sources',group_id:null})).data.id;
+ assert.equal((await uploadPersona(rejected,[row,{...row,id:'other',group_id:'foreign'}].map(r=>JSON.stringify(r)).join('\n'))).status,400);
+ const empty=(await request('/persona-studio')).data.collections.find((c:any)=>c.id===rejected);assert.equal(empty.message_count,0);assert.equal(empty.source_group_id,null);
+ }finally{base=previousBase;await new Promise<void>(r=>standaloneServer.close(()=>r()));}
 });
 test('personas publish immutable versions and groups pin independent skills with verified acknowledgements',async()=>{
  const {makeSkill}=await import('../server/persona-generation.js');
