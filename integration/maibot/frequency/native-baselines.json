@@ -1,0 +1,27 @@
+{
+  "limits/policy.py": {
+    "before": "d51e346479217c2c89339203a5cc9dce615aaf03312379ed515f7f6a1d9a4b51",
+    "after": "e1b04020dc41e5775a414eb1c3fdcc650c291bc49f223136a144845ffc3613a7",
+    "patch": "limits-policy.py.patch"
+  },
+  "limits/latency.py": {
+    "before": "6058c31d191a58fe94f125834eb2823643e74df8e3169c5df827aba9ca89f035",
+    "after": "d2653c8e206eb918e0fed7bdc31a9226d761d0851198ea23de8a98a30f081ebb",
+    "patch": "limits-latency.py.patch"
+  },
+  "limits/recovery.py": {
+    "before": "b7ba81ed67d0c2b6633d0240f7d1ad4b8e78880901f6016095ee09e26eaf3e70",
+    "after": "cae8a97d991778eeee17852b0fb4ce47feb08a324512d82b40b5edf37834337b",
+    "patch": "limits-recovery.py.patch"
+  },
+  "limits/groupdesk_runtime.py": {
+    "before": "94ae95f09857831248516d854a56e7313299e7bcefc331ee4a4cab0f6dc057a4",
+    "after": "9c1d5a26ce9a44a800d8006921033e96967047da60c9be03c9161ec9cb2b4f45",
+    "patch": "limits-groupdesk_runtime.py.patch"
+  },
+  "bridge/app.py": {
+    "before": "e8138f384cf57c7e88abb9876512d24e5f8e9059d900316523b40990478e7e4f",
+    "after": "a726a70449704530cd12c23c18b7957297bb15f35f54c4138fc3ae5909f4afcd",
+    "patch": "bridge-app.py.patch"
+  }
+}

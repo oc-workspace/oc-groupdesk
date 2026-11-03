@@ -1,0 +1,86 @@
+--- a/limits/policy.py
++++ b/limits/policy.py
+@@ -17,6 +17,7 @@
+ import groupdesk_runtime as gd
+ import latency
+ import reply_limits
++import reply_frequency as frequency
+ import newcomer_welcome as welcome
+ from food_participation import FOOD_TOPIC, authored_text, combination, continuation, rules_for, validate_rules, EXIT
+ 
+@@ -191,6 +192,7 @@
+             import recovery
+             recovery.init(db)
+             latency.init(db)
++            frequency.init(db)
+             welcome.init(db)
+             for table in ('pending','turns'):
+                 cols={r['name'] for r in db.execute('PRAGMA table_info('+table+')')}
+@@ -269,7 +271,7 @@
+         # gate independently caps actual messages. Unknown sends still count.
+         if table=='turns' and db.execute('SELECT 1 FROM circuits WHERE until>?',(now,)).fetchone():
+             return 'provider_cooldown'
+-        for window, maximum in self.cfg['reply_limits']:
++        for window, maximum in frequency.windows(self.cfg):
+             if db.execute(f'SELECT COUNT(*) FROM {table} WHERE {"created" if table=="turns" else "ts"}>?', (now-window,)).fetchone()[0] >= maximum:
+                 return 'reply_window'
+         since = datetime.fromtimestamp(now, ZoneInfo(self.cfg['timezone'])).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
+@@ -349,6 +351,8 @@
+                 self.count(db,'filtered'); return 'filtered'
+             reason = self._quota(db, kind, now, explicit=explicit,chat_id=chat_id)
+             if reason:
++                if reason=='reply_window' and direct:
++                    return frequency.defer(self,db,seq,sender,display,text,min(now,timestamp) if timestamp is not None else now,chat_id,explicit,gd.revision(managed),topic_refs)
+                 self.count(db,'suppressed_'+reason); return reason
+             latency.expire_pending(self,db,now)
+             old = db.execute('SELECT * FROM pending WHERE sender=?',(sender,)).fetchone()
+@@ -414,6 +418,7 @@
+         return topics,anchor_seq
+ 
+     def dispatch(self):
++        frequency.pump(self)
+         now=self.clock()
+         with self.db() as db:
+             db.execute('DELETE FROM observed WHERE ts<?',(now-600,))
+@@ -470,6 +475,7 @@
+                 reason=self._quota(db,row['kind'],now,explicit=bool(row['explicit']),chat_id=row['chat_id'])
+                 if reason:
+                     self.count(db,'suppressed_'+reason)
++                    if reason=='reply_window':frequency.mark_pending(self,db,row,now)
+                     # Direct requests wait for capacity up to their TTL. Passive
+                     # candidates are discarded rather than answered out of topic.
+                     if row['kind']=='passive': db.execute('DELETE FROM pending WHERE id=?',(row['id'],))
+@@ -480,7 +486,7 @@
+                     db.execute('DELETE FROM pending WHERE id=?',(row['id'],));self.count(db,'expired_queue');continue
+                 db.execute('INSERT INTO turns (id,sender,kind,created,expires,status,article,ended,explicit,fast,received_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',(row['id'],row['sender'],row['kind'],now,expires,'active',row['article'],None,row['explicit'],row['fast'],row['received_at'] or row['first']))
+                 db.execute('UPDATE turns SET greeting=?,chat_id=?,policy_revision=? WHERE id=?',(row['greeting'],row['chat_id'],row['policy_revision'],row['id']))
+-                db.execute('UPDATE turns SET welcome_due=?,welcome_expires=? WHERE id=?',(row['welcome_due'],row['welcome_expires'],row['id']))
++                db.execute('UPDATE turns SET welcome_due=?,welcome_expires=?,frequency_deadline=? WHERE id=?',(row['welcome_due'],row['welcome_expires'],row['frequency_deadline'],row['id']))
+                 db.execute('DELETE FROM pending WHERE id=?',(row['id'],))
+                 recent=db.execute('SELECT sender,ts,text FROM observed WHERE ts>? AND chat_id=? ORDER BY seq DESC',(now-self.cfg['context_age_seconds'],row['chat_id'])).fetchall()
+                 seen=set(); selected=[]
+@@ -544,6 +550,7 @@
+     def halt(self):
+         with self.db() as db:
+             db.execute('DELETE FROM pending')
++            db.execute('UPDATE frequency_waiting SET status="cancelled" WHERE status="waiting"')
+             db.execute('DELETE FROM group_food_context')
+             db.execute('DELETE FROM managed_topic_context')
+             db.execute('UPDATE turns SET status="paused",ended=? WHERE status="active"',(self.clock(),))
+@@ -562,7 +569,9 @@
+             managed=gd.profile(self.cfg,turn['chat_id'])
+             if managed is not None and turn['policy_revision']!=gd.revision(managed):raise Denied('groupdesk_revision')
+             if chat_id is not None and turn['chat_id']!=str(chat_id):raise Denied('wrong_target_group')
+-            if self._quota(db,turn['kind'],now,table='sends',explicit=bool(turn['explicit']),chat_id=turn['chat_id']): raise Denied('send_quota')
++            if turn['frequency_deadline'] and (not frequency.catchup(self.cfg)['enabled'] or now>=min(turn['frequency_deadline'],(turn['received_at'] or turn['created'])+frequency.catchup(self.cfg)['within_minutes']*60)):raise Denied('frequency_expired')
++            reason=self._quota(db,turn['kind'],now,table='sends',explicit=bool(turn['explicit']),chat_id=turn['chat_id'])
++            if reason:raise Denied('send_frequency' if reason=='reply_window' and turn['kind']=='direct' and frequency.catchup(self.cfg)['enabled'] else 'send_quota')
+             if not db.execute('INSERT OR IGNORE INTO sends VALUES (?,?,?,?,?,?)',(identifier,turn_id,now,self.day(now),turn['kind'],'reserved')).rowcount: raise Denied('duplicate_send')
+             return bool(turn['article'])
+ 
+@@ -629,4 +638,4 @@
+             db.execute('DELETE FROM managed_topic_context WHERE ts<?',(now-180,))
+             tokens=self.usage(db,now)
+             cooldown=db.execute('SELECT until,reason FROM circuits WHERE until>?',(now,)).fetchone()
+-            return {'provider_cooldown_seconds':max(0,round(cooldown['until']-now)) if cooldown else 0,'provider_cooldown_reason':cooldown['reason'] if cooldown else None,'day':self.day(now),'tokens_charged_or_reserved':tokens,'daily_token_limit':self.cfg['daily_tokens'],'budget_mode':'paused' if tokens>=self.cfg['daily_tokens'] else 'mentions_only' if tokens>=self.cfg['daily_tokens']*self.cfg['soft_budget_ratio'] else 'normal','pending':db.execute('SELECT COUNT(*) FROM pending').fetchone()[0],'active':db.execute('SELECT COUNT(*) FROM turns WHERE status="active" AND expires>?',(now,)).fetchone()[0],'model_calls_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=?',(self.day(now),)).fetchone()[0],'reported_tokens_today':db.execute('SELECT COALESCE(SUM(charged),0) FROM attempts WHERE day=? AND reported=1',(self.day(now),)).fetchone()[0],'unreported_attempts_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=? AND reported=0',(self.day(now),)).fetchone()[0],'sends_today':db.execute('SELECT COUNT(*) FROM sends WHERE day=?',(self.day(now),)).fetchone()[0],'metrics':dict(db.execute('SELECT name,value FROM metrics'))}
++            return {'provider_cooldown_seconds':max(0,round(cooldown['until']-now)) if cooldown else 0,'provider_cooldown_reason':cooldown['reason'] if cooldown else None,'day':self.day(now),'tokens_charged_or_reserved':tokens,'daily_token_limit':self.cfg['daily_tokens'],'budget_mode':'paused' if tokens>=self.cfg['daily_tokens'] else 'mentions_only' if tokens>=self.cfg['daily_tokens']*self.cfg['soft_budget_ratio'] else 'normal','frequency_waiting':db.execute('SELECT COUNT(*) FROM frequency_waiting WHERE status="waiting"').fetchone()[0],'pending':db.execute('SELECT COUNT(*) FROM pending').fetchone()[0],'active':db.execute('SELECT COUNT(*) FROM turns WHERE status="active" AND expires>?',(now,)).fetchone()[0],'model_calls_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=?',(self.day(now),)).fetchone()[0],'reported_tokens_today':db.execute('SELECT COALESCE(SUM(charged),0) FROM attempts WHERE day=? AND reported=1',(self.day(now),)).fetchone()[0],'unreported_attempts_today':db.execute('SELECT COUNT(*) FROM attempts WHERE day=? AND reported=0',(self.day(now),)).fetchone()[0],'sends_today':db.execute('SELECT COUNT(*) FROM sends WHERE day=?',(self.day(now),)).fetchone()[0],'metrics':dict(db.execute('SELECT name,value FROM metrics'))}

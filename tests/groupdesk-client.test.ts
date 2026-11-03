@@ -55,3 +55,10 @@ test('per-group reply limits must be applied before the adapter acknowledges',as
  await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/reply limits/);assert.equal(calls.length,1);
  await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_limits_version:1}));assert.equal(calls.at(-1)!.body.reply_limits_version,1);
 });
+
+test('shared reply frequency requires matching applied version and revision',async()=>{
+ const bundle={...config,reply_frequency_contract_version:1,reply_frequency:{revision:4,policy:{}}};const {client,calls}=fixture(bundle as typeof config);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2})),/reply frequency/);
+ await assert.rejects(client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_frequency_version:1,reply_frequency_revision:3})),/reply frequency/);
+ await client.applyConfig('synthetic-room',async()=>({timeout_policy_version:2,reply_frequency_version:1,reply_frequency_revision:4}));assert.equal(calls.at(-1)!.body.reply_frequency_revision,4);
+});

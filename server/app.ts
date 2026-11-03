@@ -1,3 +1,4 @@
+import {registerReplyFrequency,replyFrequency} from './reply-frequency.js';
 import {registerSummaryAdmin,registerSummaryRuntime} from './summaries/api.js';
 import express,{type Request,type Response,type NextFunction} from 'express';
 import cookieParser from 'cookie-parser';
@@ -337,6 +338,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   registerModelAdmin(app);
   registerTopicDraftAdmin(app,options.topicDraftCaller);
   registerNotificationAdmin(app);
+  registerReplyFrequency(app);
   registerPersonaAdmin(app);
   registerConversationAdmin(app);
   registerInteractionAdmin(app);
@@ -451,6 +453,8 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     config.policy_contract_version=1;
     config.timeout_policy_contract_version=2;
     config.reply_limits_contract_version=1;
+    config.reply_frequency_contract_version=1;
+    config.reply_frequency=await replyFrequency();
     if(config.policy.conversation.enabled)config.conversation_policy_contract_version=1;
     config.interactions_contract_version=1;
     config.interactions=await runtimeInteractions(config);
@@ -462,7 +466,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     res.json(config);
   });
   app.post('/api/runtime/ack',async(req,res)=>{
-    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
+    const body=z.object({group_id:id,revision:z.number().int().positive(),newcomer_welcome_policy_version:z.literal(1).optional(),timeout_policy_version:z.union([z.literal(1),z.literal(2)]).optional(),interactions_policy_version:z.literal(1).optional(),conversation_policy_version:z.literal(1).optional(),reply_limits_version:z.literal(1).optional(),reply_frequency_version:z.literal(1).optional(),reply_frequency_revision:z.number().int().positive().optional(),model_routing_version:z.literal(1).optional(),persona_skill_version:z.literal(1).optional(),persona_skill_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),persona_composition_version:z.literal(1).optional(),persona_composition_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}).parse(req.body);
     const routingGroup=(await pool.query('SELECT id,policy,language,allow_language_override,model_routes,persona_version_id FROM groups WHERE id=$1',[body.group_id])).rows[0];
     requireCondition(routingGroup,404,'群不存在');
     const composition=await runtimePersonaBundle(routingGroup);
@@ -481,7 +485,9 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     if(effectivePolicy(routingGroup).conversation.enabled)requireCondition(body.conversation_policy_version===1,409,'请更新机器人以应用本群玩笑识别与接梗策略后再确认');
     const activeInteractions=(await pool.query("SELECT 1 FROM group_interactions b JOIN interaction_definitions d ON d.id=b.definition_id WHERE b.group_id=$1 AND (b.config->>'enabled')::boolean AND NOT d.archived LIMIT 1",[body.group_id])).rowCount;
     if(activeInteractions)requireCondition(body.interactions_policy_version===1,409,'请更新机器人以应用本群互动后再确认');
-    const result=await pool.query('UPDATE groups SET applied_revision=$1,bot_seen_at=now() WHERE id=$2 AND revision=$1',[body.revision,body.group_id]);
+    const frequency=await replyFrequency();
+    requireCondition(body.reply_frequency_version===1&&body.reply_frequency_revision===frequency.revision,409,'请更新机器人并应用当前全局回复频率与限流补答配置后再确认');
+    const result=await pool.query('UPDATE groups SET applied_revision=$1,bot_seen_at=now(),reply_frequency_applied_revision=$3 WHERE id=$2 AND revision=$1 AND $3=(SELECT revision FROM workspace_reply_frequency WHERE id=1)',[body.revision,body.group_id,body.reply_frequency_revision]);
     requireCondition(result.rowCount,409,'配置版本已变化，请重新获取后再确认');
     res.json({ok:true});
   });
