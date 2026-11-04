@@ -65,7 +65,7 @@ test('generation failure does not retry, and lost delivery confirmation is never
 test('model input separates original display times from capture-only rows and rejects invented clocks',async()=>{
  const id=await create();await source(id);let seen:any;
  await processSummary(async(_credential,_model,_system,input)=>{seen=JSON.parse(input);return {choices:[{message:{content:report}}]};});
- assert.equal(seen.messages[0].sent_time.includes('Asia/Shanghai'),true);assert.equal(seen.messages[1].sent_time,null);assert.equal(seen.messages[1].at,undefined);
+ assert.equal(seen.timezone,'Asia/Shanghai');assert.match(seen.messages[0][2],/\d{4}-\d{2}-\d{2}/);assert.equal(seen.messages[1][2],null);assert.equal(seen.columns.includes('at'),false);
  const bad=await create(a,true);await source(bad);await processSummary(async()=>({choices:[{message:{content:'15:10 有群友表示愿意私下交流。这是一段合成测试文本。'}}]}));
  assert.equal((await job(bad)).status,'failed');assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[bad])).rowCount,0);
 });
@@ -74,4 +74,69 @@ test('a group revision change blocks publication even for a prepared report',asy
 test('database provenance survives generation and is exposed to administrators',async()=>{
  const id=await create();await source(id,'wechat_database');assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');await processSummary(caller);assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');assert(!(await job(id)).source.messages);
  const list=(await req('/summaries')).data.jobs.find((j:any)=>j.id===id);assert.equal(list.source_origin,'wechat-database-chatlog-keeper');await req('/summaries/jobs/'+id+'/cancel','POST',{});
+});
+
+async function freshSummaryGroup(){
+ const id=randomUUID();return (await pool.query("INSERT INTO groups(id,name,enabled,external_id,model_routes) SELECT $1,'Synthetic batching group',true,$2,model_routes FROM groups WHERE id=$3 RETURNING *",[id,'batch-'+id,a.id])).rows[0];
+}
+async function preflight(g:any,messages:any[]){
+ const id=await create(g),c=(await claim('source',g)).data.job;
+ const rows=messages.map(m=>({...m,at:new Date(new Date(c.start).getTime()+m.seq*1000).toISOString()}));
+ const plan={epoch:'a'.repeat(32),through:999999,count:rows.length,text_chars:rows.reduce((n,m)=>n+Array.from(m.text).length,0),max_text_chars:Math.max(...rows.map(m=>Array.from(m.text).length)),page_limit:200,planned_batches:Math.ceil(rows.length/200)};
+ const r=await req('/runtime/summaries/jobs/'+id+'/source-plan','POST',{token:c.token,source_kind:'wechat_database',plan},true);assert.equal(r.status,200,JSON.stringify(r.data));return {id,c,rows,plan};
+}
+const syntheticRows=(n:number,size=40)=>Array.from({length:n},(_,i)=>({seq:i+1,sender:i%2?'A':'B',text:'x'.repeat(size),time_kind:'original'}));
+test('preflight, bounded batch upload, duplicates, and completion preserve full-day counts',async()=>{
+ const g=await freshSummaryGroup(),{id,c,rows,plan}=await preflight(g,syntheticRows(979,15));
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-plan','POST',{token:c.token,source_kind:'wechat_database',plan},true)).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',{token:randomUUID(),ordinal:0,read_batches:1,messages:rows.slice(0,200)},true)).status,409);
+ for(let i=0;i<5;i++){
+  const body={token:c.token,ordinal:i,read_batches:i+1,messages:rows.slice(i*200,(i+1)*200)};
+  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',body,true)).status,200);
+  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',body,true)).status,200);
+ }
+ assert.equal((await job(id)).progress.read_count,979);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:5,read_batches:5},true)).status,200);
+ assert.equal((await pool.query('SELECT count(*)::int n FROM summary_source_batches WHERE job_id=$1',[id])).rows[0].n,0);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:5,read_batches:5},true)).status,200);
+ let calls=0;await processSummary(async(_c,_m,_s,input)=>{calls++;assert.equal(JSON.parse(input).messages.length,979);return caller();});
+ assert.equal(calls,1);assert.equal((await job(id)).status,'preview');assert.equal((await job(id)).source.stats.count,979);assert.equal((await job(id)).progress.strategy,'whole');
+});
+test('missing, overlapping, mutated or out-of-window batches cannot enqueue partial summaries',async()=>{
+ const g=await freshSummaryGroup(),{id,c,rows}=await preflight(g,syntheticRows(3));
+ const send=(ordinal:number,messages:any[])=>req('/runtime/summaries/jobs/'+id+'/source-batch','POST',{token:c.token,ordinal,read_batches:ordinal+1,messages},true);
+ assert.equal((await send(1,rows.slice(1))).status,409);
+ assert.equal((await send(0,[{...rows[0],at:c.end}])).status,400);
+ assert.equal((await send(0,rows.slice(0,2))).status,200);
+ assert.equal((await send(0,[{...rows[0],text:'mutated'},rows[1]])).status,409);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:1,read_batches:1},true)).status,400);
+ assert.equal((await send(1,[rows[0]])).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:2,read_batches:2},true)).status,400);
+ assert.equal((await job(id)).status,'reading');await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,error:'source_unavailable'},true);
+ assert.equal((await pool.query('SELECT 1 FROM summary_source_batches WHERE job_id=$1',[id])).rowCount,0);
+});
+test('large materials use complete chronological chunks then one combined report; a partial failure never publishes',async()=>{
+ const g=await freshSummaryGroup();await save(g,{input_character_budget:24000});
+ async function prepare(){const x=await preflight(g,syntheticRows(250,600));for(let i=0;i<5;i++)assert.equal((await req('/runtime/summaries/jobs/'+x.id+'/source-batch','POST',{token:x.c.token,ordinal:i,read_batches:i+1,messages:x.rows.slice(i*50,(i+1)*50)},true)).status,200);assert.equal((await req('/runtime/summaries/jobs/'+x.id+'/source-complete','POST',{token:x.c.token,batches:5,read_batches:5},true)).status,200);return x;}
+ const x=await prepare();let maps=0,finals=0;const observed=new Set<number>();
+ await processSummary(async(_c,_m,system,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.messages){maps++;for(const m of data.messages)observed.add(m[0]);return {choices:[{message:{content:'合成中间归纳：相同主题的讨论仍在继续，后续结论需要与其他分段一起核对。'}}]};}finals++;assert.match(system,/跨上午下午/);assert(data.notes.length===maps);return caller();});
+ assert(maps>1);assert.equal(finals,1);assert.equal(observed.size,250);assert.equal((await job(x.id)).status,'preview');
+ const y=await prepare();let calls=0;await processSummary(async()=>{if(++calls===2)throw Error('synthetic map failure');return {choices:[{message:{content:'合成中间归纳：讨论仍需综合后续内容判断，不应直接发布本段。'}}]};});
+ assert.equal((await job(y.id)).status,'failed');assert.equal((await job(y.id)).report,null);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[y.id])).rowCount,0);
+});
+test('cancelled reads purge temporary batches, and new endpoints enforce adapter group scope',async()=>{
+ const g=await freshSummaryGroup(),{id,c,rows}=await preflight(g,syntheticRows(2));
+ const scoped='synthetic-batching-adapter-token-32-chars';await pool.query('INSERT INTO runtime_adapters(name,token_hash,group_external_ids) VALUES($1,$2,$3)',['batch-scope',digest(scoped),JSON.stringify([a.external_id])]);
+ const body={token:c.token,ordinal:0,read_batches:1,messages:rows};assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',body,true,scoped)).status,403);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',body,true)).status,200);await req('/summaries/jobs/'+id+'/cancel','POST',{});await tick();
+ assert.equal((await pool.query('SELECT 1 FROM summary_source_batches WHERE job_id=$1',[id])).rowCount,0);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:1,read_batches:1},true)).status,409);
+});
+
+test('many intermediate notes are reduced before final synthesis and remain inside each call budget',async()=>{
+ const g=await freshSummaryGroup();await save(g,{input_character_budget:24000});const {id,c,rows}=await preflight(g,syntheticRows(300,1000));
+ for(let i=0;i<6;i++)assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',{token:c.token,ordinal:i,read_batches:i+1,messages:rows.slice(i*50,(i+1)*50)},true)).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:6,read_batches:6},true)).status,200);
+ let reductions=0,finals=0;await processSummary(async(_c,_m,_s,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.stage==='final'){finals++;return caller();}if(data.stage==='reduce')reductions++;return {choices:[{message:{content:'合成中间归纳，保留待核对的后续进展。'.repeat(200)}}]};});
+ assert(reductions>0);assert.equal(finals,1);assert.equal((await job(id)).status,'preview');
 });

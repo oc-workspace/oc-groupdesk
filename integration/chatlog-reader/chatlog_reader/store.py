@@ -89,7 +89,19 @@ class Store:
                         VALUES(:native_key,:chat_id,:sender_id,:sender,:content,:source_at,:observed_at,:is_self,:msg_type,:server_id,:is_summary,:reference_kind,:reference_server_id)''', row)
             db.execute('INSERT INTO positions VALUES(?,?,?) ON CONFLICT(shard,chat_id) DO UPDATE SET max_rowid=excluded.max_rowid', (shard,chat,maximum))
 
-    def page(self, chat, after, limit=200, start=None, end=None):
+    def summary_stats(self, chat, start, end, through=None):
+        if chat not in self.allowed:raise KeyError('Unknown group')
+        with self.connect() as db:
+            db.execute('BEGIN')
+            maximum=db.execute('SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_id=?',(chat,)).fetchone()[0]
+            through=maximum if through is None else min(through,maximum)
+            row=db.execute('''SELECT count(*) count,COALESCE(sum(length(content)),0) text_chars,
+                COALESCE(max(length(content)),0) max_text_chars
+                FROM messages WHERE chat_id=? AND seq<=? AND source_at>=? AND source_at<?
+                AND is_summary=0 AND (is_self=0 OR server_id IS NOT NULL)''',(chat,through,start,end)).fetchone()
+            return {'epoch':self.epoch,'through':through,**dict(row)}
+
+    def page(self, chat, after, limit=200, start=None, end=None, *, through=None, summary=False):
         if chat not in self.allowed:
             raise KeyError('Unknown group')
         clauses = ['chat_id=?','seq>?']
@@ -97,6 +109,10 @@ class Store:
         if start is not None:
             clauses += ['source_at>=?','source_at<?']
             args += [start,end]
+        if through is not None:
+            clauses += ['seq<=?'];args += [through]
+        if summary:
+            clauses += ['is_summary=0','(is_self=0 OR server_id IS NOT NULL)']
         with self.connect() as db:
             watermark = db.execute('SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_id=?', (chat,)).fetchone()[0]
             rows = [dict(row) for row in db.execute('SELECT * FROM messages WHERE '+' AND '.join(clauses)+' ORDER BY seq LIMIT ?', [*args,limit+1])]

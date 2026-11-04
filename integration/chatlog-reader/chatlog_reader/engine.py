@@ -235,7 +235,13 @@ class Engine:
                 if self.last_error in {'key_invalid','self_identity_changed','group_mapping_ambiguous'}:
                     self.last_success = 0
 
-    def page(self, chat, after, limit, start=None, end=None):
+    def summary_stats(self, chat, start, end):
+        with self.lock:
+            status=self.status()
+            if not status['ok']:raise RuntimeError('source_unavailable')
+            return {**self.store.summary_stats(chat,start,end),'last_checked':status['last_checked'],'messages':[]}
+
+    def page(self, chat, after, limit, start=None, end=None, *, through=None, summary=False):
         with self.lock:
             status=self.status()
             if not status['ok']:raise RuntimeError('source_unavailable')
@@ -244,7 +250,7 @@ class Engine:
             if start is None and after>=self.cached_watermarks.get(chat,0):
                 return {'epoch':self.cached_epoch,'watermark':self.cached_watermarks.get(chat,0),
                         'messages':[],'next_after':None,'last_checked':status['last_checked']}
-            result = self.store.page(chat,after,limit,start,end)
+            result = self.store.page(chat,after,limit,start,end,through=through,summary=summary)
             for row in result['messages']:row['sender'] = self.contacts.get(row['sender_id'])
             result['last_checked'] = status['last_checked']
             return result

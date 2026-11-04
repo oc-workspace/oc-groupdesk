@@ -30,6 +30,7 @@ export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolea
  await audit('summary','summary.queued',id,{group_id:g.id,publish},db);return id;
 }
 export async function tick(now=Date.now()){
+ await pool.query("DELETE FROM summary_source_batches b USING summary_jobs j WHERE b.job_id=j.id AND j.status<>'reading'");
  await pool.query("UPDATE summary_jobs SET status=CASE WHEN status='delivering' THEN 'uncertain' ELSE 'failed' END,error=CASE WHEN status='delivering' THEN '发送确认中断，请核实群内消息，系统不会自动重发' ELSE '任务超时或被中断，请手动重新创建' END,source=NULL,finished_at=now() WHERE (status IN ('reading','generating','delivering') AND lease_until<now()) OR (status IN ('waiting_source','queued','delivery_ready') AND created_at<now()-interval '1 hour')");
  for(let i=0;i<20;i++){
   const worked=await transaction(async db=>{

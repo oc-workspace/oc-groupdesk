@@ -1,6 +1,6 @@
 import {z} from 'zod';
 export const summaryZones=['Asia/Shanghai','Asia/Singapore','UTC'] as const;
-export const summaryConfig=z.object({enabled:z.boolean().default(false),timezone:z.enum(summaryZones).default('Asia/Shanghai'),template:z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).default('comprehensive'),language:z.enum(['group','zh-CN','en','ja']).default('group'),model_route:z.discriminatedUnion('mode',[z.object({mode:z.literal('inherit')}),z.object({mode:z.literal('custom'),credential_id:z.uuid(),model_id:z.string().min(1).max(200)})]).default({mode:'inherit'}),instructions:z.string().max(2000).default('')});
+export const summaryConfig=z.object({enabled:z.boolean().default(false),timezone:z.enum(summaryZones).default('Asia/Shanghai'),template:z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).default('comprehensive'),language:z.enum(['group','zh-CN','en','ja']).default('group'),model_route:z.discriminatedUnion('mode',[z.object({mode:z.literal('inherit')}),z.object({mode:z.literal('custom'),credential_id:z.uuid(),model_id:z.string().min(1).max(200)})]).default({mode:'inherit'}),instructions:z.string().max(2000).default(''),input_character_budget:z.number().int().min(24000).max(100000).default(60000)});
 export const summaryDefaults=()=>summaryConfig.parse({});
 export const windowSchema=z.discriminatedUnion('kind',[
  z.object({kind:z.literal('previous_day')}),z.object({kind:z.literal('today')}),z.object({kind:z.literal('last_24h')}),

@@ -6,11 +6,12 @@ import {requireCondition,HttpError} from '../security.js';
 import {summaryConfig,scheduleSchema,windowSchema,nextOccurrence,resolveWindow} from '../../shared/summaries.js';
 import {settings,group,validateConfig,enqueue,valid} from './core.js';
 import {prepareParts,sourceStats} from './generation.js';
+import {registerSourceBatches,sourceErrors} from './source-batches.js';
 const uuid=(v:unknown)=>z.uuid().parse(v);
 export function registerSummaryAdmin(app:express.Express){
  app.get('/api/summaries',async(_req,res)=>{
   const groups=(await pool.query('SELECT id,name FROM groups ORDER BY name')).rows;
-  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows,schedules:(await pool.query('SELECT * FROM summary_schedules ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,j.source->>\'origin\' source_origin,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
+  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows,schedules:(await pool.query('SELECT * FROM summary_schedules ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
  });
  app.put('/api/summaries/groups/:id',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({revision:z.number().int().min(0),config:summaryConfig}).parse(req.body);
@@ -40,6 +41,7 @@ export function registerSummaryAdmin(app:express.Express){
 }
 async function authorized(req:express.Request,id:string,db:any){const g=await group(id,db);requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(g.external_id),403,'此适配器未授权该群');return g;}
 export function registerSummaryRuntime(app:express.Express){
+ registerSourceBatches(app,authorized);
  app.post('/api/runtime/summaries/claim',async(req,res)=>{
   const b=z.object({external_id:z.string().min(1).max(200),kind:z.enum(['source','delivery'])}).parse(req.body);
   const result=await transaction(async db=>{
@@ -52,9 +54,9 @@ export function registerSummaryRuntime(app:express.Express){
   });res.json({job:result});
  });
  app.post('/api/runtime/summaries/jobs/:id/source',async(req,res)=>{
-  const b=z.object({token:z.uuid(),source_kind:z.enum(['ui_archive','wechat_database']).default('ui_archive'),error:z.enum(['source_unavailable','too_large','no_messages']).optional(),messages:z.array(z.object({seq:z.number().int().positive(),sender:z.string().max(500).nullable(),text:z.string().max(20000),at:z.string().datetime({offset:true}),time_kind:z.enum(['original','capture'])})).max(5000).optional()}).parse(req.body),id=uuid(req.params.id);
+  const b=z.object({token:z.uuid(),source_kind:z.enum(['ui_archive','wechat_database']).default('ui_archive'),error:z.enum(['source_unavailable','too_large','no_messages','too_many_messages','too_much_text','message_too_long']).optional(),messages:z.array(z.object({seq:z.number().int().positive(),sender:z.string().max(500).nullable(),text:z.string().max(20000),at:z.string().datetime({offset:true}),time_kind:z.enum(['original','capture'])})).max(5000).optional()}).parse(req.body),id=uuid(req.params.id);
   await transaction(async db=>{const j=(await db.query('SELECT * FROM summary_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(j,404,'任务不存在');await authorized(req,j.group_id,db);await valid(j,db);requireCondition(j.status==='reading'&&j.source_token===b.token&&new Date(j.lease_until).getTime()>Date.now(),409,'取数任务租约已失效');
-   if(b.error){await db.query("UPDATE summary_jobs SET status='failed',error=$2,finished_at=now() WHERE id=$1",[id,{source_unavailable:'Bot服务器存档暂不可读',too_large:'本时段记录过多，请缩短范围',no_messages:'该时段没有服务器已采集记录'}[b.error]]);return;}
+   if(b.error){await db.query('DELETE FROM summary_source_batches WHERE job_id=$1',[id]);await db.query("UPDATE summary_jobs SET status='failed',source=NULL,error=$2,finished_at=now() WHERE id=$1",[id,sourceErrors[b.error]]);return;}
    const messages=b.messages||[];requireCondition(messages.length&&new Set(messages.map(m=>m.seq)).size===messages.length,400,'记录为空或包含重复来源ID');requireCondition(messages.every(m=>Date.parse(m.at)>=new Date(j.window_start).getTime()&&Date.parse(m.at)<new Date(j.window_end).getTime()),400,'消息时间超出总结范围');
    requireCondition(JSON.stringify(messages).length<=115000,400,'本时段文字过多，请缩短范围');
    await db.query("UPDATE summary_jobs SET status='queued',source=$2,lease_until=NULL WHERE id=$1",[id,{messages,stats:sourceStats(messages),origin:b.source_kind==='wechat_database'?'wechat-database-chatlog-keeper':'bot-server-captured',fetched_at:new Date().toISOString()}]);
