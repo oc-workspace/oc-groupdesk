@@ -37,10 +37,11 @@ class Handler(BaseHTTPRequestHandler):
             if target.path == '/v1/status':
                 if getattr(self.server,'monitor',None):status['monitor']=self.server.monitor.snapshot()
                 self.reply(200 if status['ok'] else 503,status);return
-            if target.path not in {'/v1/stream','/v1/history'}:
+            history=target.path in {'/v1/history','/v1/history/stats'}
+            if target.path not in {'/v1/stream','/v1/history','/v1/history/stats'}:
                 self.reply(404, {'error':'not_found'});return
             query = parse_qs(target.query, strict_parsing=True)
-            expected = {'chat','after','limit'} | ({'start','end'} if target.path == '/v1/history' else set())
+            expected = {'chat','after','limit'} | ({'start','end','through','summary'} if history else set())
             if set(query) - expected or any(len(v) != 1 for v in query.values()):
                 raise ValueError('Invalid query')
             chat = int(query['chat'][0]);after = query.get('after',['0'])[0]
@@ -57,13 +58,23 @@ class Handler(BaseHTTPRequestHandler):
             if after < 0 or after >= 2**53:
                 raise ValueError('Invalid cursor')
             start = end = None
-            if target.path == '/v1/history':
+            if history:
                 import math
                 start,end = float(query['start'][0]),float(query['end'][0])
                 if not math.isfinite(start) or not math.isfinite(end) or not 0 < end-start <= 31*86400 or end > time.time()+15:
                     raise ValueError('Invalid history window')
-            if target.path=='/v1/history':self.server.engine.sync()
-            self.reply(200,self.server.engine.page(chat,after,limit,start,end))
+            if target.path=='/v1/history/stats':
+                if set(query)!={'chat','start','end'}:raise ValueError('Invalid statistics query')
+                # One explicit reconciliation per task; pages use the event-fed
+                # archive and the frozen upper sequence, never idle scans.
+                self.server.engine.sync()
+                self.reply(200,self.server.engine.summary_stats(chat,start,end));return
+            through=None;summary=False
+            if 'through' in query or 'summary' in query:
+                through=int(query['through'][0]);summary=query['summary'][0]=='1'
+                if not history or not summary or not 0<=through<2**53:raise ValueError('Invalid snapshot')
+            if target.path=='/v1/history' and through is None:self.server.engine.sync()
+            self.reply(200,self.server.engine.page(chat,after,limit,start,end,**({'through':through,'summary':summary} if through is not None else {})))
         except (ValueError, KeyError):
             self.reply(400, {'error':'invalid_request'})
         except OverflowError:

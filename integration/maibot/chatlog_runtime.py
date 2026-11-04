@@ -288,6 +288,48 @@ class ReaderAgent:
     def nack(self, delivery, _reason, retry_delay=10):
         self.finish(delivery,False,retry_delay)
 
+    def summary_plan(self, chat, *, duration_seconds, until=None):
+        identifier=int(chat.id if hasattr(chat,'id') else chat)
+        end=until or datetime.now(timezone.utc)
+        if end.tzinfo is None or not 0<float(duration_seconds)<=31*86400:
+            raise ValueError('Invalid history window')
+        start=end-timedelta(seconds=float(duration_seconds))
+        value=self.request('/v1/history/stats',{'chat':identifier,'start':start.timestamp(),'end':end.timestamp()})
+        for field in ('count','text_chars','max_text_chars','through'):
+            if type(value.get(field)) is not int or value[field]<0:raise ReaderUnavailable('Invalid source statistics')
+        if value['through']>=STRIDE:raise ReaderUnavailable('Invalid source snapshot')
+        average=value['text_chars']/max(1,value['count'])+120
+        limit=max(1,min(200,int(45000/average)))
+        return {k:value[k] for k in ('epoch','through','count','text_chars','max_text_chars')} | {
+            'chat_id':identifier,'start':start.timestamp(),'end':end.timestamp(),
+            'page_limit':limit,'planned_batches':math.ceil(value['count']/limit)}
+
+    def summary_pages(self, chat, plan):
+        identifier=int(chat.id if hasattr(chat,'id') else chat)
+        if identifier!=plan['chat_id']:raise ReaderUnavailable('Cross-group summary plan')
+        after=count=characters=0
+        while True:
+            page=self.request('/v1/history',{'chat':identifier,'start':plan['start'],'end':plan['end'],
+                'after':after,'limit':plan['page_limit'],'through':plan['through'],'summary':1})
+            if page['epoch']!=plan['epoch']:raise ReaderUnavailable('Source account changed')
+            result=[];previous=after
+            for row in page['messages']:
+                message=self.message(row,identifier,page['epoch'])
+                if not previous<message.source_seq<=plan['through'] or not plan['start']<=float(row['source_at'])<plan['end']:
+                    raise ReaderUnavailable('Invalid summary page')
+                if row.get('is_summary') or row['is_self'] and not row.get('server_id'):
+                    raise ReaderUnavailable('Unexpected summary source record')
+                previous=message.source_seq;count+=1;characters+=len(message.content);result.append(message)
+            if count>plan['count'] or characters>plan['text_chars']:raise ReaderUnavailable('Source statistics changed')
+            if result:yield result
+            following=page.get('next_after')
+            if following is None:break
+            if type(following) is not int or not after<following==previous<=plan['through']:
+                raise ReaderUnavailable('Summary pagination did not advance')
+            after=following
+        if count!=plan['count'] or characters!=plan['text_chars']:
+            raise ReaderUnavailable('Summary snapshot changed or incomplete')
+
     def get_history(self, chat, *, duration_seconds, until=None):
         identifier=int(chat.id if hasattr(chat,'id') else chat)
         end=until or datetime.now(timezone.utc)

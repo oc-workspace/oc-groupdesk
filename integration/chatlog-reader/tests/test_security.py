@@ -45,7 +45,8 @@ class HTTPTests(unittest.TestCase):
         class Fake:
             def status(self):return {'ok':True,'source':'chatlog-keeper','state':'ready','epoch':store.epoch,'last_checked':time.time()}
             def sync(self):pass
-            def page(self,*args):return {**store.page(*args),'last_checked':time.time()}
+            def page(self,*args,**kwargs):return {**store.page(*args,**kwargs),'last_checked':time.time()}
+            def summary_stats(self,*args):return {**store.summary_stats(*args),'last_checked':time.time(),'messages':[]}
         engine=Fake();engine.store=store
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.server.engine=engine;self.server.token='a'*64;self.server.daemon_threads=True
@@ -78,6 +79,17 @@ class HTTPTests(unittest.TestCase):
         path='/v1/history?chat=1&start='+str(time.time()-60)+'&end='+str(time.time()-1)
         self.rejects(path,401,False);self.server.engine.sync.assert_not_called()
         self.get(path);self.server.engine.sync.assert_called_once()
+    def test_summary_statistics_and_snapshot_pages_are_authenticated_and_reconcile_once(self):
+        from unittest.mock import Mock
+        self.server.engine.sync=Mock()
+        window='chat=1&start='+str(time.time()-60)+'&end='+str(time.time()-1)
+        self.rejects('/v1/history/stats?'+window,401,False);self.server.engine.sync.assert_not_called()
+        plan=self.get('/v1/history/stats?'+window);self.assertEqual(plan['count'],0)
+        self.assertNotIn('content',json.dumps(plan));self.assertEqual(plan['messages'],[])
+        self.get('/v1/history?'+window+'&summary=1&through='+str(plan['through']))
+        self.server.engine.sync.assert_called_once()
+        self.rejects('/v1/history?'+window+'&summary=1&through=-1',400)
+        self.rejects('/v1/history/stats?chat=2&start=1&end=2',404)
     def test_event_monitor_metadata_requires_authentication(self):
         from types import SimpleNamespace
         self.server.monitor=SimpleNamespace(snapshot=lambda:{'mode':'inotify','periodic_scan_seconds':None})
