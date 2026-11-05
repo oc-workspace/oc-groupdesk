@@ -6,6 +6,8 @@ class StackTests(unittest.TestCase):
   a=render(str(uuid.uuid4()),'wx_new',[18101,18180,18543,18187],images);b=render(str(uuid.uuid4()),'wx_other',[18201,18280,18643,18287],images)
   self.assertNotEqual(a['persist'],b['persist']);self.assertNotEqual(a['compose']['name'],b['compose']['name'])
   for stack in [a,b]:
+   # s6-overlay aborts when wrapped by Docker's init process.
+   self.assertIs(stack['compose']['services']['wechat']['init'],False)
    self.assertNotIn('external',stack['compose']['networks']['data'])
    self.assertEqual(stack['compose']['services']['reader']['networks']['data']['aliases'],['chatlog-reader'])
    for name,service in stack['compose']['services'].items():
