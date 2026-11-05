@@ -1,0 +1,7 @@
+# Operator image: use an already verified local GroupDesk runtime image.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY server/bot-config-copy.ts /app/server/bot-config-copy.ts
+COPY scripts/copy-bot-configuration.ts /app/scripts/copy-bot-configuration.ts
+USER node
+ENTRYPOINT ["/app/node_modules/.bin/tsx", "/app/scripts/copy-bot-configuration.ts"]

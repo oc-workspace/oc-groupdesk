@@ -86,3 +86,10 @@ GroupDesk `backup.sh`暂停应用写入后，一起备份控制库、所有ready
 安装合并发布的脚本到`/opt/docker/oc-projects/groupdesk-bots/egress-current/wechat_egress.py`（current为固定发布目录软链），安装同目录模板`groupdesk-bot-wechat-egress@.service`到系统systemd目录。由管理员先运行`python3 .../wechat_egress.py show <机器人UUID>`核对目标，再`systemctl enable --now groupdesk-bot-wechat-egress@<机器人UUID>.service`。只对确认需要直连的微信启用，不全局开启。systemd随Docker/主机重启恢复规则；容器重建、IP或桥接口变化后，应重新启动该实例服务以重新绑定，并再次检查容器HTTPS与真实微信二维码，不能仅以HTTP200作为登录就绪证据。
 
 停用该实例服务撤销本工具登记且实际创建的精确规则；不删除预先存在的同样规则。状态仅放`/run/groupdesk-bot-egress`，不存凭据。本次不需要重启微信，实际验证与发布信息记入当日进度。
+
+
+## 经明确授权复制配置
+
+运维命令`tsx scripts/copy-bot-configuration.ts <源机器人UUID> <目标机器人UUID> <源群UUID>`只用于用户明确要求沿用配置的首次接入。目标必须暂停且没有群、Key、Persona、素材或积分，已有人工修改的话题也拒绝覆盖。源配置以只读一致性快照读取；新空间使用新ID，API Key在进程内解密后立即按目标独立主密钥重新加密，不导出密钥文件、不调用模型或刷新远程目录。
+
+复制话题、缓存模型目录、默认/阶段模型路由、已发布Persona及选中群的配置；Persona以已发布版本作为新草稿，不带旧素材数据集或未发布草稿。群先创建为停用、无external_id、未应用状态，必须用新微信的真实群标识完成绑定。复制不包含聊天、积分/兑换、知识文件、成员授权、发送队列、定时总结计划和原接入Token。重复运行只返回原复制结果，不覆盖目标后续编辑。此命令没有网页接口，不自动扩展其他账号访问权或切换活动机器人。
