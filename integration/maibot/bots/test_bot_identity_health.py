@@ -28,6 +28,13 @@ class HealthTests(unittest.TestCase):
    with patch.object(health.gd,'api',side_effect=api):
     for now in [10000,10030,13000,13600]:health.report(b,{'groups':{'1':'own'}},{'wechat_connected':True,'running':True},True,True,now)
    reports=[v for path,v in calls if path=='/health'];self.assertEqual(len(reports),2);self.assertTrue(all(r['state']=='online' and r['external_id']=='own' for r in reports))
+ def test_recovery_updates_without_waiting_an_hour(self):
+  with tempfile.TemporaryDirectory() as t:
+   b=N(state_dir=Path(t),router=N(check_connection=lambda p:True));conf={'groups':{'1':'own'}}
+   with patch.object(health.gd,'api',return_value={'configured':False}) as api:
+    health.report(b,conf,{'running':True,'wechat_connected':False},True,True,10000)
+    health.report(b,conf,{'running':True,'wechat_connected':True},True,True,10060)
+    self.assertEqual(api.call_args.args[1]['state'],'online')
  def test_reader_down_pause_and_bounded_retry(self):
   with tempfile.TemporaryDirectory() as t:
    b=N(state_dir=Path(t),router=N(check_connection=lambda p:True));conf={'groups':{'1':'own'}};status={'wechat_connected':True,'running':True}

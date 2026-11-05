@@ -15,12 +15,14 @@ def report(bridge,conf,status,reader,enabled,now=None):
     try:previous=json.loads(path.read_text())
     except (OSError,ValueError):previous={}
     # Failed uploads retry at most once a minute, successful checks once an hour.
-    if now-previous.get('attempt_at',0)<60 or now-previous.get('reported_at',0)<3600:return
+    if now-previous.get('attempt_at',0)<60:return
     previous['attempt_at']=now
     wechat=status.get('wechat_connected') is True and status.get('running') is True and not status.get('ui_input_blocked')
     maibot=bool(bridge.router.check_connection('wechat_linux'))
     reason=('manual_pause' if not enabled else 'ui_window_blocked' if status.get('ui_input_blocked') else 'wechat_unavailable' if not wechat else 'chatlog_reader_unavailable' if not reader else 'maibot_unavailable' if not maibot else 'ok')
     state='maintenance' if not enabled else 'online' if reason=='ok' else 'degraded'
+    signature={'state':state,'reason':reason,'wechat':bool(wechat),'maibot':maibot}
+    if now-previous.get('reported_at',0)<3600 and all(previous.get('result',{}).get(k)==v for k,v in signature.items()):return
     configured=False;pending=False
     try:
         notification=gd.api('/notification');configured=notification.get('configured') is True
