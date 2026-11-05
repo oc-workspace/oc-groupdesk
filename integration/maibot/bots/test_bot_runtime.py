@@ -30,7 +30,7 @@ class LifecycleTests(unittest.TestCase):
   self.calls.append((path,body));return self.state if path=='/bot-state' else {'ok':True}
  def request(self,path,query):
   self.assertEqual(path,'/v1/status');self.assertEqual(query,{});return {'ok':True}
- def heartbeat(self):return self.calls[-1][1]
+ def heartbeat(self):return [body for path,body in self.calls if path=='/bot-heartbeat'][-1]
  def pause(self):self.state.update(state='pausing',enabled=False,revision=2)
  def test_first_legacy_activation_preserves_cursors_controls_and_does_not_send(self):
   r.sync(self.bridge);self.assertEqual(self.control.read_text(),self.original);self.assertNotIn(('reset',[1]),self.events);self.assertFalse(self.heartbeat()['stopped']);self.assertTrue(self.heartbeat()['local_ready'])

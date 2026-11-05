@@ -111,3 +111,10 @@ GroupDesk `backup.sh`暂停应用写入后，一起备份控制库、所有ready
 独立桌面HTTP200仅证明认证入口；完整接入还核验微信主界面、支持send_only的完整SDK、数据库HMAC与真实群映射、模型路由、三服务心跳和配置ACK。当前完整新账号微信镜像为`sha256:b68730597e91bccbca0910d61c8640b0f58689e890b29dbfaaaa0a59beb0ff3d`，不得误用只含旧launcher的桌面基础镜像当作Reader发送栈。新的读入仍是微信写库事件唤醒Reader，发送仍走可见微信界面，没有启用原生注入发送。
 
 停止期间如桥接账本存在reserved而无seq，应先核对SDK幂等client_id对应的真实持久回执和实际队列。本次两笔旧失败已在私有备份后对账为failed并补原seq，保留防重发记录；不能直接改机器人state、删除记录、猜测已送达或再次发送来绕过停止确认。
+
+
+### 独立点名与每小时巡检
+
+独立实例的 `/groupdesk/mention-names.json` 保存 JSON 名字数组，例如 `["Tatsumi","Tatsumisaki"]`，只在该账号内使用，按字面、大小写不敏感及英文单词边界匹配；不继承旧 GT/小T 名字。由 `bots/install-names.py` 对准确 baseline 安装 `bot_names.NAME`，统一入口用于显式点名、名字清理及平台 at 标记；不依赖 Reader 提供结构化 at。缺少新账号名字配置时不回退到旧账号。
+
+`bot_runtime.sync` 在现有桥接 Docker 内调用 `bot_health.report`：首次及此后每小时检查发送适配器状态、Reader 连接新鲜度、MaiBot websocket；只上报当前连接文件授权的群。失败至少隔一分钟重试，成功后不再频繁巡检。不读群史/原始库，不发模型请求、不重启微信；与群配置 ACK 分开。告警配置从该机器人业务库读取，仅状态异常且已配置时推送，重复异常去重且每天最多5次。人工刷新页面查看结果。

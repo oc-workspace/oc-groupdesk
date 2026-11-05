@@ -99,4 +99,9 @@ def sync(bridge):
         'sender_queue_depth':queue,'active_turns':active,'send_inflight':inflight,'stopped':stopped,
         'cutover_generation':state['activation_generation'],'local_ready':local_ready})
     bridge.health['robot']={k:state[k] for k in ('bot_id','state','revision','activation_generation')}
+    try:
+        import bot_health
+        bot_health.report(bridge,conf,status,reader,state.get('enabled') and local_ready)
+    except Exception:
+        bridge.health['hourly_health_report_error']=True
     return result
