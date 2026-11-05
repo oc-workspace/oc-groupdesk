@@ -1,0 +1,25 @@
+[Unit]
+Description=Direct outbound route for GroupDesk WeChat %i
+After=docker.service network-online.target sing-box.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /opt/docker/oc-projects/groupdesk-bots/egress-current/wechat_egress.py apply %i
+ExecStop=/usr/bin/python3 /opt/docker/oc-projects/groupdesk-bots/egress-current/wechat_egress.py remove %i
+TimeoutStartSec=60
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=groupdesk-bot-egress
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/run/groupdesk-bot-egress
+
+[Install]
+WantedBy=multi-user.target
