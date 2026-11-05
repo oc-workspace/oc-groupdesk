@@ -235,6 +235,20 @@ class Engine:
                 if self.last_error in {'key_invalid','self_identity_changed','group_mapping_ambiguous'}:
                     self.last_success = 0
 
+    def tail(self, chat):
+        # Cursor baselines need metadata only. Read the epoch, committed archive
+        # watermark and cutoff under the same lock as sync; no history body or
+        # archive/raw database is opened, even if the first message is huge.
+        with self.lock:
+            status = self.status()
+            if not status['ok']:
+                raise RuntimeError('source_unavailable')
+            if chat not in self.store.allowed:
+                raise KeyError('Unknown group')
+            return {'epoch': self.cached_epoch, 'watermark': self.cached_watermarks.get(chat, 0),
+                    'last_checked': status['last_checked'], 'messages': [],
+                    'next_after': None, 'cutover_at': time.time()}
+
     def summary_stats(self, chat, start, end):
         with self.lock:
             status=self.status()
