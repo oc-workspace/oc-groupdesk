@@ -6,12 +6,13 @@ import {passwordHash} from './security.js';
 import {catalog} from './policies.js';
 import {defaultInteractionId,interactionCommands} from '../shared/interactions.js';
 
-export async function migrate(){
+export async function migrate(options:{controlPlane?:boolean;bootstrapAdmin?:boolean}={}){
   await transaction(async db=>{
     await db.query("SELECT pg_advisory_xact_lock(78511942)");
     await db.query('CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
     const files=(await readdir(new URL('../migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort();
     for(const name of files){
+      if(options.controlPlane===false&&name.endsWith('_bot_control.sql'))continue;
       if((await db.query('SELECT 1 FROM schema_migrations WHERE name=$1',[name])).rowCount)continue;
       await db.query(await readFile(new URL('../migrations/'+name,import.meta.url),'utf8'));
       await db.query('INSERT INTO schema_migrations(name) VALUES($1)',[name]);
@@ -20,7 +21,7 @@ export async function migrate(){
       const instructions=await readFile(new URL('../skills/wechat-server-summary/references/'+slug+'.md',import.meta.url),'utf8');
       await db.query('INSERT INTO summary_templates(slug,name,instructions) VALUES($1,$2,$3) ON CONFLICT(slug) DO NOTHING',[slug,name,instructions]);
     }
-    if(!(await db.query('SELECT 1 FROM admins LIMIT 1')).rowCount){
+    if(options.bootstrapAdmin!==false&&!(await db.query('SELECT 1 FROM admins LIMIT 1')).rowCount){
       const password=process.env.ADMIN_PASSWORD;
       if(!password||password.length<16)throw new Error('ADMIN_PASSWORD must contain at least 16 characters for initial setup');
       await db.query('INSERT INTO admins(id,username,password_hash) VALUES($1,$2,$3)',[randomUUID(),process.env.ADMIN_USERNAME||'admin',passwordHash(password)]);

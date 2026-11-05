@@ -1,3 +1,4 @@
+import {modelMasterKey} from './bot-context.js';
 import {randomBytes,createCipheriv,createDecipheriv} from 'node:crypto';
 import {lookup} from 'node:dns/promises';
 import {get} from 'node:https';
@@ -5,7 +6,7 @@ import {isIP} from 'node:net';
 import {HttpError,requireCondition} from './security.js';
 
 function masterKey(){
-  const value=process.env.MODEL_ENCRYPTION_KEY||'';
+  const value=modelMasterKey();
   requireCondition(/^[a-f0-9]{64}$/i.test(value),503,'模型密钥存储尚未初始化');
   return Buffer.from(value,'hex');
 }

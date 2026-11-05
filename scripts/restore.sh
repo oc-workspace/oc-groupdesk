@@ -15,11 +15,21 @@ dc=(docker compose --env-file /opt/persist/groupdesk/secrets/app.env)
 "${dc[@]}" stop interaction-worker
 "${dc[@]}" stop app worker
 # On failure remain stopped rather than serving partially restored data.
-"${dc[@]}" exec -T postgres pg_restore -U groupdesk -d groupdesk --clean --if-exists --exit-on-error < "$backup_dir/database.dump"
+"${dc[@]}" exec -T postgres pg_restore -U groupdesk -d groupdesk --no-owner --no-acl --clean --if-exists --exit-on-error < "$backup_dir/database.dump"
+if [[ -f "$backup_dir/bot-databases.tsv" ]]; then
+  "${dc[@]}" run --rm --no-deps -T -e GROUPDESK_RESTORE_MODE=1 worker /app/node_modules/.bin/tsx scripts/prepare-bot-restore.ts
+  while IFS=$'\t' read -r bot_id bot_database bot_role; do
+    [[ -n "$bot_id" ]] || continue
+    [[ "$bot_id" =~ ^[a-f0-9-]{36}$ && "$bot_database" =~ ^gdb_[a-f0-9]{32}$ && "$bot_role" =~ ^gdr_[a-f0-9]{32}$ ]] || { echo "Invalid robot database binding"; exit 1; }
+    [[ -f "$backup_dir/bots/$bot_id.dump" ]] || { echo "Missing robot database backup"; exit 1; }
+    "${dc[@]}" exec -T postgres pg_restore -U groupdesk -d "$bot_database" --role="$bot_role" --no-owner --no-acl --clean --if-exists --exit-on-error < "$backup_dir/bots/$bot_id.dump"
+  done < "$backup_dir/bot-databases.tsv"
+fi
 restore_dir="$(mktemp -d /opt/persist/groupdesk/restore-files.XXXXXX)"
 tar -xzf "$backup_dir/files.tar.gz" -C "$restore_dir"
 chown -R 1000:1000 "$restore_dir"
 mv /opt/persist/groupdesk/files "/opt/persist/groupdesk/files.before-restore-$(date +%s)"
 mv "$restore_dir" /opt/persist/groupdesk/files
 "${dc[@]}" up -d --no-build --force-recreate --no-deps --wait --wait-timeout 150 app worker interaction-worker
+echo "Robots restored from a multi-robot backup remain paused until explicitly activated."
 echo "Restore complete. Previous files remain in files.before-restore-*."

@@ -1,3 +1,4 @@
+import {requireCurrentBotActive} from '../bot-workspaces.js';
 import {randomUUID} from 'node:crypto';
 import {pool,transaction,audit} from '../db.js';
 import {requireCondition,HttpError} from '../security.js';
@@ -15,8 +16,9 @@ export async function validateConfig(g:any,c:any,db:Db=pool){
  if(c.model_route.mode==='custom')await validateSelection(c.model_route,'text',db);
 }
 export async function route(g:any,c:any,db:Db=pool){const routes=await effectiveModelRoutes({model_routes:c.model_route.mode==='inherit'?g.model_routes:{text:c.model_route,image:{mode:'disabled'}}},db);return c.model_route.mode==='inherit'?routes.stages.summary:routes.text;}
-export async function valid(job:any,db:Db=pool,send=false){const g=await group(job.group_id,db),s=await settings(g.id,db);requireCondition(g.enabled&&g.external_id===job.external_id&&g.revision===job.group_revision&&s.revision===job.settings_revision,409,'群或总结配置已变化，请重新创建任务');if(send)requireCondition(s.config.enabled,409,'本群总结发布已停用');return {g,s};}
+export async function valid(job:any,db:Db=pool,send=false){await requireCurrentBotActive();const g=await group(job.group_id,db),s=await settings(g.id,db);requireCondition(g.enabled&&g.external_id===job.external_id&&g.revision===job.group_revision&&s.revision===job.settings_revision,409,'群或总结配置已变化，请重新创建任务');if(send)requireCondition(s.config.enabled,409,'本群总结发布已停用');return {g,s};}
 export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolean,requestId:string,now=Date.now(),scheduleId:string|null=null,occurrence:string|null=null){
+ await requireCurrentBotActive();
  await db.query('SELECT id FROM groups WHERE id=$1 FOR UPDATE',[groupId]);
  const g=await group(groupId,db),s=await settings(groupId,db),c=summaryConfig.parse(s.config);
  requireCondition(g.enabled&&g.external_id,409,'请先启用群并连接机器人');if(publish)requireCondition(c.enabled,409,'请先保存并启用本群总结发布');

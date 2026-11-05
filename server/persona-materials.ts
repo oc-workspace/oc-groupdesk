@@ -1,3 +1,4 @@
+import {dataDirectory} from './bot-context.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {mkdir,writeFile,unlink,readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -7,7 +8,7 @@ import {pool,transaction,audit} from './db.js';
 import {digest,requireCondition,HttpError} from './security.js';
 import {textMatchesAny} from '../shared/conversation.js';
 
-export const materialRoot=()=>resolve(process.env.DATA_DIR||'data','persona');
+export const materialRoot=()=>resolve(dataDirectory(),'persona');
 const short=z.string().max(500).min(1);
 const recordSchema=z.object({id:short,group_id:short.optional(),sender_id:short,
  sender_display_name:z.string().max(500).nullable().optional(),timestamp:z.number().int().min(0).max(4102444800),

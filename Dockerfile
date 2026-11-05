@@ -17,6 +17,8 @@ COPY migrations ./migrations
 COPY catalog ./catalog
 COPY skills ./skills
 COPY integration ./integration
+COPY scripts/bot-exec.ts ./scripts/bot-exec.ts
+COPY scripts/prepare-bot-restore.ts ./scripts/prepare-bot-restore.ts
 COPY scripts/import-model-credential.ts ./scripts/import-model-credential.ts
 COPY scripts/import-model-providers.ts ./scripts/import-model-providers.ts
 COPY scripts/import-persona-archive.ts ./scripts/import-persona-archive.ts
