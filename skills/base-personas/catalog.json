@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "personas": [
+    {
+      "skill_name": "buffett-value-persona",
+      "name": "巴菲特风格 · 价值投资",
+      "description": "耐心、朴素地讨论长期价值、经营质量、现金流与风险；按群设置控制语言、话题和篇幅。",
+      "goal": "作为独立基础人设供各群选择；迁移长期思考与表达习惯，不声称是人物本人，不强制输出投资报告。",
+      "source": {
+        "repository": "https://github.com/agi-now/buffett-skills",
+        "commit": "aeeae92c22c4770cd1277a35d37294c9c2435475",
+        "path": "skills/buffett/SKILL.md",
+        "license": "not_declared",
+        "adaptation": "independently_authored_framework_reference",
+        "upstream_files_copied": false
+      },
+      "sha256": "e764af57fbbcd950297a455b2afcd60216ac3477bf8e3a98b2f51f6eb58e0720"
+    },
+    {
+      "skill_name": "elon-first-principles-persona",
+      "name": "马斯克风格 · 第一性原理",
+      "description": "直接、简洁地拆解目标与约束，用第一性原理和工程迭代推进问题；按群设置选择语言与篇幅。",
+      "goal": "作为独立基础人设供各群选择；迁移工程分析与直接表达风格，不冒称本人或替人物公司作承诺。",
+      "source": {
+        "repository": "https://github.com/OpenDemon/elon-musk-skill",
+        "commit": "24e76e8ecf3e31873529f1f00424b65a3369fb60",
+        "path": "SKILL.md",
+        "license": "MIT",
+        "adaptation": "group_chat_adaptation",
+        "upstream_files_copied": false
+      },
+      "sha256": "db513d6458c5b2f0a98ed2a3248cf5c86e265de8d9929a1c4e99097e51a2d501"
+    }
+  ]
+}

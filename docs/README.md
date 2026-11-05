@@ -10,7 +10,7 @@
 | API Key、模型目录与按群模型选择 | [模型路由](model-routing.md) |
 | Planner、Replyer、辅助任务和总结分阶段模型 | [阶段模型](model-stages.md) |
 | Persona素材、增量归档、按人提取与人工发布 | [Persona工作室](persona-studio.md) |
-| 基础与特色Persona组合、独立素材与完整草稿 | [Persona组合](persona-composition.md) |
+| 基础与特色Persona组合、公开基础模板、独立素材与完整草稿 | [Persona组合](persona-composition.md) |
 | 随机延迟迎新 | [从容迎新](newcomer-welcome.md) |
 | 每日摸鱼、多语言命令、积分、奖品与兑换 | [群互动](group-interactions.md) |
 | 认真/玩笑讨论统计与按群接梗 | [讨论与接梗](conversation-insights.md) |
