@@ -51,9 +51,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 1 <= limit <= 200:
                 raise ValueError('Invalid page limit')
             if after == 'tail' and target.path == '/v1/stream':
-                value = self.server.engine.page(chat,0,1)
-                self.reply(200, {'epoch':value['epoch'],'watermark':value['watermark'],
-                    'last_checked':value['last_checked'],'messages':[],'next_after':None,'cutover_at':time.time()});return
+                self.reply(200, self.server.engine.tail(chat));return
             after = int(after)
             if after < 0 or after >= 2**53:
                 raise ValueError('Invalid cursor')

@@ -45,6 +45,7 @@ class HTTPTests(unittest.TestCase):
         class Fake:
             def status(self):return {'ok':True,'source':'chatlog-keeper','state':'ready','epoch':store.epoch,'last_checked':time.time()}
             def sync(self):pass
+            def tail(self,chat):return {'epoch':store.epoch,'watermark':0,'last_checked':time.time(),'messages':[],'next_after':None,'cutover_at':time.time()}
             def page(self,*args,**kwargs):return {**store.page(*args,**kwargs),'last_checked':time.time()}
             def summary_stats(self,*args):return {**store.summary_stats(*args),'last_checked':time.time(),'messages':[]}
         engine=Fake();engine.store=store
@@ -97,7 +98,13 @@ class HTTPTests(unittest.TestCase):
         self.rejects('/v1/status',401,False)
         self.assertNotIn('monitor',self.get('/healthz',False))
     def test_tail_is_empty_and_creates_a_fresh_cutover_boundary(self):
+        from unittest.mock import Mock
+        self.server.engine.page=Mock(side_effect=AssertionError('tail read historical content'))
+        self.server.engine.sync=Mock(side_effect=AssertionError('tail reconciled raw database'))
         result=self.get('/v1/stream?chat=1&after=tail')
+        self.server.engine.page.assert_not_called();self.server.engine.sync.assert_not_called()
+        self.rejects('/v1/stream?chat=1&after=tail',401,False)
+        self.rejects('/v1/stream?chat=99&after=tail',404)
         self.assertEqual(result['messages'],[]);self.assertGreater(result['cutover_at'],0)
 
 if __name__=='__main__':unittest.main()

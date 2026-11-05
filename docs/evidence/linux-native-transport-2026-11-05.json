@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-05",
+  "scope": "isolated_synthetic_child_only",
+  "target_system": {"os": "Ubuntu 24.04", "architecture": "x86_64", "wechat_version": "4.1.13.23", "executable_format": "ELF"},
+  "test_image": "sha256:d438de562ac84a81491c0f7a42f33d8592adf9b722609846f8e631f54f18ff16",
+  "profile": {"network": "none", "user": "1000:1000", "read_only": true, "account_mounts": false, "capabilities_added": false},
+  "result": {"contract": 1, "target": "own_synthetic_child", "status": {"CapEff": "0000000000000000", "NoNewPrivs": "0", "Seccomp": "2"}, "traceme": true, "ptrace_read": true, "ptrace_write": true, "process_vm_readv": true, "child_verified": true},
+  "real_wechat_memory_access": false,
+  "real_wechat_injection_verified": false,
+  "native_message_send_verified": false,
+  "real_messages_sent": 0,
+  "credentials_collected": false
+}

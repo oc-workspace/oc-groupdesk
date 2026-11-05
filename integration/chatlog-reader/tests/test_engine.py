@@ -47,6 +47,36 @@ class EngineTests(unittest.TestCase):
         connection=sqlite3.connect(self.message)
         connection.execute('INSERT INTO '+self.table(group)+' VALUES(1,?,?,?,?,NULL)',(int(time.time())-10,sender,text,server))
         connection.commit();connection.close()
+    def test_tail_is_memory_only_and_preserves_the_live_archive(self):
+        from unittest.mock import patch
+        self.engine.sync()
+        before = self.engine.store.page(1,0,200)
+        with patch.object(self.engine.store,'connect',side_effect=AssertionError('tail opened archive')), patch.object(self.engine,'decrypt',side_effect=AssertionError('tail decrypted raw database')), patch('chatlog_reader.engine.time.time',return_value=before['messages'][0]['observed_at']+1):
+            tail = self.engine.tail(1)
+        self.assertEqual(tail['watermark'],3)
+        self.assertEqual(tail['epoch'],before['epoch'])
+        self.assertEqual(tail['messages'],[])
+        self.assertIsNone(tail['next_after'])
+        self.assertEqual(before,self.engine.store.page(1,0,200))
+    def test_tail_does_not_fail_on_an_oversized_first_historical_message(self):
+        connection=sqlite3.connect(self.message)
+        connection.execute('UPDATE '+self.table('native-a@chatroom')+' SET message_content=? WHERE server_id=101',('x'*2_600_000,))
+        connection.commit();connection.close()
+        self.engine.sync()
+        with self.assertRaises(OverflowError):self.engine.page(1,0,1)
+        self.assertEqual(self.engine.tail(1)['watermark'],3)
+    def test_tail_rejects_unconfigured_groups_and_unhealthy_sources(self):
+        self.engine.sync()
+        with self.assertRaises(KeyError):self.engine.tail(999)
+        self.engine.last_success=0
+        with self.assertRaises(RuntimeError):self.engine.tail(1)
+    def test_empty_group_tail_uses_its_own_cached_watermark(self):
+        connection=sqlite3.connect(self.message)
+        connection.execute('DELETE FROM '+self.table('native-b@chatroom'))
+        connection.commit();connection.close()
+        self.engine.sync()
+        self.assertEqual(self.engine.tail(1)['watermark'],3)
+        self.assertEqual(self.engine.tail(2)['watermark'],0)
     def test_indexer_excludes_unconfigured_conversations(self):
         self.engine.sync();self.assertTrue(self.engine.status()['ok'])
         self.assertEqual(self.engine.store.counts(),{'1':3,'2':1})

@@ -19,6 +19,7 @@
 | 群总结、预览、定时与单次预约、自适应批次 | [群聊总结](group-summaries.md) |
 | 知识库、文件处理与私聊成员核验 | [知识与权限](knowledge-and-access.md) |
 | 微信数据库读取、写入事件、加密与送达校验 | [Chatlog Reader](../integration/chatlog-reader/README.md) |
+| Linux读取改进、叙间方案对照与原生发送候选评估 | [Linux原生发送评估](linux-native-transport-evaluation.md) |
 | 微信巡检、独立告警、Docker部署与备份 | [运维](operations.md) |
 | 多机器人管理、相互隔离与先后切换 | [多机器人方案与实现](multi-bot-management.md) |
 | 历史测试、发布、部署与阻塞证据 | [每日进度](progress/README.md) |
