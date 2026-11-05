@@ -27,6 +27,7 @@ COPY scripts/bootstrap-persona.ts ./scripts/bootstrap-persona.ts
 COPY scripts/prepare-persona-specialist.ts ./scripts/prepare-persona-specialist.ts
 COPY scripts/migrate-persona-composition.ts ./scripts/migrate-persona-composition.ts
 COPY scripts/seed-welcome-persona.ts ./scripts/seed-welcome-persona.ts
+COPY scripts/seed-public-base-personas.ts ./scripts/seed-public-base-personas.ts
 RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 EXPOSE 3110

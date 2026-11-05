@@ -1,0 +1,8 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY server/public-personas.ts /app/server/public-personas.ts
+COPY scripts/bot-exec.ts /app/scripts/bot-exec.ts
+COPY scripts/seed-public-base-personas.ts /app/scripts/seed-public-base-personas.ts
+COPY skills/base-personas /app/skills/base-personas
+USER node
+ENTRYPOINT ["/app/node_modules/.bin/tsx", "/app/scripts/bot-exec.ts"]
