@@ -1,3 +1,5 @@
+import {dataDirectory} from './bot-context.js';
+import {forWorkspaces} from './bot-workspaces.js';
 import {tick} from './summaries/core.js';
 import {processSummary} from './summaries/generation.js';
 import {readFile} from 'node:fs/promises';
@@ -20,7 +22,7 @@ export async function processNext(){
   try{
     let content=doc.source_text||'';
     if(doc.filename){
-      const buffer=await readFile(resolve(process.env.DATA_DIR||'data','uploads',doc.filename));
+      const buffer=await readFile(resolve(dataDirectory(),'uploads',doc.filename));
       if(doc.kind==='pdf'){
         const {PDFParse}=await import('pdf-parse');
         const parser=new PDFParse({data:buffer});
@@ -49,11 +51,11 @@ export async function processNext(){
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
   let running=true;const summaryAbort=new AbortController();
-  const summaryTasks=[(async()=>{while(running){try{await tick();}catch{console.error('summary_schedule_retry');}await new Promise(r=>setTimeout(r,2000));}})(),(async()=>{while(running){try{if(!await processSummary(undefined,summaryAbort.signal))await new Promise(r=>setTimeout(r,2000));}catch{await new Promise(r=>setTimeout(r,3000));}}})()];
+  const summaryTasks=[(async()=>{while(running){try{await forWorkspaces(true,async()=>{await tick();return true;});}catch{console.error('summary_schedule_retry');}await new Promise(r=>setTimeout(r,2000));}})(),(async()=>{while(running){try{if(!await forWorkspaces(true,()=>processSummary(undefined,summaryAbort.signal)))await new Promise(r=>setTimeout(r,2000));}catch{await new Promise(r=>setTimeout(r,3000));}}})()];
   process.on('SIGTERM',()=>{running=false;summaryAbort.abort();});process.on('SIGINT',()=>{running=false;summaryAbort.abort();});
   console.log('GroupDesk worker ready');
   while(running){
-    try{if(!await processNext()&&!await processPersonaJob()&&!await processConversationJob())await new Promise(r=>setTimeout(r,2000));}
+    try{if(!await forWorkspaces(false,async()=>await processNext()||await processPersonaJob()||await processConversationJob()))await new Promise(r=>setTimeout(r,2000));}
     catch{console.error('worker_retry');await new Promise(r=>setTimeout(r,3000));}
   }
   await Promise.allSettled(summaryTasks);await pool.end();

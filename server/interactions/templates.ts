@@ -1,3 +1,4 @@
+import {forWorkspaces} from '../bot-workspaces.js';
 import {identityInstructions} from '../identity.js';
 import {fileURLToPath} from 'node:url';
 import {writeFile} from 'node:fs/promises';
@@ -61,6 +62,6 @@ export async function processInteractionTemplate(caller=callTextModel){
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  let running=true;process.on('SIGTERM',()=>{running=false;});process.on('SIGINT',()=>{running=false;});
- while(running){try{await writeFile('/tmp/interaction-worker-heartbeat',String(Date.now()));if(!await processInteractionTemplate())await new Promise(r=>setTimeout(r,1500));}catch{await new Promise(r=>setTimeout(r,3000));}}
+ while(running){try{await writeFile('/tmp/interaction-worker-heartbeat',String(Date.now()));if(!await forWorkspaces(true,()=>processInteractionTemplate()))await new Promise(r=>setTimeout(r,1500));}catch{await new Promise(r=>setTimeout(r,3000));}}
  await pool.end();
 }

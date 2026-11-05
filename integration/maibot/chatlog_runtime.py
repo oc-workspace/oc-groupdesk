@@ -166,6 +166,7 @@ class ReaderAgent:
             if len(body)>4_000_000:
                 raise OverflowError('Source response too large')
             value = json.loads(body)
+            if route=='/v1/status' and value.get('ok') is True:value={**value,'messages':[]}
             if not re.fullmatch(r'[a-f0-9]{32}', value.get('epoch','')) or not isinstance(value.get('messages'),list):
                 raise ReaderUnavailable('Invalid source contract')
             checked = float(value['last_checked'])
@@ -287,6 +288,20 @@ class ReaderAgent:
 
     def nack(self, delivery, _reason, retry_delay=10):
         self.finish(delivery,False,retry_delay)
+
+    def reset_live_cursors(self, chat_ids):
+        # Resuming one account starts at its current tail. The archive, epoch,
+        # send evidence and other robot instances are never changed.
+        anchors=[]
+        for chat in chat_ids:
+            tail=self.request('/v1/stream',{'chat':int(chat),'after':'tail','limit':1})
+            if type(tail.get('watermark')) is not int or not 0<=tail['watermark']<STRIDE:
+                raise ReaderUnavailable('Invalid resumption tail')
+            anchors.append((int(chat),tail))
+        with self.db() as db:
+            for chat,tail in anchors:
+                db.execute('INSERT INTO reader_cursors(chat_id,epoch,after_seq,cutover,pending_seq,retry_until) VALUES(?,?,?,?,NULL,0) ON CONFLICT(chat_id) DO UPDATE SET epoch=excluded.epoch,after_seq=excluded.after_seq,cutover=excluded.cutover,pending_seq=NULL,retry_until=0',
+                    (chat,tail['epoch'],tail['watermark'],float(tail['cutover_at'])))
 
     def summary_plan(self, chat, *, duration_seconds, until=None):
         identifier=int(chat.id if hasattr(chat,'id') else chat)

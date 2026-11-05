@@ -1,3 +1,8 @@
+import {botStorage,legacyBotId,dataDirectory} from './bot-context.js';
+import {controlPool} from './db.js';
+import {botRecord,botScope,ensureAdminAlias} from './bot-workspaces.js';
+import {registerBotAdmin} from './bots-api.js';
+import {registerBotRuntime} from './bot-runtime-api.js';
 import {registerReplyFrequency,replyFrequency} from './reply-frequency.js';
 import {registerSummaryAdmin,registerSummaryRuntime} from './summaries/api.js';
 import express,{type Request,type Response,type NextFunction} from 'express';
@@ -27,7 +32,7 @@ import {runtimeInteractions} from './interactions/config.js';
 import {registerNotificationAdmin,registerNotificationRuntime} from './notifications.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
-declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];}}}
+declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];botId?:string;}}}
 const id=z.uuid();
 const text=(max:number)=>z.string().trim().max(max);
 const language=z.enum(['auto','zh-CN','en','ja','ko','fr','de','es']);
@@ -40,7 +45,7 @@ const topicSchema=z.object({name:text(80).min(1),description:text(1000),instruct
 const kbSchema=z.object({name:text(120).min(1),description:text(1000)});
 const UUID=(value:unknown)=>id.parse(value);
 const cookieName='groupdesk_session';
-const dataRoot=resolve(process.env.DATA_DIR||'data');
+const dataRoot=dataDirectory;
 const secureCookies=process.env.COOKIE_SECURE!=='false';
 
 export async function groupDetail(groupId:string,db:Pick<typeof pool,'query'>=pool){
@@ -85,21 +90,33 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
     res.json({username:admin.username,csrf});
   });
   app.use('/api/runtime',async(req,res,next)=>{
-    const configured=process.env.BOT_API_TOKEN||'';
-    if(configured.length>=32&&secureEqual(req.headers.authorization||'','Bearer '+configured))return next();
-    const bearer=/^Bearer ([A-Za-z0-9_-]{32,200})$/.exec(req.headers.authorization||'');
-    if(!bearer)return res.status(401).json({error:'机器人身份验证失败'});
-    const adapter=(await pool.query('SELECT group_external_ids FROM runtime_adapters WHERE token_hash=$1',[digest(bearer[1])])).rows[0];
-    if(!adapter)return res.status(401).json({error:'机器人身份验证失败'});
-    req.runtimeGroups=adapter.group_external_ids;
-    if(['/scenes','/select-scene'].includes(req.path))return res.status(403).json({error:'此适配器只授权群聊'});
-    next();
+    const configured=process.env.BOT_API_TOKEN||'',supplied=req.headers.authorization||'';
+    let botId=legacyBotId,groups:string[]|undefined;
+    if(!(configured.length>=32&&secureEqual(supplied,'Bearer '+configured))){
+      const bearer=/^Bearer ([A-Za-z0-9_-]{32,200})$/.exec(supplied);
+      if(!bearer)return res.status(401).json({error:'机器人身份验证失败'});
+      const hash=digest(bearer[1]);
+      let adapter=(await controlPool.query('SELECT bot_id,group_external_ids FROM managed_bot_adapters WHERE token_hash=$1',[hash])).rows[0];
+      if(!adapter){const legacy=(await controlPool.query('SELECT group_external_ids FROM runtime_adapters WHERE token_hash=$1',[hash])).rows[0];if(legacy)adapter={bot_id:legacyBotId,...legacy};}
+      if(!adapter)return res.status(401).json({error:'机器人身份验证失败'});
+      botId=adapter.bot_id;groups=adapter.group_external_ids;
+      // Existing legacy allowlists can still be maintained by the original
+      // onboarding tool. They can never redirect to another robot/database.
+      if(botId===legacyBotId){const live=(await controlPool.query('SELECT group_external_ids FROM runtime_adapters WHERE token_hash=$1',[hash])).rows[0];if(live)groups=live.group_external_ids;}
+    }
+    requireCondition(!req.headers['x-groupdesk-bot']||req.headers['x-groupdesk-bot']===botId,403,'运行凭据不能切换到其他机器人');
+    req.botId=botId;req.runtimeGroups=groups;
+    const bot=await botRecord(botId);requireCondition(bot,401,'机器人身份验证失败');
+    if(['/bot-state','/bot-heartbeat'].includes(req.path))return next();
+    requireCondition(bot.state==='active',403,'机器人已暂停、正在切换或已归档');
+    if(groups&&['/scenes','/select-scene'].includes(req.path))return res.status(403).json({error:'此适配器只授权群聊'});
+    return botStorage.run(await botScope(botId),()=>next());
   });
   registerRuntime(app,options.interactions);
   app.use('/api',async(req,res,next)=>{
     const session=req.cookies[cookieName];
     if(!session)return res.status(401).json({error:'请先登录'});
-    const found=(await pool.query('SELECT a.id,a.username,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now()',[digest(session)])).rows[0];
+    const found=(await controlPool.query('SELECT a.id,a.username,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now()',[digest(session)])).rows[0];
     if(!found)return res.status(401).json({error:'登录已过期'});
     req.admin=found;
     if(!['GET','HEAD','OPTIONS'].includes(req.method)){
@@ -123,6 +140,15 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
       await audit(req.admin!.username,'auth.password_changed',null,{},db);
     });
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
+  });
+  registerBotAdmin(app);
+  app.use('/api',async(req,res,next)=>{
+    if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/'))return next();
+    const selected=req.headers['x-groupdesk-bot'];
+    const botId=selected===undefined?legacyBotId:z.uuid().parse(selected);
+    const record=await botRecord(botId);requireCondition(record,404,'机器人不存在');requireCondition(record.state!=='archived',409,'机器人已归档，请先在机器人管理恢复');
+    const scope=await botScope(botId);req.botId=botId;
+    return botStorage.run(scope,async()=>{await ensureAdminAlias(req.admin!);next();});
   });
   app.get('/api/overview',async(_req,res)=>{
     const groups=(await pool.query('SELECT * FROM groups ORDER BY created_at,id')).rows;
@@ -286,14 +312,14 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
     requireCondition(ext&&['txt','md','pdf'].includes(ext),400,'支持 TXT、Markdown 和文字型 PDF');
     if(ext==='pdf')requireCondition(file.buffer.subarray(0,5).toString()==='%PDF-',400,'PDF 文件格式无效');
     const docId=randomUUID(),filename=docId+'.'+ext;
-    await mkdir(resolve(dataRoot,'uploads'),{recursive:true});
-    await writeFile(resolve(dataRoot,'uploads',filename),file.buffer,{mode:0o600,flag:'wx'});
+    await mkdir(resolve(dataRoot(),'uploads'),{recursive:true});
+    await writeFile(resolve(dataRoot(),'uploads',filename),file.buffer,{mode:0o600,flag:'wx'});
     try{
       await transaction(async db=>{
         await db.query('INSERT INTO documents(id,kb_id,title,kind,filename) VALUES($1,$2,$3,$4,$5)',[docId,kbId,file.originalname.slice(0,200),ext,filename]);
         await audit(req.admin!.username,'document.created',docId,{kind:ext},db);
       });
-    }catch(error){await unlink(resolve(dataRoot,'uploads',filename));throw error;}
+    }catch(error){await unlink(resolve(dataRoot(),'uploads',filename));throw error;}
     res.status(201).json({id:docId,status:'pending'});
   });
   app.post('/api/documents/:id/retry',async(req,res)=>{
@@ -309,7 +335,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
       await bumpGroups(db,undefined,current.kb_id);await audit(req.admin!.username,'document.deleted',docId,{},db);
       return current;
     });
-    if(doc.filename)await unlink(resolve(dataRoot,'uploads',doc.filename)).catch(()=>console.error('upload_cleanup_failed',docId));
+    if(doc.filename)await unlink(resolve(dataRoot(),'uploads',doc.filename)).catch(()=>console.error('upload_cleanup_failed',docId));
     res.json({ok:true});
   });
   app.post('/api/knowledge/:id/search',async(req,res)=>{
@@ -370,6 +396,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
 }
 
 function registerRuntime(app:express.Express,interactions:{clock?:()=>number;random?:(min:number,max:number)=>number}={}){
+  registerBotRuntime(app);
   registerInteractionRuntime(app,interactions);
   registerSummaryRuntime(app);
   registerRuntimeHealth(app);

@@ -101,3 +101,5 @@ Compose项目名保持groupdesk。
 不含真实群聊天记录或个人资料。
 
 微信在线巡检及分级恢复见[integration/maibot/availability](integration/maibot/availability/README.md)。微信在线状态和配置应用确认分开显示；巡检每小时运行，不影响消息采集和配置同步频率。
+
+完整功能与运维说明见[文档索引](docs/README.md)；多机器人管理方案见[多机器人说明](docs/multi-bot-management.md)。

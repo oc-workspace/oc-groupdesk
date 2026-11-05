@@ -99,6 +99,18 @@ class CursorTests(unittest.TestCase):
     def test_history_cross_group_and_replay_requests_are_rejected(self):
         with self.assertRaises(ValueError):self.agent.claim(chat_ids=[1],replay_existing=True)
         with self.assertRaises(ReaderUnavailable):self.agent.message(row(chat=2),1,EPOCH)
+    def test_resume_tail_only_skips_old_live_messages_and_preserves_other_cursor_and_history(self):
+        self.prepare();self.source.rows=[row(1),row(2)]
+        with self.agent.db() as db:db.execute('INSERT INTO reader_cursors(chat_id,epoch,after_seq,cutover) VALUES(?,?,?,?)',(2,EPOCH,40,NOW))
+        # Source fixture normally emits cutover_at only for tail requests.
+        self.agent.reset_live_cursors([1])
+        self.assertEqual(self.agent.cursor(1)['after_seq'],2)
+        with self.agent.db() as db:self.assertEqual(db.execute('SELECT after_seq FROM reader_cursors WHERE chat_id=2').fetchone()[0],40)
+        self.source.rows.append(row(3));delivery=self.agent.claim(chat_ids=[1])[0]
+        self.assertEqual(delivery.message.source_seq,3)
+        history=self.agent.get_history(1,duration_seconds=20,until=datetime.fromtimestamp(NOW+10,timezone.utc))
+        self.assertEqual(len(history),3)
+
     def test_missing_names_remain_missing_in_history(self):
         self.source.rows=[{**row(1),'sender':None}]
         history=self.agent.get_history(1,duration_seconds=20,until=datetime.fromtimestamp(NOW+10,timezone.utc))
