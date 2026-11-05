@@ -38,17 +38,18 @@ def validate_rule(rule):
     return rule
 
 
-def plan(container, network, slug):
+def plan(container, network, slug, service='wechat'):
     project = 'gdbot-' + slug
-    if not container['running'] or container['project'] != project or container['service'] != 'wechat':
-        raise ValueError('Expected this bot’s running WeChat service')
+    if service not in {'wechat', 'maibot', 'wechat-bridge'} or not container['running'] or container['project'] != project or container['service'] != service:
+        raise ValueError('Expected this bot’s running outbound service')
     if network['Name'] != project + '_bot' or network['Labels'].get('com.docker.compose.project') != project:
         raise ValueError('Network belongs to another bot')
     if network['Driver'] != 'bridge' or network.get('Internal') or network.get('Options'):
         raise ValueError('Expected the default independent outbound bridge')
     endpoints = container['networks']
-    if set(endpoints) != {network['Name']}:
-        raise ValueError('WeChat must use only its own bot network')
+    expected = {network['Name'], project + '_data'} if service == 'wechat-bridge' else {network['Name']}
+    if set(endpoints) != expected:
+        raise ValueError('Service must use only its own expected networks')
     endpoint = endpoints[network['Name']]
     if endpoint['NetworkID'] != network['Id'] or not re.fullmatch('[a-f0-9]{64}', network['Id']):
         raise ValueError('Docker network identity mismatch')
@@ -58,17 +59,17 @@ def plan(container, network, slug):
     return validate_rule({'source': str(address) + '/32', 'interface': 'br-' + network['Id'][:12]})
 
 
-def inspect_rule(slug):
+def inspect_rule(slug, service='wechat'):
     project = 'gdbot-' + slug
     fmt = '{"running":{{json .State.Running}},"project":{{json (index .Config.Labels "com.docker.compose.project")}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"networks":{{json .NetworkSettings.Networks}}}'
-    container = json.loads(run('docker', 'inspect', '--format', fmt, project + '-wechat-1'))
+    container = json.loads(run('docker', 'inspect', '--format', fmt, project + '-' + service + '-1'))
     network = json.loads(run('docker', 'network', 'inspect', project + '_bot'))[0]
-    return plan(container, network, slug)
+    return plan(container, network, slug, service)
 
 
 def present(rule):
     address = str(ipaddress.ip_interface(rule['source']).ip)
-    return any(r.get('priority') == PRIORITY and r.get('src') in (address, rule['source'])
+    return any(r.get('priority') == PRIORITY and r.get('src') in (address, rule['source']) and r.get('srclen', 32) == 32 and 'not' not in r
                and r.get('iif') == rule['interface'] and r.get('table') in ('main', 254)
                for r in json.loads(run('ip', '-j', '-4', 'rule', 'show')))
 
@@ -83,9 +84,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['show', 'apply', 'remove'])
     parser.add_argument('bot_id')
+    parser.add_argument('--service', choices=['wechat', 'maibot', 'wechat-bridge'], default='wechat')
     args = parser.parse_args()
     slug = identity(args.bot_id)
-    state = STATE / (slug + '.json')
+    suffix = '' if args.service == 'wechat' else '-' + args.service
+    state = STATE / (slug + suffix + '.json')
     if args.action == 'remove':
         if state.exists():
             old = json.loads(state.read_text())
@@ -101,7 +104,7 @@ def main():
     deadline = time.monotonic() + (25 if args.action == 'apply' else 0)
     while True:
         try:
-            rule = inspect_rule(slug)
+            rule = inspect_rule(slug, args.service)
             break
         except subprocess.CalledProcessError:
             if time.monotonic() >= deadline:
