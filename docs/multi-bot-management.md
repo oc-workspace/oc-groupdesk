@@ -66,7 +66,7 @@ RyuBuddy的数据库迁移有一个兼容安排：保留原库中的现有业务
 3. 在本账号登录目录定位db_storage，配置自己的Reader、加密取钥及独立API Token。此操作在账号提供后另行执行，不能以旧账号密钥代替。`.env`只含`READER_ACCOUNT`与`WECHAT_ACCOUNT_DATABASES`，后者必须在本机器人的wechat目录内。
 4. 私有`groupdesk/connection.json`除url、token、groups外，加上bot_id、wechat_id、生成的runtime_instance_id，以及Reader账号目录名SHA256作为account_fingerprint。该指纹用于绑定所配置的数据库来源，不等于通过微信协议验证公开微信号；实际账号由本人登录与运维核对。后台Token和各群白名单必须与本空间一致。
 5. `start_stack.py <部署目录> --desktop-only`用于首次桌面登录；完整运行使用`start_stack.py <部署目录>`，会先校验固定目录、代码摘要、私有配置、Reader与连接的账号/群绑定及只读原库挂载。缺项时停止启动。不会自动启用后台机器人。
-6. 收到真实健康上报后再按用户要求切换。当前用户准备了第二账号，但尚未提供微信号；因此本次不创建虚假新账号，不暂停RyuBuddy，不宣称第二账号已连接。
+6. 收到真实健康上报后再按用户要求切换。用户已登记Tatsumi/Tatsumisaki，独立桌面已启动；Reader与MaiBot仍待本账号登录和配置，不暂停RyuBuddy，不宣称第二账号已连接。
 
 独立运行栈的微信缓存、Reader密钥、Chatlog归档、MaiBot记忆、发送证据及账本都放在其私有目录，不能只备份GroupDesk。公共镜像可以复用，登录目录与业务数据不能复用。
 
@@ -75,3 +75,14 @@ RyuBuddy的数据库迁移有一个兼容安排：保留原库中的现有业务
 GroupDesk `backup.sh`暂停应用写入后，一起备份控制库、所有ready业务库、文件及根模型主密钥，并记录摘要。`restore.sh`先校验摘要及主密钥，使用加密控制元数据重建受限数据库身份，再按各自身份恢复业务库。恢复后所有未归档机器人保持暂停；归档状态保留。启动失败时应用保持停止，不能以部分恢复的数据继续发群。全新灾备恢复需要当前版本镜像，且必须保留本次备份的模型根密钥。
 
 受信运维导入脚本统一通过`tsx scripts/bot-exec.ts <bot UUID> <允许的脚本名> ...`选择目标空间，避免把第二账号的素材导入默认空间。脚本只允许已有的明确导入/维护命令，不提供通用Shell执行。
+
+
+## 新桌面显示“网络连接已断开”的检查与直连
+
+远程桌面HTTP认证/画面正常，不代表里面的微信已连通腾讯登录服务。2026-11-05核对Tatsumisaki时，新容器能完成TCP握手，但腾讯公开HTTPS连接被重置；同机RyuBuddy可正常HTTPS。原因是服务器sing-box策略路由默认接管新Docker流量，而原账号已有独立直连规则。不要把此问题当成桌面密码错误，不要关闭认证或接入旧账号网络。
+
+已审核工具`integration/maibot/bots/wechat_egress.py`只对指定新机器人当前微信容器的私网IPv4 /32和其独立Docker桥接口，同时匹配后使用main路由表，优先级8995。它核对UUID、部署目录、Compose项目/服务标签、独立网络及IP归属；不修改代理、过滤规则、端口、Reader内部网络或其他服务路由。工具只读取Docker连接元数据，不读取微信账号/聊天、desktop.env或容器环境。
+
+安装合并发布的脚本到`/opt/docker/oc-projects/groupdesk-bots/egress-current/wechat_egress.py`（current为固定发布目录软链），安装同目录模板`groupdesk-bot-wechat-egress@.service`到系统systemd目录。由管理员先运行`python3 .../wechat_egress.py show <机器人UUID>`核对目标，再`systemctl enable --now groupdesk-bot-wechat-egress@<机器人UUID>.service`。只对确认需要直连的微信启用，不全局开启。systemd随Docker/主机重启恢复规则；容器重建、IP或桥接口变化后，应重新启动该实例服务以重新绑定，并再次检查容器HTTPS与真实微信二维码，不能仅以HTTP200作为登录就绪证据。
+
+停用该实例服务撤销本工具登记且实际创建的精确规则；不删除预先存在的同样规则。状态仅放`/run/groupdesk-bot-egress`，不存凭据。本次不需要重启微信，实际验证与发布信息记入当日进度。
