@@ -5,12 +5,12 @@ import {isInitialPersonaDraft,refreshPersonaEditor} from '../shared/persona-edit
 import './persona-style.css';
 import {PersonaBindings} from './persona-bindings';
 type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
-type Props={api:Api;models:ModelData;groups:{id:string;name:string}[];reload:()=>Promise<void>;notify:(s:string,error?:boolean)=>void};
+type Props={targetGroupId?:string;api:Api;models:ModelData;groups:{id:string;name:string}[];reload:()=>Promise<void>;notify:(s:string,error?:boolean)=>void};
 const when=(v:string)=>new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Singapore'});
 const fromTimestamp=(v:number|string)=>Number(v)?when(new Date(Number(v)*1000).toISOString()):'参考资料';
 const draftFields=(p:any)=>({kind:p.kind||'base',name:p.name,description:p.description,goal:p.goal,dataset_ids:p.dataset_ids,draft_skill:p.draft_skill,revision:p.revision,source_version_id:p.source_version_id??null});
-export function PersonaStudio({api,models,groups,reload,notify}:Props){
- const [data,setData]=useState<any>(null),[tab,setTab]=useState('skills'),[busy,setBusy]=useState(false),[p,setP]=useState<any>(null),[original,setOriginal]=useState(''),[remoteRevision,setRemoteRevision]=useState(0),[archived,setArchived]=useState(false);
+export function PersonaStudio({api,models,groups,reload,notify,targetGroupId=''}:Props){
+ const [data,setData]=useState<any>(null),[tab,setTab]=useState(targetGroupId?'bindings':'skills'),[busy,setBusy]=useState(false),[p,setP]=useState<any>(null),[original,setOriginal]=useState(''),[remoteRevision,setRemoteRevision]=useState(0),[archived,setArchived]=useState(false);
  const [creation,setCreation]=useState({kind:'base',name:'',skill_name:'',description:''});
  const [collection,setCollection]=useState(''),[newCollection,setNewCollection]=useState({name:'',group_id:''}),[file,setFile]=useState<File|null>(null),[senders,setSenders]=useState<any[]>([]),[senderQuery,setSenderQuery]=useState(''),[sender,setSender]=useState(''),[messages,setMessages]=useState<any[]>([]),[search,setSearch]=useState(''),[offset,setOffset]=useState(0);
  const [dataset,setDataset]=useState<any>({name:'',sender_ids:[],contains_any:[],since:'',until_time:''}),[editingDataset,setEditingDataset]=useState('');
@@ -71,6 +71,6 @@ export function PersonaStudio({api,models,groups,reload,notify}:Props){
  <section className="panel persona-panel"><h2>浏览与筛选素材</h2><div className="policy-grid"><label>发送者<select value={sender} onChange={e=>setSender(e.target.value)}><option value="">全部发送者</option>{senders.map(s=><option key={s.sender_id} value={s.sender_id}>{s.sender_name} · {s.sender_id}</option>)}</select></label><label>正文包含<input value={search} onChange={e=>setSearch(e.target.value)}/></label></div><div className="model-key-actions"><button className="button" disabled={busy} onClick={()=>work(()=>refreshMessages(0))}>查询素材</button><button className="button" disabled={busy||offset===0} onClick={()=>work(()=>refreshMessages(Math.max(0,offset-50)))}>上一页</button><button className="button" disabled={busy||messages.length<50} onClick={()=>work(()=>refreshMessages(offset+50))}>下一页</button></div>{messages.map(m=><article className="persona-message" key={m.source_id}><strong>{m.sender_name}</strong><small>{m.sender_id} · {fromTimestamp(m.timestamp)} · {m.source_id}</small><p>{m.authored_text||'['+m.content_status+']'}</p>{m.quoted_context&&<details><summary>引用语境（不是本人正文）</summary><pre>{JSON.stringify(m.quoted_context,null,2)}</pre></details>}{m.shared_content&&<details><summary>分享预览（作者未核实）</summary><pre>{JSON.stringify(m.shared_content,null,2)}</pre></details>}<label className="check-row"><input type="checkbox" checked={m.excluded} onChange={e=>work(async()=>{await api('/persona-collections/'+collection+'/exclusion','POST',{source_id:m.source_id,excluded:e.target.checked});await refreshMessages(offset);})}/>从生成数据中排除</label></article>)}</section>
  <section className="panel persona-panel"><h2>导入存档与增量对账</h2>{data.imports.filter((i:any)=>i.collection_id===collection).map((i:any)=><div className="persona-version" key={i.id}><span>{i.name}<small>{when(i.created_at)} · 新增 {i.added} / 更新 {i.updated} / 重复 {i.unchanged}</small><small>SHA-256 {i.sha256}</small></span><a className="button small" href={'/api/persona-imports/'+i.id+'/download'}>下载原文件</a></div>)}</section></>}
  </>}
- {tab==='bindings'&&<PersonaBindings data={data} api={api} busy={busy} work={work} reload={async()=>{await load();await reload();}} notify={notify}/>}
+ {tab==='bindings'&&<PersonaBindings targetGroupId={targetGroupId} data={data} api={api} busy={busy} work={work} reload={async()=>{await load();await reload();}} notify={notify}/>}
  </>;
 }

@@ -1,0 +1,13 @@
+# Frontend-only release: reuse verified, lock-identical build dependencies and
+# preserve the deployed server/worker runtime. Supply verified local images.
+ARG BUILD_IMAGE
+ARG RUNTIME_IMAGE
+FROM ${BUILD_IMAGE} AS frontend-build
+WORKDIR /app
+RUN cp package-lock.json /tmp/frontend-build-lock.json
+COPY . .
+RUN cmp package-lock.json /tmp/frontend-build-lock.json && npm run build
+FROM ${RUNTIME_IMAGE} AS runtime
+ARG FRONTEND_REVISION
+COPY --from=frontend-build --chown=node:node /app/dist /app/dist
+LABEL dev.rococo.groupdesk.frontend-revision=${FRONTEND_REVISION}
