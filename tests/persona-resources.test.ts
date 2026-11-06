@@ -18,9 +18,28 @@ export function resourceReader(options:{omit?:boolean;readme?:boolean;truncated?
  };
 }
 test('resource directory is a pinned catalog with unique resources, not published personas',()=>{
- assert.equal(personaResourceCatalog.entries.length,71);assert.equal(new Set(personaResourceCatalog.entries.map(e=>e.id)).size,71);
+ assert.equal(personaResourceCatalog.entries.length,72);assert.equal(new Set(personaResourceCatalog.entries.map(e=>e.id)).size,72);
  assert.match(personaResourceCatalog.commit,/^[a-f0-9]{40}$/);assert.equal(personaResourceCatalog.entries.find(e=>e.family==='buffett')?.repository,'will2025btc/buffett-perspective');
  assert.equal(personaResourceCatalog.entries.find(e=>e.repository==='alchaincyf/nuwa-skill')?.resource_type,'reference');
+});
+test('zodiac source includes all 12 reviewed definition texts, retaining bounds and excluding other prompts or scripts',async()=>{
+ const zodiac=personaResourceCatalog.entries.find(e=>e.repository==='sirius-016/zodiac-persona-skill')!;
+ assert.equal(zodiac.resource_type,'persona');assert.equal(zodiac.origin,'用户指定');
+ const signs=['aries','taurus','gemini','cancer','leo','virgo','libra','scorpio','sagittarius','capricorn','aquarius','pisces'];
+ const seen:URL[]=[];
+ const reader:PublicTextReader=async(url,maximum)=>{
+  seen.push(url);
+  if(url.pathname.includes('/git/trees/'))return JSON.stringify({truncated:false,tree:[
+   ...['SKILL.md','LICENSE',...signs.map(s=>'prompts/zodiac_definitions/'+s+'.md'),'prompts/unreviewed.md','prompts/zodiac_definitions/run.sh'].map(path=>({path,type:'blob',mode:'100644',size:1000})),
+   {path:'prompts/zodiac_definitions/link.md',type:'blob',mode:'120000',size:10}
+  ]});
+  return resourceReader()(url,maximum);
+ };
+ const p=await fetchResourceSnapshot(zodiac.id,undefined,reader);
+ assert.equal(p.files.length,14);assert.deepEqual(p.omitted,[]);
+ for(const sign of signs)assert(p.files.some(f=>f.path==='prompts/zodiac_definitions/'+sign+'.md'));
+ const raw=seen.filter(u=>u.hostname==='raw.githubusercontent.com');
+ assert(raw.every(u=>u.pathname.includes('/'+commit+'/')));assert(!raw.some(u=>/unreviewed|run\.sh|link\.md/.test(u.pathname)));
 });
 test('source preview pins commit, includes references and notice, and never reads scripts or symlinks',async()=>{
  const seen:URL[]=[];const p=await fetchResourceSnapshot(resource.id,undefined,resourceReader({onRead:u=>seen.push(u)}));
