@@ -16,7 +16,7 @@ class Fake(Driver):
   with sqlite3.connect(persist/'limits/limits.sqlite3') as db:db.executescript('CREATE TABLE turns(status TEXT,expires REAL);CREATE TABLE pending(id TEXT);')
   with sqlite3.connect(persist/'bridge/delivery.sqlite3') as db:db.executescript("CREATE TABLE reader_cursors(chat_id INTEGER PRIMARY KEY,epoch TEXT,after_seq INTEGER,cutover REAL,pending_seq INTEGER,retry_until REAL);INSERT INTO reader_cursors VALUES(1,'old-epoch',444,100,NULL,0);")
   self.actions=[];self.fail=None;super().__init__(BOT,base)
- def discover(self):return {'candidates':[copy.deepcopy(SELECTED)],'desktop_url':'http://127.0.0.1:18180/'}
+ def discover(self,group_name=''):return {'candidates':[copy.deepcopy(SELECTED)],'desktop_url':'http://127.0.0.1:18180/'}
  def api(self,path,body=None):return {'chat':{'id':2}} if path=='chats' else {'wechat_connected':True,'queue_depth':0}
  def command(self,args,**kw):self.actions.append(args);return ''
  def reload_reader(self):
@@ -64,6 +64,24 @@ class OperationTests(unittest.TestCase):
   save(target,['Operator change'])
   with self.assertRaises(Failure):self.d.recover(state)
   self.assertEqual(json.loads(target.read_text()),['Operator change'])
+class MetadataTests(unittest.TestCase):
+ def functions(self):
+  with patch.dict(sys.modules,{'chatlog_reader':N(),'chatlog_reader.vault':N(unwrap=None),'chatlog_keeper':N(wechat_db=N())}):return runpy.run_path(str(Path(__file__).parent/'discover.py'))
+ def test_exact_name_alias_session_titles_and_no_personal_contacts(self):
+  f=self.functions()['group_metadata']
+  with contextlib.closing(sqlite3.connect(':memory:')) as c,contextlib.closing(sqlite3.connect(':memory:')) as s:
+   c.executescript("CREATE TABLE contact(username TEXT,nick_name TEXT,remark TEXT);INSERT INTO contact VALUES('room@chatroom','Shanghai Entrepreneurs Meetup','Shanghai alias'),('person','Shanghai Entrepreneurs Meetup',''),('other@chatroom','Shanghai Entrepreneurs Meetup Extra','');")
+   s.executescript("CREATE TABLE SessionNoContactInfoTable(username TEXT,session_title TEXT);INSERT INTO SessionNoContactInfoTable VALUES('session@chatroom','Session group');")
+   self.assertEqual([r['native_id'] for r in f(c,s,'  shanghai   ENTREPRENEURS meetup  ')],['room@chatroom']);self.assertEqual(f(c,s,'Shanghai alias')[0]['name'],'Shanghai Entrepreneurs Meetup');self.assertEqual(f(c,s,'Session group')[0]['native_id'],'session@chatroom');self.assertEqual(f(c,s,'Shanghai'),[]);self.assertEqual(len(f(c,s)),3)
+ def test_name_lookup_happens_before_list_limit_and_preserves_duplicate_warning(self):
+  f=self.functions()['group_metadata']
+  with contextlib.closing(sqlite3.connect(':memory:')) as c:
+   c.execute('CREATE TABLE contact(username TEXT,nick_name TEXT,remark TEXT)');c.executemany('INSERT INTO contact VALUES(?,?,?)',[(str(i)+'@chatroom','Group '+str(i),'') for i in range(600)]+[('target@chatroom','ZZ target',''),('duplicate@chatroom','zz TARGET','')]);self.assertEqual(len(f(c)),500);matched=f(c,None,'zz target');self.assertEqual(len(matched),2);self.assertTrue(all(g['ambiguous'] for g in matched))
+ def test_name_parameter_rejects_invalid_types_and_authority_fields(self):
+  with tempfile.TemporaryDirectory() as t:
+   d=Fake(t)
+   for payload in [{'group_name':[]},{'group_name':' '},{'group_name':'x'*201},{'group_name':'name','kind':'verify'}]:
+    with self.assertRaises(Failure):d.handle({'id':str(uuid.uuid4()),'kind':'discover',**payload})
 class GreetingTests(unittest.TestCase):
  def test_repeated_greeting_uses_one_normal_pending_task_and_never_requeues_an_uncertain_send(self):
   with tempfile.TemporaryDirectory() as t:

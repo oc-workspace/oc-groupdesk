@@ -106,3 +106,13 @@ test('template copies keep full restricted language and follow flags without cha
  const groups=(await overview()).groups;const copy=groups.find((g:any)=>g.id===r.data.group.id);assert.deepEqual(copy.policy.language,restricted);assert.equal(copy.allow_language_override,false);assert.equal(copy.enabled,false);assert.deepEqual(groups.find((g:any)=>g.id===original.id).policy,policy);
  await req('/group-onboarding/jobs/'+r.data.id+'/cancel','POST',{},a.id);
 });
+
+test('named discovery validates input and agent capability, carries exact query and records an empty result without binding',async()=>{
+ assert.equal((await req('/group-onboarding/discover','POST',{request_id:randomUUID(),group_name:'   '},a.id)).status,400);
+ assert.equal((await req('/group-onboarding/discover','POST',{request_id:randomUUID(),group_name:'Shanghai Entrepreneurs Meetup'},a.id)).status,409);
+ assert.equal((await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).status,200);
+ const body={request_id:randomUUID(),group_name:'  Shanghai Entrepreneurs Meetup  '};const before=(await overview()).groups;
+ const job=await req('/group-onboarding/discover','POST',body,a.id);assert.equal(job.status,202);assert.equal(job.data.requested_group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await req('/group-onboarding/discover','POST',body,a.id)).data.id,job.data.id);
+ const task=(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).data.task;assert.equal(task.group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await report(task,{candidates:[]})).status,200);
+ const done=(await req('/group-onboarding/jobs/'+job.data.id,'GET',undefined,a.id)).data;assert.equal(done.status,'succeeded');assert.equal(done.requested_group_name,'Shanghai Entrepreneurs Meetup');assert.deepEqual(done.result.candidates,[]);assert.deepEqual((await overview()).groups,before);
+});

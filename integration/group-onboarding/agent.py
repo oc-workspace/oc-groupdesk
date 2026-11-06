@@ -28,7 +28,7 @@ class Agent:
   reporter=threading.Thread(target=progress,daemon=True);reporter.start()
   try:
    self.api('report',{**base,'status':'working','stage':'preflight'})
-   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id'} and v is not None};result=self.local(local)
+   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id','group_name'} and v is not None};result=self.local(local)
    if task['kind']=='greeting':
     deadline=time.monotonic()+480
     while result.get('greeting_status')=='queued' and time.monotonic()<deadline:
@@ -46,7 +46,7 @@ class Agent:
  def run(self):
   while True:
    try:
-    task=self.api('claim',{'version':'1'}).get('task')
+    task=self.api('claim',{'version':'2'}).get('task')
     if task:self.run_one(task)
     else:time.sleep(10)
    except Exception:time.sleep(20)

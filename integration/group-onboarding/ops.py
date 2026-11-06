@@ -66,9 +66,9 @@ class Driver:
    request=urllib.request.Request(url,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json'})
    with urllib.request.urlopen(request,timeout=15) as r:return json.load(r)
   except Exception:raise Failure('needs_login')
- def discover(self):
+ def discover(self,group_name=''):
   conf=self.validate();script=(Path(__file__).parent/'discover.py').read_text()
-  raw=self.exec('reader',script,timeout=90);need(raw.get('account_fingerprint')==conf['account_fingerprint'])
+  raw=self.exec('reader',script,{'group_name':group_name},timeout=90);need(raw.get('account_fingerprint')==conf['account_fingerprint'])
   known={}
   with sqlite3.connect('file:'+str(self.persist/'reader/data/archive.sqlite3')+'?mode=ro',uri=True) as db:
    for chat,native in db.execute('SELECT chat_id,native_id FROM groups'):known[native]=conf['groups'].get(str(chat))
@@ -130,7 +130,7 @@ class Driver:
    if previous.get('complete'):
     self.verify(previous['result']['external_id']);return previous['result']
    self.recover(previous)
-  live=self.discover();actual=next((c for c in live['candidates'] if c['id']==selected['id']),None)
+  live=self.discover(selected['name']);actual=next((c for c in live['candidates'] if c['id']==selected['id']),None)
   need(actual and actual['native_id']==selected['native_id'] and actual['name']==selected['name'],'group_missing');need(not actual['ambiguous'],'duplicate_name')
   need(not actual.get('external_id'),'config_changed')
   status=self.api('status');need(status.get('wechat_connected') is True and not status.get('ui_input_blocked'),'needs_login')
@@ -196,14 +196,15 @@ class Driver:
   try:return self.exec('wechat-bridge',code,{'job_id':identifier(job),'chat_id':chat},timeout=25)
   except Failure:raise Failure('greeting_failed')
  def handle(self,task):
-  need(isinstance(task,dict) and set(task)<={'id','kind','candidate','external_id'})
+  need(isinstance(task,dict) and set(task)<={'id','kind','candidate','external_id','group_name'})
   job=identifier(task.get('id'));kind=task.get('kind');need(kind in {'discover','connect','verify','greeting','progress'})
+  need('group_name' not in task or (kind=='discover' and isinstance(task['group_name'],str) and 1<=len(task['group_name'].strip())<=200))
   if kind=='progress':return self.progress(job)
   with (self.state/'control.lock').open('a') as lock:
    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    except BlockingIOError:raise Failure('busy')
    self.validate()
-   if kind=='discover':return self.discover()
+   if kind=='discover':return self.discover(task.get('group_name','').strip())
    if kind=='connect':
     c=task.get('candidate');need(isinstance(c,dict) and set(c)=={'id','native_id','name','ambiguous','external_id'});need(re.fullmatch('[a-f0-9]{64}',c['id']) and re.fullmatch(r'[A-Za-z0-9_-]{1,120}@chatroom',c['native_id']) and isinstance(c['name'],str) and 1<=len(c['name'])<=200);return self.connect(job,c)
    external=task.get('external_id');need(isinstance(external,str) and re.fullmatch('bowxt-'+self.slug+r':[1-9]\d{0,9}',external))
