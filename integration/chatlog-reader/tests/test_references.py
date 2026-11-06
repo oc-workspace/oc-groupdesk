@@ -32,7 +32,7 @@ class QuotedEngineTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    a=ReaderAgent(N(consumer='synthetic'),d,'http://chatlog-reader:5030','unused');message=a.message(row,1,self.engine.store.epoch,live=True)
    self.assertEqual(a.message(row,1,self.engine.store.epoch,live=False).content,'A new reply')
-  self.assertEqual(message.message_type,'text');self.assertTrue(message.is_at_me);self.assertTrue(message.content.startswith('A new reply\n'));self.assertIn('Own normal reply',message.content)
+  self.assertEqual(message.message_type,'text');self.assertTrue(message.is_at_me);self.assertTrue(message.content.startswith('A new reply\n'));self.assertIn('Own normal reply',message.content);self.assertIn('引用 当前机器人 的消息',message.content);self.assertNotIn('引用 小T 的消息',message.content)
  def test_reference_to_other_member_with_bot_display_name_is_not_explicit(self):
   self.add_quote(server='101');self.engine.sync();row=self.engine.page(1,0,200)['messages'][-1];self.assertFalse(row['reference']['is_bot']);self.assertNotIn('bot_text',row['reference'])
   with tempfile.TemporaryDirectory() as d:
