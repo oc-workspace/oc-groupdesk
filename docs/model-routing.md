@@ -25,3 +25,8 @@ Codex 模板中的 base_url、OPENAI_API_KEY、model、wire_api=responses 映射
 协议更新递增凭据与受影响群版本，旧页面省略协议字段时保留原协议。脚本 scripts/import-model-providers.ts 仅从 stdin 读取批量配置，事务内重命名/加密新增/登记参考模型；重试不覆盖已有配置或默认路由，冲突整体回滚。
 
 接口参考：[OpenAI Responses](https://developers.openai.com/api/reference/responses/overview)、[Gemini Models](https://ai.google.dev/api/models)、[Gemini Authentication](https://ai.google.dev/api)。第三方服务可用目录以实际查询为准。
+
+
+## 新群接入配置助手
+
+默认模型新增独立onboarding选择，首次按当前机器人已登记的maibot-gpt / gpt-6-luna初始化；找不到时保持未配置，不替换其他Key或聊天模型。可在站点更改，也可在向导本次选用其他文字模型。仅改变助手不会使群配置待确认；群文字/阶段模型继续各自设置。AI辅助只生成待人工采纳的配置建议，授权和真实群绑定由接入程序完成。详见[站点接入向导](group-onboarding-wizard.md)。

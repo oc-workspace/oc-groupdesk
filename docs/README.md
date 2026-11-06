@@ -4,7 +4,7 @@
 
 | 功能 | 当前说明 |
 |---|---|
-| 群接入、群标识与配置确认 | [微信群接入](wechat-group-onboarding.md)、[运行接口](runtime-api.md) |
+| 群接入、群标识与配置确认 | [站点新群接入向导](group-onboarding-wizard.md)、[微信群接入](wechat-group-onboarding.md)、[运行接口](runtime-api.md) |
 | 话题库、群话题、AI Prompt助填、讨论深度与回复长度 | [话题策略](topic-policy-guide.md) |
 | 输出语言、AI身份与角色扮演 | [身份策略](identity-policy.md)、[话题策略](topic-policy-guide.md) |
 | API Key、模型目录与按群模型选择 | [模型路由](model-routing.md) |

@@ -22,7 +22,7 @@ export const stageRoute=z.discriminatedUnion('mode',[
 const stageFields=Object.fromEntries(modelStageIds.map(id=>[id,stageRoute])) as Record<ModelStage,typeof stageRoute>;
 const defaultStageFields=Object.fromEntries(modelStageIds.map(id=>[id,selection.nullable()])) as Record<ModelStage,z.ZodNullable<typeof selection>>;
 export const groupRoutes=z.object({text:groupRoute,image:groupRoute,stages:z.object(stageFields).partial().strict().optional()});
-export const defaultRoutes=z.object({text:selection.nullable(),image:selection.nullable(),stages:z.object(defaultStageFields).partial().strict().optional()});
+export const defaultRoutes=z.object({onboarding:selection.nullable().optional(),text:selection.nullable(),image:selection.nullable(),stages:z.object(defaultStageFields).partial().strict().optional()});
 export type Routes=z.infer<typeof groupRoutes>;
 type Db=Pick<pg.PoolClient,'query'>;
 export async function modelOverview(db:Db=pool){

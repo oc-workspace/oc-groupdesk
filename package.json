@@ -12,7 +12,7 @@
     "start": "tsx server/index.ts",
     "worker": "tsx server/worker.ts",
     "test": "tsx --test tests/*.test.ts",
-    "test:integration": "tsx --test --test-concurrency=1 tests/integration.ts tests/interactions-integration.ts tests/conversation-integration.ts tests/persona-composition-integration.ts tests/summaries-integration.ts tests/frequency-integration.ts tests/model-stages-integration.ts tests/persona-sampling-integration.ts tests/bots-integration.ts tests/bot-config-copy-integration.ts tests/public-personas-integration.ts",
+    "test:integration": "tsx --test --test-concurrency=1 tests/integration.ts tests/interactions-integration.ts tests/conversation-integration.ts tests/persona-composition-integration.ts tests/summaries-integration.ts tests/frequency-integration.ts tests/model-stages-integration.ts tests/persona-sampling-integration.ts tests/bots-integration.ts tests/bot-config-copy-integration.ts tests/public-personas-integration.ts tests/group-onboarding-integration.ts",
     "migrate": "tsx server/migrate.ts",
     "admin:reset": "tsx server/reset-admin.ts",
     "catalog:check": "tsx scripts/export-schemas.ts",

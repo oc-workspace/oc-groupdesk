@@ -24,6 +24,7 @@ import {runtimePersonaBundle,featureBindings} from './persona-composition.js';
 import {registerConversationAdmin} from './conversation-insights.js';
 import {registerTopicDraftAdmin} from './topic-drafting.js';
 import type {callTextModel} from './model-generation.js';
+import {registerOnboardingAdmin,registerOnboardingRuntime} from './group-onboarding.js';
 import {registerModelAdmin} from './models-api.js';
 import {registerRuntimeHealth} from './runtime-health.js';
 import {registerInteractionAdmin} from './interactions/admin-api.js';
@@ -363,6 +364,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
     });res.json({ok:true});
   });
   registerModelAdmin(app);
+  registerOnboardingAdmin(app,options.topicDraftCaller);
   registerTopicDraftAdmin(app,options.topicDraftCaller);
   registerNotificationAdmin(app);
   registerReplyFrequency(app);
@@ -400,6 +402,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
   registerInteractionRuntime(app,interactions);
   registerSummaryRuntime(app);
   registerRuntimeHealth(app);
+  registerOnboardingRuntime(app);
   registerNotificationRuntime(app);
   app.post('/api/runtime/model-credentials',async(req,res)=>{
     const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);

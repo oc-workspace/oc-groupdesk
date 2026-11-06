@@ -40,7 +40,7 @@ def validate_rule(rule):
 
 def plan(container, network, slug, service='wechat'):
     project = 'gdbot-' + slug
-    if service not in {'wechat', 'maibot', 'wechat-bridge'} or not container['running'] or container['project'] != project or container['service'] != service:
+    if service not in {'wechat', 'maibot', 'wechat-bridge', 'group-onboarding-agent'} or not container['running'] or container['project'] != project or container['service'] != service:
         raise ValueError('Expected this bot’s running outbound service')
     if network['Name'] != project + '_bot' or network['Labels'].get('com.docker.compose.project') != project:
         raise ValueError('Network belongs to another bot')
@@ -84,7 +84,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['show', 'apply', 'remove'])
     parser.add_argument('bot_id')
-    parser.add_argument('--service', choices=['wechat', 'maibot', 'wechat-bridge'], default='wechat')
+    parser.add_argument('--service', choices=['wechat', 'maibot', 'wechat-bridge', 'group-onboarding-agent'], default='wechat')
     args = parser.parse_args()
     slug = identity(args.bot_id)
     suffix = '' if args.service == 'wechat' else '-' + args.service
