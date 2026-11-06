@@ -50,13 +50,13 @@ export async function queuePersonaJob(personaId:string,revision:number,selection
   requireCondition(p.dataset_ids.length,400,'请先关联素材数据集并保存');
   const sample=await samplePersonaDatasets(p.dataset_ids,db);requireCondition(sample.selected.length,400,'所选数据集没有可用于生成的正文');
   const id=randomUUID(),filename=id+'.job.json';
-  const provenance={dataset_ids:p.dataset_ids,datasets:sample.datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,contains_any:d.contains_any||[],since:d.since,until_time:d.until_time})),
+  const provenance={...(p.draft_provenance?.resource_source?{resource_source:p.draft_provenance.resource_source,source:p.draft_provenance.source}:{}),dataset_ids:p.dataset_ids,datasets:sample.datasets.map(d=>({id:d.id,collection_id:d.collection_id,sender_ids:d.sender_ids,contains_any:d.contains_any||[],since:d.since,until_time:d.until_time})),
    total_records:sample.total_records,eligible_records:sample.eligible,sampled_records:sample.selected.length,sampled_characters:sample.characters,collections:sample.collections,
    strategy:'先合并同库重叠筛选，再按素材库分层、库内按时间等距抽取最多500条正文，合计最多10万字符；参考文档保留独立篇幅；不使用引用或分享正文；这是Skill归纳，不是模型微调',
    source_digest:digest(JSON.stringify(sample.selected.map(r=>[r.collection_id,r.id,r.content_hash]))),
    source_import_ids:sample.source_import_ids,created_at:new Date().toISOString()};
   await mkdir(materialRoot(),{recursive:true,mode:0o700});
-  await writeFile(resolve(materialRoot(),filename),JSON.stringify({persona:{name:p.name,skill_name:p.skill_name,description:p.description,goal:p.goal,kind:p.kind,previous_skill:isInitialPersonaDraft(p.draft_skill)?'':p.draft_skill},samples:sample.selected}),{mode:0o600,flag:'wx'});
+  await writeFile(resolve(materialRoot(),filename),JSON.stringify({persona:{name:p.name,skill_name:p.skill_name,description:p.description,goal:p.goal,kind:p.kind,previous_skill:isInitialPersonaDraft(p.draft_skill)?'':p.draft_skill},reference_scope:p.draft_provenance?.resource_source?{repository:p.draft_provenance.resource_source.repository,commit:p.draft_provenance.resource_source.commit,included:p.draft_provenance.resource_source.files.map((f:any)=>f.path),omitted:p.draft_provenance.resource_source.omitted,rule:"仅按已读取且抽样提供的资料归纳；未读内容不能臆测，待人工核对"}:undefined,samples:sample.selected}),{mode:0o600,flag:'wx'});
   await db.query('INSERT INTO persona_jobs(id,persona_id,draft_revision,credential_id,credential_revision,model_id,input_file,provenance) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,personaId,revision,selection.credential_id,c.revision,selection.model_id,filename,provenance]);
   await audit(actor,'persona.generation_queued',personaId,{job_id:id,sampled_records:sample.selected.length},db);
   return {id,provenance};

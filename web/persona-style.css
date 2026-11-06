@@ -7,3 +7,7 @@
 .persona-feature-list{margin:20px 0}.persona-feature-choice{padding:14px;border:1px solid var(--border,#e4e6ec);border-radius:10px;margin:10px 0}.persona-feature-choice.selected{background:#f8f7ff;border-color:#cfc6f6}.persona-feature-choice small{display:block;color:#737786;margin-top:4px}.persona-composition-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:460px;overflow:auto;background:#f7f8fb;padding:16px;border-radius:10px;font:13px/1.7 system-ui}.persona-feature-choice .policy-grid{margin-top:10px}
 
 .persona-template-note,.persona-job-status{padding:14px 16px;border:1px solid #d9cff0;border-radius:10px;background:#f8f5ff;margin:14px 0}.persona-job-status p{margin:6px 0}.persona-generation{margin:18px 0 26px;padding:18px;border:1px solid var(--border);border-radius:12px}.persona-generation h3{margin-top:0}
+.persona-resource-source{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;font-size:.85rem;background:var(--surface,#f4f5fa);padding:1rem;border-radius:12px}
+.persona-resource-library .persona-tile{display:flex;flex-direction:column;gap:.65rem;text-align:left}
+.persona-resource-library .persona-tile .model-key-actions{margin-top:auto}
+.persona-resource-library .persona-job-status .button{margin:.5rem .5rem 0 0}
