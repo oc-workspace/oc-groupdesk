@@ -26,7 +26,7 @@ def main():
  compose={'name':namespace,'services':{'group-onboarding-agent':service},'networks':{'bot':{'external':True,'name':namespace+'_bot'}}}
  path=root/'compose.onboarding.json';path.write_text(json.dumps(compose,indent=2)+'\n');path.chmod(0o600)
  run(['docker','compose','-f',str(path),'up','-d','--no-build','group-onboarding-agent'])
- run(['systemctl','enable','--now','groupdesk-onboarding-egress@'+bot+'.service'])
+ run(['systemctl','enable','--now','groupdesk-onboarding-egress@'+bot+'.service']);run(['systemctl','restart','groupdesk-onboarding-egress@'+bot+'.service'])
  run(['docker','compose','-f',str(path),'exec','-T','group-onboarding-agent','python','-c',"from agent import Agent;from uuid import uuid4;a=Agent();assert a.conf();assert a.local({'id':str(uuid4()),'kind':'progress'}).get('stage')"])
  (root/'onboarding-agent-source-version').write_text(a.source+'\n');print('Account-scoped onboarding agent deployed; no group, WeChat or existing runtime was changed.')
 if __name__=='__main__':main()

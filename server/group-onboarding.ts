@@ -17,7 +17,7 @@ const configSchema=z.object({name:z.string().trim().min(1).max(120),topic_ids:z.
  model_routes:groupRoutes,base_version_id:z.uuid().nullable(),base_follow_latest:z.boolean().default(true),features:z.array(z.object({version_id:z.uuid(),follow_latest:z.boolean()}).strict()).max(5),
  source_group_id:z.uuid().nullable(),enable:z.boolean()}).strict();
 const createInput=z.object({request_id:z.uuid(),discovery_id:z.uuid(),candidate_id:z.string().regex(/^[a-f0-9]{64}$/),confirmation,config:configSchema}).strict();
-const publicJob='id,kind,status,group_id,parent_id,stage,error_code,result,attempts,created_at,updated_at';
+const publicJob="input->>'group_name' AS requested_group_name,"+'id,kind,status,group_id,parent_id,stage,error_code,result,attempts,created_at,updated_at';
 async function activeBot(id:string){const b=await botRecord(id);requireCondition(b?.state==='active',409,'请先在机器人管理启用当前账号，再进行新群接入');return b;}
 async function agentReady(){requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE seen_at>now()-interval '90 seconds'")).rowCount,409,onboardingErrors.agent_offline);}
 async function insertJob(kind:string,requestId:string,input:any,actor:string,groupId:string|null=null,parentId:string|null=null,db:any=pool){
@@ -47,7 +47,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
   const versions=(await pool.query("SELECT v.id,v.persona_id,v.version,v.kind,p.name FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE NOT p.archived ORDER BY p.name,v.version DESC")).rows;
   res.json({agent,jobs,versions});
  });
- app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid()}).strict().parse(req.body);const id=await transaction(db=>insertJob('discover',b.request_id,{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
+ app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid(),group_name:z.string().trim().min(1).max(200).optional()}).strict().parse(req.body);if(b.group_name)requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE version='2'")).rowCount,409,'指定群名读取运行端正在更新，请稍后刷新');const id=await transaction(db=>insertJob('discover',b.request_id,b.group_name?{group_name:b.group_name}:{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
  app.get('/api/group-onboarding/jobs/:id',async(req,res)=>res.json(await readJob(z.uuid().parse(req.params.id))));
  app.post('/api/group-onboarding/jobs/:id/retry',async(req,res)=>{
   await activeBot(req.botId!);await agentReady();const id=z.uuid().parse(req.params.id);
@@ -110,14 +110,14 @@ const runtimeIdentity=z.object({contract:z.literal(1),instance_id:z.uuid(),accou
 async function identity(req:express.Request,value:unknown){const input=runtimeIdentity.parse(value),b=await activeBot(req.botId!);requireCondition(b.runtime_instance_id===input.instance_id&&b.account_fingerprint===input.account_fingerprint,403,onboardingErrors.scope_mismatch);return b;}
 export function registerOnboardingRuntime(app:express.Express){
  app.post('/api/runtime/group-onboarding/claim',async(req,res)=>{
-  const b=z.object({...runtimeIdentity.shape,version:z.literal('1')}).strict().parse(req.body);await identity(req,b);
+  const b=z.object({...runtimeIdentity.shape,version:z.enum(['1','2'])}).strict().parse(req.body);await identity(req,b);
   const task=await transaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511971)');
    await db.query('INSERT INTO group_onboarding_agent(singleton,instance_id,seen_at,version) VALUES(true,$1,now(),$2) ON CONFLICT(singleton) DO UPDATE SET seen_at=now(),instance_id=excluded.instance_id,version=excluded.version',[b.instance_id,b.version]);
    const j=(await db.query("SELECT * FROM group_onboarding_jobs WHERE status='queued' OR (status='working' AND lease_until<now()) ORDER BY created_at LIMIT 1 FOR UPDATE")).rows[0];if(!j)return null;
    const lease=randomUUID();await db.query("UPDATE group_onboarding_jobs SET status='working',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() WHERE id=$1",[j.id,lease]);
    const selected=j.kind==='connect'?(await pool.query('SELECT result FROM group_onboarding_jobs WHERE id=$1',[j.parent_id])).rows[0]?.result?.candidates?.find((c:any)=>c.id===j.input.candidate_id):null;
-   return {id:j.id,kind:j.kind,lease_token:lease,...(selected?{candidate:selected}:{}),group_id:j.group_id,external_id:j.input.external_id||null};
+   return {id:j.id,kind:j.kind,lease_token:lease,...(selected?{candidate:selected}:{}),group_id:j.group_id,external_id:j.input.external_id||null,...(j.kind==='discover'&&j.input.group_name?{group_name:j.input.group_name}:{})};
   });res.json({task});
  });
  app.post('/api/runtime/group-onboarding/report',async(req,res)=>{
