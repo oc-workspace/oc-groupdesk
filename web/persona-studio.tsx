@@ -1,3 +1,4 @@
+import {LoadingStatus} from './loading';
 import React,{useEffect,useState,type FormEvent} from 'react';
 import type {ModelData} from './model-editors';
 import {PersonaGeneration} from './persona-generation';
@@ -16,7 +17,8 @@ export function PersonaStudio({api,models,groups,reload,notify,targetGroupId=''}
  const [dataset,setDataset]=useState<any>({name:'',sender_ids:[],contains_any:[],since:'',until_time:''}),[editingDataset,setEditingDataset]=useState('');
  const [model,setModel]=useState<any>(models.defaults.routes.text);
  const dirty=!!p&&JSON.stringify(draftFields(p))!==original;
- async function load(){const d=await api('/persona-studio');setData(d);setCollection(c=>c||d.collections[0]?.id||'');if(collection)setSenders(await api('/persona-collections/'+collection+'/senders'));}
+ const [initialError,setInitialError]=useState('');
+ async function load(){setInitialError('');try{const d=await api('/persona-studio');setData(d);setCollection(c=>c||d.collections[0]?.id||'');if(collection)setSenders(await api('/persona-collections/'+collection+'/senders'));}catch(e){if(!data)setInitialError((e as Error).message);throw e;}}
  async function work(action:()=>Promise<void>){setBusy(true);try{await action();}catch(e){notify((e as Error).message,true);}finally{setBusy(false);}}
  useEffect(()=>{void load().catch(e=>notify(e.message,true));},[]);
  async function selectPersona(id:string,discard=false){
@@ -47,7 +49,7 @@ export function PersonaStudio({api,models,groups,reload,notify,targetGroupId=''}
   const b={name:dataset.name,collection_id:collection,sender_ids:dataset.sender_ids,contains_any:(dataset.contains_any||[]).map((s:string)=>s.trim()).filter(Boolean),since:dataset.since?Math.floor(new Date(dataset.since+'T00:00:00+08:00').getTime()/1000):null,until_time:dataset.until_time?Math.floor(new Date(dataset.until_time+'T23:59:59+08:00').getTime()/1000):null};
   await api('/persona-datasets'+(editingDataset?'/'+editingDataset:''),editingDataset?'PUT':'POST',b);await load();setEditingDataset('');setDataset({name:'',sender_ids:[],contains_any:[],since:'',until_time:''});notify('数据集筛选已保存；新导入记录会自动纳入匹配结果');
  });}
- if(!data)return <div className="panel persona-panel"><p>正在载入 Persona 工作室…</p><button className="button" onClick={()=>work(load)}>重试</button></div>;
+ if(!data)return <div className="panel persona-panel">{initialError?<p className="form-error" role="alert">{initialError}</p>:<LoadingStatus label="正在载入 Persona 工作室…"/>}<button className="button" onClick={()=>work(load)}>重试</button></div>;
  return <><div className="page-head"><div><span className="eyebrow">PERSONA STUDIO</span><h1>让每种声音，有自己的来处</h1><p>个人或群像都可独立制作、修订和导出 Skill，需要时再应用到群。</p></div><button className="button" disabled={busy} onClick={()=>work(load)}>刷新工作室</button></div>
  <div className="persona-tabs" role="tablist" aria-label="Persona 工作区">{[['skills','Persona 技能'],['materials','素材与数据集'],['bindings','群人设配置']].map(([id,name])=><button role="tab" key={id} aria-selected={tab===id} onClick={()=>setTab(id)}>{name}</button>)}</div>
  {tab==='skills'&&<>

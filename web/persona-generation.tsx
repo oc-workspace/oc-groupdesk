@@ -1,3 +1,4 @@
+import {LoadingStatus,LoadingButton} from './loading';
 import React from 'react';
 import {ModelChoice,type ModelData} from './model-editors';
 import {isInitialPersonaDraft} from '../shared/persona-editor';
@@ -15,9 +16,10 @@ export function PersonaGeneration({persona:p,busy,dirty,model,models,onModelChan
   <ModelChoice kind="text" value={model} onChange={onModelChange} data={models} prefix="制作 Persona"/>
   <p className="hint">点击制作会保存当前设置，并把抽样正文和已有草稿发送给所选模型服务，可能产生费用。按素材库分层选取最多500条、共10万字符，参考资料保留独立篇幅；同库重叠筛选会合并。完整资料仍保留。单次模型请求最多4分钟，这是 Skill 归纳，不是模型微调。</p>
   <div className="model-key-actions">
-   <button type="button" className="button primary" disabled={busy||active||p.archived||!model?.credential_id||!model?.model_id||!p.dataset_ids.length} onClick={onGenerate}>{busy?'正在处理…':active?'完整草稿制作中':dirty?'保存设置并制作完整草稿':'制作完整草稿'}</button>
+   <LoadingButton type="button" className="button primary" loading={active} disabled={busy||active||p.archived||!model?.credential_id||!model?.model_id||!p.dataset_ids.length} onClick={onGenerate}>{busy?'正在处理…':active?'完整草稿制作中':dirty?'保存设置并制作完整草稿':'制作完整草稿'}</LoadingButton>
    <button type="button" className="button" disabled={busy} onClick={onRefresh}>查看制作进度 / 载入结果</button>
   </div>
+  {active&&<LoadingStatus label={latest?.status==='pending'?'Persona 制作已排队…':'AI 正在制作完整 Persona 草稿…'} detail="这是最近一次查看的任务状态。后台继续处理，请手动查看制作进度；无需重复提交。"/>}
   {latest&&<div className="persona-job-status" role="status" aria-live="polite">
    <strong>{statuses[latest.status]||latest.status}</strong>
    {['pending','processing'].includes(latest.status)&&<p>任务已提交。稍后点击「查看制作进度 / 载入结果」，无需重复制作。</p>}

@@ -1,0 +1,9 @@
+.loading-spinner{display:inline-block;flex:0 0 auto;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:groupdesk-spin .8s linear infinite;vertical-align:middle;color:inherit}
+@keyframes groupdesk-spin{to{transform:rotate(360deg)}}
+.loading-status{display:flex;align-items:center;gap:12px;margin:14px 0;padding:14px 16px;border:1px solid #ded8ef;border-radius:10px;background:#f7f5fc;color:#625187;font-size:14px}
+.loading-status strong{font-weight:600}.loading-status small{display:block;margin-top:5px;line-height:1.6;color:#787184;font-size:12px}.loading-status .loading-spinner{width:19px;height:19px}
+.request-activity{position:fixed;z-index:1400;top:78px;right:30px;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 36px);padding:12px 18px;border:1px solid #ded8ef;border-radius:10px;background:#fff;box-shadow:0 6px 24px #44315c18;color:#63517f;font-size:14px;pointer-events:none}
+.request-activity small{font-size:12px;color:#81798c;white-space:nowrap}.request-activity span:not(.loading-spinner){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.button[aria-busy=true]{cursor:wait;opacity:.85}.button .loading-spinner{width:15px;height:15px}
+@media(prefers-reduced-motion:reduce){.loading-spinner{animation:none;border-right-color:currentColor;border-style:dotted}}
+@media(max-width:700px){.request-activity{top:70px;right:12px;padding:10px 13px;font-size:13px}}
