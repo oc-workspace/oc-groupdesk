@@ -116,3 +116,14 @@ test('named discovery validates input and agent capability, carries exact query 
  const task=(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).data.task;assert.equal(task.group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await report(task,{candidates:[]})).status,200);
  const done=(await req('/group-onboarding/jobs/'+job.data.id,'GET',undefined,a.id)).data;assert.equal(done.status,'succeeded');assert.equal(done.requested_group_name,'Shanghai Entrepreneurs Meetup');assert.deepEqual(done.result.candidates,[]);assert.deepEqual((await overview()).groups,before);
 });
+
+test('completed workflows and latest optional actions survive newer discoveries and remain workspace scoped',async()=>{
+ const parent=(await req('/group-onboarding/jobs/'+connectId,'GET',undefined,a.id)).data;
+ assert.equal(parent.followups.greeting.status,'succeeded');assert.equal(parent.followups.verify.status,'succeeded');
+ const otherCheck=await req('/group-onboarding/jobs/'+connectId+'/verify','POST',{request_id:randomUUID(),confirmed:true},a.id);assert.equal(otherCheck.status,202);
+ const claimed=(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).data.task;assert.equal(claimed.kind,'verify');assert.equal((await report(claimed,{wechat:false,reader:true,sender:true})).status,200);
+ for(let i=0;i<31;i++)assert.equal((await req('/group-onboarding/discover','POST',{request_id:randomUUID()},a.id)).status,202);
+ const list=(await req('/group-onboarding','GET',undefined,a.id)).data;assert.equal(list.jobs.length,30);assert(list.flows.some((f:any)=>f.id===connectId));
+ const restored=(await req('/group-onboarding/jobs/'+connectId,'GET',undefined,a.id)).data;assert.equal(restored.followups.greeting.id,parent.followups.greeting.id);assert.equal(restored.followups.verify.id,otherCheck.data.id);assert.equal(restored.followups.verify.result.wechat,false);
+ assert(!(await req('/group-onboarding','GET',undefined,b.id)).data.flows.some((f:any)=>f.id===connectId));assert.equal((await req('/group-onboarding/jobs/'+connectId,'GET',undefined,b.id)).status,404);
+});

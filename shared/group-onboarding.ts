@@ -16,3 +16,12 @@ export const onboardingErrors:Record<string,string>={
  operation_failed:'接入任务暂未完成，群保持停用。请查看当前步骤后重试；不要重复创建同一个群。'
 };
 export const onboardingSteps=[['queued','等待运行端'],['preflight','检查账号与队列'],['binding','绑定真实群'],['reader','配置读取'],['sender','配置发送'],['runtime','更新本群连接'],['ack','等待机器人确认'],['ready','接入完成']] as const;
+
+export type OnboardingTaskRef={id:string;kind:string;parent_id?:string|null;status?:string};
+export function onboardingFlowId(job:OnboardingTaskRef|null|undefined){return job?.kind==='connect'?job.id:job&&['verify','greeting'].includes(job.kind)?job.parent_id||null:null;}
+export function resumeOnboardingTask(saved:string|null,flows:OnboardingTaskRef[],jobs:OnboardingTaskRef[]){
+ const selected=[...flows,...jobs].find(j=>j.id===saved);
+ if(selected)return onboardingFlowId(selected)||selected.id;
+ const active=jobs.find(j=>['queued','working'].includes(j.status||''));
+ return active?(onboardingFlowId(active)||active.id):flows[0]?.id||(jobs[0]?(onboardingFlowId(jobs[0])||jobs[0].id):null);
+}
