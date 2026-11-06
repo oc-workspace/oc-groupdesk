@@ -44,7 +44,8 @@ def sender_key(chat,sender):
     return str(chat)+':'+value if str(chat) else value
 
 def track(p,seq,sender,text,timestamp,at_me,chat,result):
-    from policy import NAME,reminder_candidate
+    from policy import reminder_candidate
+    from bot_names import addressed
     if seq<0 or result=='duplicate':return
     with p.db() as db:
         key=sender_key(chat,sender)
@@ -53,7 +54,7 @@ def track(p,seq,sender,text,timestamp,at_me,chat,result):
             target=db.execute('SELECT id FROM pending WHERE sender=? AND chat_id=?',(key,str(chat))).fetchone()
             if not target and result=='coalesced_reminder':
                 target=db.execute('SELECT id FROM turns WHERE sender=? AND chat_id=? AND explicit=1 AND status="active" ORDER BY created DESC LIMIT 1',(key,str(chat))).fetchone()
-        if not (at_me or NAME.search(str(text)) or (target and reminder_candidate(str(text)))):return
+        if not (at_me or addressed(p.cfg,chat,str(text)) or (target and reminder_candidate(str(text)))):return
         now=p.clock()
         db.execute('INSERT OR IGNORE INTO recovery_sources VALUES(?,?,?,?,?,?,?,NULL)',
                    (seq,str(chat),str(sender)[:80],str(text)[:p.cfg['input_chars']],timestamp if timestamp is not None else now,target['id'] if target else None,result))
@@ -67,7 +68,7 @@ def reconcile(p,incident,recovered_at,source_rows,allowed):
     Untracked historical rows cannot prove whether a reply was sent; flag them
     for private review instead of blindly replaying them.
     """
-    from policy import NAME
+    from bot_names import addressed
     now=p.clock();start=recovered_at-WINDOW;untracked=0;created=0;uncertain=0
     allowed={str(v) for v in allowed}
     with p.db() as db:
@@ -77,7 +78,7 @@ def reconcile(p,incident,recovered_at,source_rows,allowed):
         for row in source_rows:
             if (str(row['chat_id']) not in allowed or row['direction']!='incoming' or row['message_type']!='text'
                 or not row.get('sender') or not start<=row['source_at']<=recovered_at):continue
-            if not (row.get('is_at_me') or NAME.search(row.get('content',''))):continue
+            if not (row.get('is_at_me') or addressed(p.cfg,row['chat_id'],row.get('content',''))):continue
             if not db.execute('SELECT 1 FROM recovery_sources WHERE seq=?',(row['seq'],)).fetchone():untracked+=1
         rows=db.execute('SELECT * FROM recovery_sources WHERE source_at>=? AND source_at<=? AND batch_id IS NULL ORDER BY source_at,seq',(start,recovered_at)).fetchall()
         grouped={}

@@ -2,7 +2,11 @@ import {z} from 'zod';
 
 export const identityPolicySchema=z.object({
   disclosure:z.enum(['when_asked','proactive','roleplay']).default('when_asked'),
-  personal_questions:z.enum(['tactful','plain']).default('tactful')
+  personal_questions:z.enum(['tactful','plain']).default('tactful'),
+  bot_name:z.string().trim().max(80).regex(/^[^\x00-\x1f\x7f]*$/).optional(),
+  self_reference:z.string().trim().max(40).regex(/^[^\x00-\x1f\x7f]*$/).optional(),
+  mention_names:z.array(z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/)).max(12).refine(a=>new Set(a.map(v=>v.toLocaleLowerCase())).size===a.length,'点名名称不能重复').optional(),
+  name_policy_version:z.literal(1).optional()
 }).strict();
 export type IdentityPolicy=z.infer<typeof identityPolicySchema>;
 

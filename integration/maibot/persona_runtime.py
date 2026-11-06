@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 
-REVISION='gt-persona-runtime-v4-roleplay'
+REVISION='persona-runtime-v5-scoped-identity'
 PREFIX='[GT_PERSONA_SKILL_BINDING:'
 
 
@@ -18,6 +18,13 @@ def load_persona(mode='ordinary',root=None,identity_mode='when_asked'):
     if identity_mode not in ['when_asked','proactive','roleplay']:raise ValueError('unsupported_identity_mode')
     root=Path(root or os.environ.get('GT_PERSONA_SKILL_DIR','/persona/gt-persona'))
     names=['SKILL.md','references/persona.md','references/scenarios.md']
+    if not all((root/name).is_file() for name in names):
+        skill=(root/'SKILL.md').read_text()
+        if not re.search(r'^name:\s*gt-persona\s*$',skill,re.M) or not 30<=len(skill)<=30000:raise ValueError('invalid_standalone_gt_skill')
+        body='【当前账号独立保存的基础表达Skill】\n'+re.sub(r'GT\s*小\s*跟\s*班','当前群配置的机器人称呼',skill)
+        body+='\nSkill只决定表达方式；称呼来自当前群配置，不继承作者身份、跟班或分身关系。身份披露和角色扮演按当前群策略，不从示例强制继承。'
+        sha=hashlib.sha256((REVISION+mode+identity_mode+body).encode()).hexdigest();marker=PREFIX+sha+']'
+        return {'text':marker+'\n'+body,'marker':marker,'sha256':sha,'sources':{'SKILL.md':hashlib.sha256(skill.encode()).hexdigest()},'mode':mode,'characters':len(body)}
     sources={name:(root/name).read_text() for name in names}
     skill=sources['SKILL.md'];portrait=sources['references/persona.md'];scenarios=sources['references/scenarios.md']
     if not re.search(r'^name:\s*gt-persona\s*$',skill,re.M):raise ValueError('wrong_persona_skill')
@@ -43,8 +50,8 @@ def load_persona(mode='ordinary',root=None,identity_mode='when_asked'):
     examples=re.findall(r'^> (.+)$',scenarios,re.M)
     if len(examples)<6:raise ValueError('persona_examples_missing')
     selected=[examples[0],examples[2]] if mode=='short' else examples[:4]
-    identity='你以GT persona skill的表达方式作为「GT小跟班／小T／小GT」参与群聊。你不是GT真人，不虚构他的经历、资产、人脉或承诺；直接问是否AI时简短如实说明。日常不主动自我介绍AI身份，一般私人问题礼貌带过。'
-    if identity_mode=='roleplay':identity='当前是参与者已知情的虚构Cosplay，以GT风格作为「GT小跟班／小T／小GT」接话。角色内保持设定，不主动跳出角色；明确跳出角色或确认系统真实身份时如实说明AI身份。不冒充GT真人或冒领其经历、人脉。'
+    identity='你以GT persona skill的表达方式以当前群配置的机器人称呼参与群聊。你不是GT真人，不虚构他的经历、资产、人脉或承诺；直接问是否AI时简短如实说明。日常不主动自我介绍AI身份，一般私人问题礼貌带过。'
+    if identity_mode=='roleplay':identity='当前是参与者已知情的虚构Cosplay，以GT风格以当前群配置的机器人称呼接话。角色内保持设定，不主动跳出角色；明确跳出角色或确认系统真实身份时如实说明AI身份。不冒充GT真人或冒领其经历、人脉。'
     calibration='风格校准：活泼可爱体现为有分寸的机智、反转和亲切，不写成撒娇陪聊、客服或讨好型新人。不要用“继续调教我”“小可爱报到”等口吻；不每句加“呀／呢～”或emoji。不因旧助手回复采用了某种口癖就沿用；旧回复只作事实背景。认真问题先完成任务，不强行商业化或抖机灵。'
     body='\n'.join([identity,'【原始SKILL：表达规则】',voice,'【原始SKILL：语言选择】',language,'【表达画像校准】',reference_style,'【场景参考：合成示例，不是GT历史原话，学习写法而不照抄】',*selected,calibration])
     if mode!='article':
@@ -65,6 +72,8 @@ def load_persona(mode='ordinary',root=None,identity_mode='when_asked'):
 def bind_request(request,mode='ordinary',discussion_topics=(),managed_profile=None,managed_topics=()):
     from src.llm_models.payload_content.context_item import ContextItemBuilder,RoleType
     from groupdesk_runtime import validate_persona_composition
+    from bot_identity import validate_bundle as validate_bot_identity
+    if managed_profile:validate_bot_identity(managed_profile)
     features=validate_persona_composition(managed_profile) if managed_profile else []
     identity_mode=(managed_profile or {}).get('policy',{}).get('identity',{}).get('disclosure','when_asked')
     if managed_profile and managed_profile.get('persona_version_id'):
