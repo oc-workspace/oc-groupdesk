@@ -13,15 +13,16 @@ const names:Record<string,string>={discover:'读取微信群列表',connect:'接
 const statuses:Record<string,string>={queued:'排队中',working:'处理中',succeeded:'已完成',failed:'未完成',cancelled:'已取消'};
 export function GroupOnboarding({api,data,reload,notify,onOpenGroup,onDirty,botId,botName,wechatId}:Props){
  const [info,setInfo]=useState<any>(null),[flow,setFlow]=useState<any>(null),[job,setJob]=useState<any>(null),[discovery,setDiscovery]=useState<any>(null),[chosen,setChosen]=useState<any>(null),[config,setConfig]=useState<any>(null),[query,setQuery]=useState(''),[lookupName,setLookupName]=useState('');
- const [busy,setBusy]=useState(false),[prompt,setPrompt]=useState(''),[suggestion,setSuggestion]=useState<any>(null),[model,setModel]=useState<Selection|null>(data.model_config.defaults.routes.onboarding||null);
+ const [working,setBusy]=useState(false),[prompt,setPrompt]=useState(''),[suggestion,setSuggestion]=useState<any>(null),[model,setModel]=useState<Selection|null>(data.model_config.defaults.routes.onboarding||null);
  const busyLock=useRef(false);const [busyAction,setBusyAction]=useState('refresh'),[readMode,setReadMode]=useState('all'),[initializing,setInitializing]=useState(true),[loadError,setLoadError]=useState('');
+ const busy=working||initializing;
  const [joined,setJoined]=useState(false),[scope,setScope]=useState(false),[confirm,setConfirm]=useState<'connect'|'greeting'|null>(null),[pollUntil,setPollUntil]=useState(0);
  const flowAnchor=useRef<HTMLDivElement>(null);const storageKey='groupdesk:onboarding-task:'+botId;
  function remember(id:string){try{sessionStorage.setItem(storageKey,id);}catch{}}
  function emphasizeFlow(){requestAnimationFrame(()=>{flowAnchor.current?.scrollIntoView({behavior:'smooth',block:'start'});flowAnchor.current?.focus({preventScroll:true});});}
  const requestId=useRef(uid());const dirty=!!config;
  useEffect(()=>{onDirty(dirty);return()=>onDirty(false);},[dirty]);
- async function work(fn:()=>Promise<void>,action='refresh'){if(busyLock.current)return;busyLock.current=true;setBusyAction(action);setBusy(true);try{await fn();}catch(e){notify((e as Error).message,true);}finally{busyLock.current=false;setBusy(false);}}
+ async function work(fn:()=>Promise<void>,action='refresh'){if(busyLock.current||initializing)return;busyLock.current=true;setBusyAction(action);setBusy(true);try{await fn();}catch(e){notify((e as Error).message,true);}finally{busyLock.current=false;setBusy(false);}}
  async function load(){const v=await api('/group-onboarding');setInfo(v);setLoadError('');return v;}
  async function readSelection(id:string,resumePolling=true){const v=await api('/group-onboarding/jobs/'+id);setJob(v);const flowId=onboardingFlowId(v);const parent=flowId?(flowId===v.id?v:await api('/group-onboarding/jobs/'+flowId)):null;setFlow(parent);remember(parent?.id||v.id);if(resumePolling)setPollUntil(Date.now()+15*60000);if(v.kind==='discover'&&v.status==='succeeded'){setDiscovery(v);setQuery('');}return v;}
  useEffect(()=>{void load().then(async v=>{const recent=v.jobs.find((j:any)=>j.kind==='discover'&&j.status==='succeeded');if(recent)setDiscovery(recent);let saved=null;try{saved=sessionStorage.getItem(storageKey);}catch{}const id=resumeOnboardingTask(saved,v.flows||[],v.jobs);if(id){const restored=await readSelection(id);if(onboardingFlowId(restored))emphasizeFlow();}}).catch(e=>{setLoadError(e.message);notify(e.message,true);}).finally(()=>setInitializing(false));},[]);
@@ -48,7 +49,7 @@ export function GroupOnboarding({api,data,reload,notify,onOpenGroup,onDirty,botI
  const candidates=(discovery?.result?.candidates||[]).filter((c:any)=>c.name.toLowerCase().includes(query.toLowerCase()));
  return <>
   <div className="page-head"><div><span className="eyebrow">CONNECT A NEW COMMUNITY</span><h1>先入群，再在这里完成接入</h1><p>确认微信已加入目标群，选择配置后由运行端完成绑定、读取与发送授权，无需回到 Codex 操作。</p></div><button className="button" disabled={busy} onClick={()=>void work(async()=>{await load();if(job)await selectJob(job.id);})}>刷新任务与运行端</button></div>
-  {busy?<LoadingStatus label={onboardingActionLabels[busyAction]||onboardingActionLabels.refresh}/>:taskLoading?<LoadingStatus {...taskLoading}/>:initializing?<LoadingStatus label="正在加载新群接入数据…"/>:null}
+  {initializing?<LoadingStatus label="正在加载新群接入数据…"/>:busy?<LoadingStatus label={onboardingActionLabels[busyAction]||onboardingActionLabels.refresh}/>:taskLoading?<LoadingStatus {...taskLoading}/>:null}
   {loadError&&!initializing&&<p className="form-error" role="alert">{loadError}；请点击“刷新任务与运行端”重试。</p>}
   <div className="onboarding-guide"><strong>接入顺序：1 选群 → 2 确认配置 → 3 等待机器人确认</strong><p>前三步为必做顺序；4 连接检查、5 入群问候、6 后续群管理均为可选，不需要全部点击。</p></div>
   {flow&&!config&&<div ref={flowAnchor} tabIndex={-1} className="onboarding-flow-anchor"><OnboardingFlow flow={flow} activeJob={job} busy={busy} action={busyAction} onRefresh={()=>void work(async()=>{await readSelection(flow.id);await load();})} onVerify={()=>void child('verify')} onGreeting={()=>setConfirm('greeting')} onViewTask={id=>void work(()=>selectJob(id))} onOpenGroup={()=>onOpenGroup(flow.group_id)} onRetry={()=>void work(async()=>{await api('/group-onboarding/jobs/'+flow.id+'/retry','POST',{});await readSelection(flow.id);await load();})} onCancel={()=>void work(async()=>{await api('/group-onboarding/jobs/'+flow.id+'/cancel','POST',{});await readSelection(flow.id);await load();})}/></div>}
