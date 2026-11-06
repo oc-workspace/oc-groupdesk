@@ -53,6 +53,12 @@ class EndpointRouteTest(unittest.TestCase):
         self.container['networks']['foreign_data']={}
         with self.assertRaises(ValueError):plan(self.container,self.network,SLUG,'wechat-bridge')
 
+    def test_onboarding_agent_uses_only_its_own_endpoint_and_bridge(self):
+        self.container['service']='group-onboarding-agent'
+        self.assertEqual(plan(self.container,self.network,SLUG,'group-onboarding-agent')['source'],'172.23.0.2/32')
+        self.container['networks'][PROJECT+'_data']={}
+        with self.assertRaises(ValueError):plan(self.container,self.network,SLUG,'group-onboarding-agent')
+
     def test_existing_broader_or_negated_rules_are_not_owned(self):
         import json
         rule={'source':'172.23.0.2/32','interface':'br-aaaaaaaaaaaa'}

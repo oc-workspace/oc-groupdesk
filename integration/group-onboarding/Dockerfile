@@ -1,0 +1,9 @@
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE}
+USER root
+WORKDIR /agent
+COPY agent.py /agent/agent.py
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENTRYPOINT ["python","/agent/agent.py"]
+
+CMD []

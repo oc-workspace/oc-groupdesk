@@ -46,6 +46,8 @@ export function registerModelAdmin(app:express.Express){
     await transaction(async db=>{
       const old=(await db.query('SELECT revision,routes FROM model_settings WHERE singleton=true FOR UPDATE')).rows[0];
       requireCondition(old.revision===body.revision,409,'默认模型已被更新，请重新载入');
+      if(body.routes.onboarding===undefined)body.routes.onboarding=old.routes.onboarding;
+      await validateSelection(body.routes.onboarding||null,'text',db);
       if(body.routes.stages===undefined&&old.routes.stages!==undefined)body.routes.stages=old.routes.stages;
       for(const kind of ['text','image'] as const)await validateSelection(body.routes[kind],kind,db);
       for(const route of Object.values(body.routes.stages||{}))await validateSelection(route||null,'text',db);

@@ -1,0 +1,18 @@
+[Unit]
+Description=Exact outbound route for GroupDesk onboarding agent %i
+After=docker.service network-online.target sing-box.service
+Requires=docker.service
+PartOf=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /opt/docker/oc-projects/groupdesk-onboarding/current/wechat_egress.py apply %i --service group-onboarding-agent
+ExecStop=/usr/bin/python3 /opt/docker/oc-projects/groupdesk-onboarding/current/wechat_egress.py remove %i --service group-onboarding-agent
+TimeoutStartSec=90
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/groupdesk-bot-egress
+[Install]
+WantedBy=multi-user.target
