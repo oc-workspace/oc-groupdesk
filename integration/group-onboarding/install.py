@@ -20,12 +20,13 @@ def main():
  run(['docker','image','inspect',a.python_image],stdout=subprocess.DEVNULL)
  run(['docker','image','tag',a.python_image,python_tag])
  run(['docker','build','--network=none','--pull=false','-f',str(code/'Dockerfile'),'--build-arg','PYTHON_IMAGE='+python_tag,'-t',a.agent_image,str(code)])
- run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','groupdesk-onboarding-control@'+bot+'.service'])
- namespace='gdbot-'+slug
- service={'image':a.agent_image,'pull_policy':'never','restart':'unless-stopped','init':True,'read_only':True,'user':'0:0','cap_drop':['ALL'],'security_opt':['no-new-privileges:true'],'tmpfs':['/tmp:rw,nosuid,nodev,size=16m,mode=1777'],'volumes':[str(persist/'groupdesk')+':/groupdesk:ro','/run/groupdesk-onboarding/'+bot+':/control:ro'],'networks':['bot'],'mem_limit':'96m','pids_limit':32,'logging':{'driver':'json-file','options':{'max-size':'5m','max-file':'2'}},'healthcheck':{'test':['CMD','python','-c',"import time;from pathlib import Path;assert time.time()-Path('/tmp/onboarding-heartbeat').stat().st_mtime<120"],'interval':'30s','timeout':'5s','retries':3,'start_period':'60s'}}
+ run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','groupdesk-onboarding-control@'+bot+'.service']);run(['systemctl','restart','groupdesk-onboarding-control@'+bot+'.service'])
+ namespace='gdbot-'+slug;owner=(persist/'groupdesk/connection.json').stat()
+ service={'image':a.agent_image,'pull_policy':'never','restart':'unless-stopped','init':True,'read_only':True,'user':str(owner.st_uid)+':'+str(owner.st_gid),'cap_drop':['ALL'],'security_opt':['no-new-privileges:true'],'tmpfs':['/tmp:rw,nosuid,nodev,size=16m,mode=1777'],'volumes':[str(persist/'groupdesk')+':/groupdesk:ro','/run/groupdesk-onboarding/'+bot+':/control:ro'],'networks':['bot'],'mem_limit':'96m','pids_limit':32,'logging':{'driver':'json-file','options':{'max-size':'5m','max-file':'2'}},'healthcheck':{'test':['CMD','python','-c',"import time;from pathlib import Path;assert time.time()-Path('/tmp/onboarding-heartbeat').stat().st_mtime<120"],'interval':'30s','timeout':'5s','retries':3,'start_period':'60s'}}
  compose={'name':namespace,'services':{'group-onboarding-agent':service},'networks':{'bot':{'external':True,'name':namespace+'_bot'}}}
  path=root/'compose.onboarding.json';path.write_text(json.dumps(compose,indent=2)+'\n');path.chmod(0o600)
  run(['docker','compose','-f',str(path),'up','-d','--no-build','group-onboarding-agent'])
  run(['systemctl','enable','--now','groupdesk-onboarding-egress@'+bot+'.service'])
+ run(['docker','compose','-f',str(path),'exec','-T','group-onboarding-agent','python','-c',"from agent import Agent;from uuid import uuid4;a=Agent();assert a.conf();assert a.local({'id':str(uuid4()),'kind':'progress'}).get('stage')"])
  (root/'onboarding-agent-source-version').write_text(a.source+'\n');print('Account-scoped onboarding agent deployed; no group, WeChat or existing runtime was changed.')
 if __name__=='__main__':main()
