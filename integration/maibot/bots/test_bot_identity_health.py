@@ -17,7 +17,7 @@ class NamesTests(unittest.TestCase):
    p=Path(t)/'mention-names.json';p.write_text('["Tatsumi"]');self.assertIsNotNone(names.NAME.search('@Tatsumi '))
    p.write_text('["RyuBuddy"]');self.assertIsNone(names.NAME.search('@Tatsumi '));self.assertIsNotNone(names.NAME.search('@RyuBuddy '))
  def test_invalid_config_fails_closed(self):
-  for nameset in [[],[''],['x'*81],'.*']:
+  for nameset in [[''],['x'*81],'.*']:
    with self.assertRaises(ValueError):names.compile_names(nameset)
 
 class HealthTests(unittest.TestCase):

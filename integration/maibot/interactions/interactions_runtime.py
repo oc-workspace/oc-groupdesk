@@ -34,7 +34,7 @@ def validate_bundle(bundle):
         return
     if type(contract) is not int or contract!=1 or not isinstance(data,dict):raise ValueError('Unsupported interaction contract')
     aliases=data.get('settings',{}).get('bot_aliases')
-    if not isinstance(aliases,list) or not 1<=len(aliases)<=20 or any(not isinstance(v,str) or not 1<=len(v)<=80 for v in aliases):raise ValueError('Invalid bot aliases')
+    if not isinstance(aliases,list) or not 0<=len(aliases)<=20 or any(not isinstance(v,str) or not 1<=len(v)<=80 for v in aliases):raise ValueError('Invalid bot aliases')
     bindings=data.get('bindings');prizes=data.get('prizes')
     if not isinstance(bindings,list) or len(bindings)>50 or not isinstance(prizes,list) or len(prizes)>10:raise ValueError('Invalid interaction list')
     for item in bindings:

@@ -14,7 +14,7 @@
         "adaptation": "independently_authored_framework_reference",
         "upstream_files_copied": false
       },
-      "sha256": "e764af57fbbcd950297a455b2afcd60216ac3477bf8e3a98b2f51f6eb58e0720"
+      "sha256": "70da70e3f7e2aa6b7aa348145b5df81de514d378c8e14a698d6ebaa44c058786"
     },
     {
       "skill_name": "elon-first-principles-persona",
@@ -29,7 +29,7 @@
         "adaptation": "group_chat_adaptation",
         "upstream_files_copied": false
       },
-      "sha256": "db513d6458c5b2f0a98ed2a3248cf5c86e265de8d9929a1c4e99097e51a2d501"
+      "sha256": "4b1a8d84597a1b7f3d7e4c21e91eacab6d6c2fcdd1d6043501c05a0af5df2e76"
     }
   ]
 }

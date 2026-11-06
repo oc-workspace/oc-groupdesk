@@ -1,3 +1,5 @@
+import {botIdentityBundle} from './bot-identity.js';
+import {effectivePolicy} from './policies.js';
 import {isInitialPersonaDraft} from '../shared/persona-editor.js';
 import type express from 'express';
 import multer from 'multer';
@@ -137,10 +139,12 @@ export function registerPersonaAdmin(app:express.Express){
   res.type('application/gzip').attachment(v.skill_name+'-v'+v.version+'.tar.gz').send(skillArchive(v.skill_name,v.skill_md,v.provenance));
  });
  app.get('/api/persona-bindings/:id',async(req,res)=>{
-  const group=(await pool.query('SELECT id,persona_version_id,policy FROM groups WHERE id=$1',[uuid(req.params.id)])).rows[0];requireCondition(group,404,'群不存在');
+  const group=(await pool.query('SELECT id,persona_version_id,policy,language,allow_language_override,interaction FROM groups WHERE id=$1',[uuid(req.params.id)])).rows[0];requireCondition(group,404,'群不存在');
   const bundle=await runtimePersonaBundle(group);
   const text=renderPersonaComposition(bundle.persona_skill,bundle.persona_feature_skills,group.policy.persona==='gt-persona'?'【内置基础】由机器人加载 GT Persona。':'【内置基础】中性自然表达。');
-  res.json({...bundle,text,characters:text.length});
+  const identity=await botIdentityBundle({...group,policy:effectivePolicy(group)});
+  const preview=text+'\n'+identity.bot_name_instructions.join('\n');
+  res.json({...bundle,...identity,text:preview,characters:preview.length});
  });
  app.put('/api/persona-bindings/:id',async(req,res)=>{
   const b=z.object({revision,version_id:z.uuid().nullable(),follow_latest:z.boolean().default(false),features:z.array(z.object({version_id:z.uuid(),follow_latest:z.boolean().default(false)})).max(5).optional()}).parse(req.body),groupId=uuid(req.params.id);

@@ -8,6 +8,7 @@ import {groupRoutes,validateRoutes,selection,validateSelection} from './models.j
 import {parseGroupPolicy,effectivePolicy} from './policies.js';
 import {runtimePersona,resolveBindingVersion,validateComposition,featureBindings} from './persona-composition.js';
 import {callTextModel,generationText} from './model-generation.js';
+import {identityPolicySchema} from './identity.js';
 import {onboardingErrors} from '../shared/group-onboarding.js';
 
 const candidate=z.object({id:z.string().regex(/^[a-f0-9]{64}$/),native_id:z.string().regex(/^[A-Za-z0-9_-]{1,120}@chatroom$/),name:z.string().min(1).max(200),ambiguous:z.boolean(),external_id:z.string().max(200).nullable()}).strict();
@@ -15,7 +16,7 @@ const confirmation=z.object({joined:z.literal(true),scope:z.literal(true)}).stri
 const configSchema=z.object({name:z.string().trim().min(1).max(120),topic_ids:z.array(z.uuid()).min(1).max(100),kb_ids:z.array(z.uuid()).max(100),
  participation:z.enum(['quiet','moderate','active']),topic_scope:z.enum(['all','proactive']),language:z.enum(['auto','zh-CN','en','ja','ko','fr','de','es','source']),
  model_routes:groupRoutes,base_version_id:z.uuid().nullable(),base_follow_latest:z.boolean().default(true),features:z.array(z.object({version_id:z.uuid(),follow_latest:z.boolean()}).strict()).max(5),
- source_group_id:z.uuid().nullable(),enable:z.boolean()}).strict();
+ source_group_id:z.uuid().nullable(),enable:z.boolean(),identity:identityPolicySchema.optional()}).strict();
 const createInput=z.object({request_id:z.uuid(),discovery_id:z.uuid(),candidate_id:z.string().regex(/^[a-f0-9]{64}$/),confirmation,config:configSchema}).strict();
 const publicJob="input->>'group_name' AS requested_group_name,"+'id,kind,status,group_id,parent_id,stage,error_code,result,attempts,created_at,updated_at';
 async function activeBot(id:string){const b=await botRecord(id);requireCondition(b?.state==='active',409,'请先在机器人管理启用当前账号，再进行新群接入');return b;}
@@ -82,7 +83,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
    await validateRoutes(cfg.model_routes,db);let sourceLanguage='auto';let policy=effectivePolicy({language:'auto',allow_language_override:true});
    if(cfg.source_group_id){const source=(await db.query('SELECT * FROM groups WHERE id=$1',[cfg.source_group_id])).rows[0];requireCondition(source,400,'参考群不属于当前机器人');policy=effectivePolicy(source);sourceLanguage=source.language;}
    requireCondition(cfg.language!=='source'||cfg.source_group_id,400,'沿用语言需要先选择参考群');
-   policy=parseGroupPolicy({...policy,participation:cfg.participation,topic_scope:cfg.topic_scope,topic_overrides:Object.fromEntries(Object.entries(policy.topic_overrides).filter(([id])=>cfg.topic_ids.includes(id))),language:cfg.language==='source'?policy.language:{mode:cfg.language==='auto'?'follow':'fixed',allowed:[],fallback:cfg.language==='auto'?'zh-CN':cfg.language,...(cfg.language==='auto'?{}:{fixed:cfg.language}),allow_requested:true}});
+   policy=parseGroupPolicy({...policy,...(cfg.identity?{identity:cfg.identity}:{}),participation:cfg.participation,topic_scope:cfg.topic_scope,topic_overrides:Object.fromEntries(Object.entries(policy.topic_overrides).filter(([id])=>cfg.topic_ids.includes(id))),language:cfg.language==='source'?policy.language:{mode:cfg.language==='auto'?'follow':'fixed',allowed:[],fallback:cfg.language==='auto'?'zh-CN':cfg.language,...(cfg.language==='auto'?{}:{fixed:cfg.language}),allow_requested:true}});
    const base=cfg.base_version_id?await resolveBindingVersion(cfg.base_version_id,'base',cfg.base_follow_latest,db):null;
    const features=await Promise.all(cfg.features.map(f=>resolveBindingVersion(f.version_id,'feature',f.follow_latest,db)));validateComposition(base,features);
    const groupId=randomUUID();await db.query('INSERT INTO groups(id,name,enabled,language,allow_language_override,interaction,policy,model_routes,persona_version_id,persona_follow_latest) VALUES($1,$2,false,$3,$4,\'topic\',$5,$6,$7,$8)',[groupId,cfg.name,cfg.language==='source'?sourceLanguage:cfg.language,policy.language.allow_requested,policy,cfg.model_routes,base?.version_id||null,!!base&&cfg.base_follow_latest]);

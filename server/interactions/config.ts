@@ -1,3 +1,4 @@
+import {botIdentityBundle} from '../bot-identity.js';
 import type pg from 'pg';
 import {pool} from '../db.js';
 import {effectivePolicy} from '../policies.js';
@@ -24,8 +25,10 @@ export async function validateInteractionBindings(groupId:string,db:Db){
   for(const key of commandKeys(binding.commands)){requireCondition(!seen.has(key),400,'同一群的互动触发词有冲突，请调整后再启用');seen.add(key);}
  }
 }
+export async function interactionMentionNames(group:any){return (await botIdentityBundle(group)).bot_identity.mention_names;}
 export async function runtimeInteractions(group:any,db:Db=pool){
  const settings=await interactionSettings(group.id,db),bindings=(await interactionBindings(group.id,db)).filter(b=>!b.archived&&b.config.enabled);
+ settings.bot_aliases=await interactionMentionNames(group);
  return {settings,bindings:bindings.map(b=>({id:b.id,definition_id:b.definition_id,name:b.name,kind:b.kind,commands:b.commands,require_mention:b.config.require_mention,language_mode:b.config.language_mode})),prizes:(await interactionPrizes(group.id,db)).filter(p=>p.enabled).map(p=>({code:p.code,name:p.name,cost:p.cost,available:p.stock===null||p.stock>0}))};
 }
 export function interactionDay(now:number,timezone:string){

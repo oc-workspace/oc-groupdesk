@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {transaction,audit} from '../db.js';
 import {digest,requireCondition} from '../security.js';
 import {interactionCommand,normalizeInteractionText} from '../../shared/interactions.js';
-import {groupForInteraction,interactionSettings,interactionBindings,interactionPrizes,interactionDay,interactionLocale,type Db} from './config.js';
+import {interactionMentionNames,groupForInteraction,interactionSettings,interactionBindings,interactionPrizes,interactionDay,interactionLocale,type Db} from './config.js';
 import {interactionTemplate} from './templates.js';
 import {baseTemplate,renderInteraction,type Outcome} from './copy.js';
 
@@ -26,7 +26,7 @@ export async function executeInteraction(input:InteractionEventInput,access:Runt
   requireCondition(group.enabled&&group.revision===body.revision,409,'群配置已变化，请重新同步');
   requireCondition(body.source_at*1000<=now+15000&&body.source_at*1000>=now-90000,400,'只处理新采集的群消息');
   const binding=(await interactionBindings(group.id,db)).find(b=>b.id===body.binding_id&&b.config.enabled&&!b.archived);requireCondition(binding,409,'互动已停用或配置已变化');
-  const command=interactionCommand(body.text,binding.commands,settings.bot_aliases,body.mentioned,binding.config.require_mention);if(!command)return {handled:false};
+  const command=interactionCommand(body.text,binding.commands,await interactionMentionNames(group),body.mentioned,binding.config.require_mention);if(!command)return {handled:false};
   const day=interactionDay(body.source_at*1000,settings.timezone),usageDay=interactionDay(now,settings.timezone);
   const recent=(await db.query("SELECT 1 FROM interaction_events WHERE group_id=$1 AND actor_key=$2 AND created_at>to_timestamp($3)-$4*interval '1 second'",[group.id,actorKey,now/1000,settings.member_cooldown_seconds])).rowCount;
   const burst=(await db.query("SELECT count(*)::int count FROM interaction_events WHERE group_id=$1 AND created_at>to_timestamp($2)-interval '1 minute'",[group.id,now/1000])).rows[0].count;

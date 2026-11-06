@@ -97,6 +97,10 @@ def validate_bundle(bundle,external_id):
     from reply_frequency import validate_bundle as validate_frequency
     validate_frequency(bundle)
     validate_persona_composition(bundle)
+    from bot_identity import validate_bundle as validate_bot_identity
+    own=None
+    if CONNECTION.exists():own=json.loads(CONNECTION.read_text()).get("bot_id")
+    validate_bot_identity(bundle,own)
     from newcomer_welcome import validate
     validate(bundle)
     from interactions_runtime import validate_bundle as validate_interactions
@@ -155,7 +159,7 @@ def sync():
         temp=SNAPSHOT.with_suffix('.tmp');temp.write_text(json.dumps({'groups':groups},ensure_ascii=False));temp.chmod(0o600);temp.replace(SNAPSHOT)
     save()
     for chat,group_id,rev in acks:
-        try:api('/ack',{'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,**({'topic_reply_length_version':1} if groups[chat].get('topic_reply_length_contract_version')==1 else {}),**({'model_stage_routing_version':1} if groups[chat].get('model_stage_routing_contract_version')==1 else {}),'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'reply_frequency_version':1,'reply_frequency_revision':groups[chat]['reply_frequency']['revision']} if groups[chat].get('reply_frequency_contract_version')==1 else {}),**({'reply_limits_version':1} if groups[chat].get('reply_limits_contract_version')==1 else {}),**({'newcomer_welcome_policy_version':1} if groups[chat].get('newcomer_welcome_contract_version')==1 else {}),**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {}),**({'persona_composition_version':1,'persona_composition_sha256':groups[chat]['persona_composition_sha256']} if groups[chat].get('persona_feature_skills') else {})})
+        try:api('/ack',{**({'bot_identity_version':1,'bot_identity_sha256':groups[chat]['bot_identity_sha256']} if groups[chat].get('bot_identity_contract_version')==1 else {}),'group_id':group_id,'revision':rev,'timeout_policy_version':groups[chat].get('timeout_policy_contract_version',1),'model_routing_version':1,**({'topic_reply_length_version':1} if groups[chat].get('topic_reply_length_contract_version')==1 else {}),**({'model_stage_routing_version':1} if groups[chat].get('model_stage_routing_contract_version')==1 else {}),'persona_skill_version':1,'interactions_policy_version':1,'conversation_policy_version':1,**({'reply_frequency_version':1,'reply_frequency_revision':groups[chat]['reply_frequency']['revision']} if groups[chat].get('reply_frequency_contract_version')==1 else {}),**({'reply_limits_version':1} if groups[chat].get('reply_limits_contract_version')==1 else {}),**({'newcomer_welcome_policy_version':1} if groups[chat].get('newcomer_welcome_contract_version')==1 else {}),**({'persona_skill_sha256':groups[chat]['persona_skill']['sha256']} if groups[chat].get('persona_skill') else {}),**({'persona_composition_version':1,'persona_composition_sha256':groups[chat]['persona_composition_sha256']} if groups[chat].get('persona_feature_skills') else {})})
         except Exception:groups[chat]['enabled']=False;groups[chat]['valid_until']=0
     save();return {chat:{'revision':p.get('revision'),'enabled':p.get('enabled')} for chat,p in groups.items()}
 
@@ -218,6 +222,7 @@ def generation_rules(p,names=(),short=False):
     if not short:
         from interactions_runtime import guide
         pieces.append(guide(p))
+    pieces.extend(p.get('bot_name_instructions',[]))
     return '\n'.join(pieces)
 
 def check_remote_revision(p):
