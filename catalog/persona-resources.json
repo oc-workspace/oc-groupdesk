@@ -2,7 +2,7 @@
   "source": "https://github.com/xixu-me/awesome-persona-distill-skills",
   "commit": "eeaad969a384ad00aad47f1541dc4f007b859cea",
   "license": "CC0-1.0（仅目录；各资源按自身许可）",
-  "reviewed_at": "2026-11-06",
+  "reviewed_at": "2026-11-07",
   "entries": [
     {
       "name": "八字人格",
@@ -713,6 +713,21 @@
       "repository": "Ming-H/yinyuan-skills",
       "resource_type": "persona",
       "family": null
+    },
+    {
+      "name": "十二星座人格 · Zodiac Persona",
+      "url": "https://github.com/sirius-016/zodiac-persona-skill",
+      "description": "12 种星座原型的沟通风格、行为与情感特征。制作目标可指定一个星座或组合，例如“制作天蝎座风格”；只作角色创作参考，不是对群友性格的判断。",
+      "category": "性格原型与沟通风格",
+      "id": "sirius-016-zodiac-persona-skill",
+      "repository": "sirius-016/zodiac-persona-skill",
+      "resource_type": "persona",
+      "family": null,
+      "origin": "用户指定",
+      "reviewed_commit": "1e3c8bbd12fe89bc3ce8260e162508bdf2ab7a06",
+      "reference_paths": [
+        "prompts/zodiac_definitions/"
+      ]
     }
   ]
 }

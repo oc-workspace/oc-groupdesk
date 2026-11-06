@@ -2,7 +2,7 @@
 
 ## 使用
 
-在机器人工作区打开「Persona 制作 → 人设资源库」。公共目录来自 [awesome-persona-distill-skills](https://github.com/xixu-me/awesome-persona-distill-skills)，首版固定在 `eeaad969a384ad00aad47f1541dc4f007b859cea`，包含71项链接。目录升级随项目发布，不自动覆盖用户内容。
+在机器人工作区打开「Persona 制作 → 人设资源库」。公共目录来自 [awesome-persona-distill-skills](https://github.com/xixu-me/awesome-persona-distill-skills)，首版固定在 `eeaad969a384ad00aad47f1541dc4f007b859cea`，包含71项链接。2026-11-07按用户指定补充十二星座人格后，共72项；补充条目独立记录来源及人工核对commit。目录升级随项目发布，不自动覆盖用户内容。
 
 1. 搜索人物、用途或仓库，按类别、资源类型筛选，点击「读取来源」。浏览目录不会下载全部仓库或增加基础Persona选项。
 2. 来源预览显示仓库、固定commit、主Skill候选文件、许可、已读文件、遗漏和SHA-256。多Skill仓库可选择具体文件；来源脚本和宿主工具不安装或执行。
@@ -30,3 +30,15 @@
 - `POST /api/persona-resources/:id/import`：预览ID、名称/slug、种类、制作目标、同类变体/部分资料选择、可选模型路由。
 
 导入事务原子建立存档、素材数据集和未发布模板；模型排队失败仍保留来源和模板，可在编辑器重新提交。使用既有Persona任务worker，任务输入协议兼容，无需改变微信、Reader、桥接或MaiBot。原文件不进仓库，公共目录快照保存在`catalog/persona-resources.json`。
+
+## 十二星座人格补充（2026-11-07）
+
+[Zodiac Persona](https://github.com/sirius-016/zodiac-persona-skill) 为MIT公开资源，核对版本`1e3c8bbd12fe89bc3ce8260e162508bdf2ab7a06`。在人设资源库搜索“星座”或“Zodiac”，读取来源包含SKILL.md、LICENSE和`prompts/zodiac_definitions/`下12份定义，共14个文本文件。该额外目录由仓库代码中的目录元数据明确允许，不开放任意路径；保持固定版本、文本/路径/符号链接/大小限制。
+
+导入时在制作目标指定星座或组合，例如“制作天蝎座风格，简短幽默，服从当前群的语言和称呼设置”；不指定时会同时参考12种原型，建议先明确目标。只增加一个资源入口，不自动生成12个人设，不自动应用到任何群。多份独立星座Persona可在编辑器中新建，重复使用已导入的数据集；同源导入仍保持幂等。
+
+## MBTI资源评估（2026-11-07，未加入目录）
+
+[MCP Market页面](https://mcpmarket.com/zh/tools/skills/mbti-personality-ai-persona)保留SKILL.md，宣称16类MBTI、4个预设（Silent Tech Lead / Visionary PM / Reliable Mentor / Genius Teammate）及32种维度组合。思考、沟通与节奏描述可作为本项目Persona素材。
+
+但原Skill针对Claude Code/OpenClaw，含CLAUDE.md/SOUL.md写入、固定角色昵称、对话内切换/召唤和推广引导；本项目需改为独立草稿，称呼与点名由群配置决定，发布和群绑定仍通过后台。它依赖`references/presets.md`、`references/mbti-types.md`、`references/dimensions.md`。页面GitHub链接`https://github.com/georgedoors888/gb-power-market-jj`本次查询返回404，尚未核验这三份完整参考文件及许可。用户本次仅要求评估，未将缺少可核验源码的条目加入可导入目录，也未下载/执行其CLI。

@@ -6,7 +6,7 @@ import {publicAddress} from './model-security.js';
 import {digest,HttpError,requireCondition} from './security.js';
 
 export const personaResourceCatalog=JSON.parse(readFileSync(new URL('../catalog/persona-resources.json',import.meta.url),'utf8')) as {
- source:string;commit:string;license:string;reviewed_at:string;entries:{id:string;name:string;url:string;repository:string;description:string;category:string;resource_type:string;family:string|null}[]
+ source:string;commit:string;license:string;reviewed_at:string;entries:{id:string;name:string;url:string;repository:string;description:string;category:string;resource_type:string;family:string|null;origin?:string;reviewed_commit?:string;reference_paths?:string[]}[]
 };
 export type ResourceFile={path:string;content:string;sha256:string};
 export type ResourceSnapshot={resource_id:string;repository:string;commit:string;path:string;sha256:string;files:ResourceFile[];choices:string[];omitted:string[];license:string;fetched_at:string};
@@ -46,7 +46,9 @@ export async function fetchResourceSnapshot(id:string,requestedPath?:string,read
  requireCondition(choices.length&&choices.length<=100,400,'没有可导入的 SKILL.md/README.md，或候选过多；请在来源选择后上传');
  const path=requestedPath||choices[0];requireCondition(choices.includes(path),400,'请选择来源目录内的 Skill 文件');
  const dir=posix.dirname(path),prefix=dir==='.'?'':dir+'/';
- const companion=files.filter(f=>f.path!==path&&((f.path.startsWith(prefix+'references/')&&/\.(md|txt)$/i.test(f.path))||/^(license|copying|notice)(\.[a-z]+)?$/i.test(posix.basename(f.path))&&(posix.dirname(f.path)===dir||!f.path.includes('/'))));
+ // Additional text directories are code-reviewed catalog metadata, never URL/request input.
+ const extraPrefixes=(entry.reference_paths||[]).map(p=>{const value=p.replace(/\/$/,'');requireCondition(safeSourcePath(value),400,'资源参考目录无效');return value+'/';});
+ const companion=files.filter(f=>f.path!==path&&(((f.path.startsWith(prefix+'references/')||extraPrefixes.some(p=>f.path.startsWith(p)))&&/\.(md|txt)$/i.test(f.path))||/^(license|copying|notice)(\.[a-z]+)?$/i.test(posix.basename(f.path))&&(posix.dirname(f.path)===dir||!f.path.includes('/'))));
  companion.sort((a,b)=>Number(!/license|copying|notice/i.test(a.path))-Number(!/license|copying|notice/i.test(b.path))||a.path.localeCompare(b.path));
  const candidates=[files.find(f=>f.path===path)!,...companion];const included:ResourceFile[]=[],omitted:string[]=[];let total=0;
  for(const file of candidates){
