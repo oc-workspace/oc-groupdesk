@@ -30,6 +30,10 @@ async function insertJob(kind:string,requestId:string,input:any,actor:string,gro
 async function readJob(id:string){
  const j=(await pool.query('SELECT '+publicJob+' FROM group_onboarding_jobs WHERE id=$1',[id])).rows[0];requireCondition(j,404,'接入任务不存在');
  if(j.group_id){j.group=(await pool.query('SELECT id,name,enabled,external_id,revision,applied_revision FROM groups WHERE id=$1',[j.group_id])).rows[0];}
+ if(j.kind==='connect'){
+  const children=(await pool.query('SELECT DISTINCT ON(kind) '+publicJob+" FROM group_onboarding_jobs WHERE parent_id=$1 AND kind IN ('verify','greeting') ORDER BY kind,created_at DESC,id DESC",[j.id])).rows;
+  j.followups={verify:children.find(v=>v.kind==='verify')||null,greeting:children.find(v=>v.kind==='greeting')||null};
+ }
  j.error=j.error_code?onboardingErrors[j.error_code]||onboardingErrors.operation_failed:null;
  j.ready=j.kind==='connect'&&j.status==='succeeded'&&!!j.group?.external_id&&j.group.revision===j.group.applied_revision;
  return j;
@@ -45,7 +49,8 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
   const agent=(await pool.query('SELECT seen_at,version FROM group_onboarding_agent WHERE singleton=true')).rows[0]||null;
   const jobs=(await pool.query('SELECT '+publicJob+' FROM group_onboarding_jobs ORDER BY created_at DESC LIMIT 30')).rows;
   const versions=(await pool.query("SELECT v.id,v.persona_id,v.version,v.kind,p.name FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE NOT p.archived ORDER BY p.name,v.version DESC")).rows;
-  res.json({agent,jobs,versions});
+  const flows=(await pool.query("SELECT j.id,j.kind,j.status,j.stage,j.group_id,j.created_at,g.name AS group_name,(j.status='succeeded' AND g.external_id IS NOT NULL AND g.revision=g.applied_revision) AS ready FROM group_onboarding_jobs j JOIN groups g ON g.id=j.group_id WHERE j.kind='connect' ORDER BY j.created_at DESC LIMIT 30")).rows;
+  res.json({agent,jobs,versions,flows});
  });
  app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid(),group_name:z.string().trim().min(1).max(200).optional()}).strict().parse(req.body);if(b.group_name)requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE version='2'")).rowCount,409,'指定群名读取运行端正在更新，请稍后刷新');const id=await transaction(db=>insertJob('discover',b.request_id,b.group_name?{group_name:b.group_name}:{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
  app.get('/api/group-onboarding/jobs/:id',async(req,res)=>res.json(await readJob(z.uuid().parse(req.params.id))));
