@@ -21,6 +21,7 @@ import {identityInstructions} from './identity.js';
 import {botIdentityBundle} from './bot-identity.js';
 import {groupRoutes,validateRoutes,modelOverview,effectiveModelRoutes,privateTextRoute,privateStageRoutes,hasStageRouting} from './models.js';
 import {registerPersonaAdmin} from './personas-api.js';
+import {registerPersonaResources} from './persona-resources.js';
 import {runtimePersonaBundle,featureBindings} from './persona-composition.js';
 import {registerConversationAdmin} from './conversation-insights.js';
 import {registerTopicDraftAdmin} from './topic-drafting.js';
@@ -372,6 +373,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   registerNotificationAdmin(app);
   registerReplyFrequency(app);
   registerPersonaAdmin(app);
+  registerPersonaResources(app);
   registerConversationAdmin(app);
   registerInteractionAdmin(app);
   registerSummaryAdmin(app);

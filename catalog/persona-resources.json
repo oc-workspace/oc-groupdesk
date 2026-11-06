@@ -1,0 +1,718 @@
+{
+  "source": "https://github.com/xixu-me/awesome-persona-distill-skills",
+  "commit": "eeaad969a384ad00aad47f1541dc4f007b859cea",
+  "license": "CC0-1.0（仅目录；各资源按自身许可）",
+  "reviewed_at": "2026-11-06",
+  "entries": [
+    {
+      "name": "八字人格",
+      "url": "https://github.com/cantian-ai/bazi-persona-skill",
+      "description": "基于生辰八字，生成会聊天、有情绪、会随时间变化的AI人格。",
+      "category": "自我蒸馏与元工具",
+      "id": "cantian-ai-bazi-persona-skill",
+      "repository": "cantian-ai/bazi-persona-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "图鉴.skill",
+      "url": "https://github.com/Aar0nPB/curator-skill",
+      "description": "跨作者 persona skill 调度器 — 根据对话意图，从 30 个 persona skill 中智能匹配推荐。",
+      "category": "自我蒸馏与元工具",
+      "id": "aar0npb-curator-skill",
+      "repository": "Aar0nPB/curator-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "数字人生.skills",
+      "url": "https://github.com/wildbyteai/digital-life",
+      "description": "从个人在日常工具中留下的数字痕迹中提炼结构化自我画像。",
+      "category": "自我蒸馏与元工具",
+      "id": "wildbyteai-digital-life",
+      "repository": "wildbyteai/digital-life",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "Forge Skill",
+      "url": "https://github.com/YIKUAIBANZI/forge-skill",
+      "description": "将自我蒸馏与他人蒸馏拆分为独立流程，用于自我镜像、记忆整理与角色化对话。",
+      "category": "自我蒸馏与元工具",
+      "id": "yikuaibanzi-forge-skill",
+      "repository": "YIKUAIBANZI/forge-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "永生.skill",
+      "url": "https://github.com/agenmod/immortal-skill",
+      "description": "从聊天记录与相关资料中整理多维数字人格画像。",
+      "category": "自我蒸馏与元工具",
+      "id": "agenmod-immortal-skill",
+      "repository": "agenmod/immortal-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "大师.skill",
+      "url": "https://github.com/swaylq/master-skill",
+      "description": "从一个具体行业的从业经验中提炼判断方式、决策框架与工具习惯，形成可复用的方法论 skill。",
+      "category": "自我蒸馏与元工具",
+      "id": "swaylq-master-skill",
+      "repository": "swaylq/master-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "midas.skill",
+      "url": "https://github.com/realteamprinz/midas-skill",
+      "description": "从任意公众人物中提炼出六维度财富操作系统（赚钱引擎、交易架构、投资逻辑、风险画像、杠杆模型、退出路径），也可从个人日常数据中挖掘财富信号。",
+      "category": "自我蒸馏与元工具",
+      "id": "realteamprinz-midas-skill",
+      "repository": "realteamprinz/midas-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "反蒸馏 Skill",
+      "url": "https://github.com/lcmomo/my-anti-distill",
+      "description": "将可公开分发的技能内容与私有经验备份拆分管理，用于技能交付场景。",
+      "category": "自我蒸馏与元工具",
+      "id": "lcmomo-my-anti-distill",
+      "repository": "lcmomo/my-anti-distill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "数字生命开源计划",
+      "url": "https://github.com/weixr18/my-digital-life",
+      "description": "提供一套将个人知识库升级为数字分身的框架。",
+      "category": "自我蒸馏与元工具",
+      "id": "weixr18-my-digital-life",
+      "repository": "weixr18/my-digital-life",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "女娲.skill",
+      "url": "https://github.com/alchaincyf/nuwa-skill",
+      "description": "从个人的心智模型、决策启发式与表达模式中提炼可复用技能。",
+      "category": "自我蒸馏与元工具",
+      "id": "alchaincyf-nuwa-skill",
+      "repository": "alchaincyf/nuwa-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "Persona Skill",
+      "url": "https://github.com/Tomsawyerhu/Persona-Skill",
+      "description": "统一的多语言人格蒸馏、合成、扮演、管理。",
+      "category": "自我蒸馏与元工具",
+      "id": "tomsawyerhu-persona-skill",
+      "repository": "Tomsawyerhu/Persona-Skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "Skill Fidelity Bench",
+      "url": "https://github.com/c0ffee-milk/skill-fidelity-bench",
+      "description": "用于评测人格蒸馏 skill 在修改或投毒后是否保留原始能力、推理框架、边界与辨识度的基准工具 skill。",
+      "category": "自我蒸馏与元工具",
+      "id": "c0ffee-milk-skill-fidelity-bench",
+      "repository": "c0ffee-milk/skill-fidelity-bench",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "VibePortrait",
+      "url": "https://github.com/dadwadw233/VibePortrait",
+      "description": "从 Vibe Coding 对话中提炼开发者画像、开发技能与偏好。",
+      "category": "自我蒸馏与元工具",
+      "id": "dadwadw233-vibeportrait",
+      "repository": "dadwadw233/VibePortrait",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "自己.skill",
+      "url": "https://github.com/notdog1998/yourself-skill",
+      "description": "将个人对话与记录整理为自我蒸馏助手。",
+      "category": "自我蒸馏与元工具",
+      "id": "notdog1998-yourself-skill",
+      "repository": "notdog1998/yourself-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "诸子.skill",
+      "url": "https://github.com/linzzzzzz/zhuzi-skill",
+      "description": "让多个已存在的人格 skill 围绕同一问题展开结构化辩论，支持自动选人、按轮交锋与中立总结。",
+      "category": "自我蒸馏与元工具",
+      "id": "linzzzzzz-zhuzi-skill",
+      "repository": "linzzzzzz/zhuzi-skill",
+      "resource_type": "reference",
+      "family": null
+    },
+    {
+      "name": "老板.skill",
+      "url": "https://github.com/vogtsw/boss-skills",
+      "description": "从工作材料中提炼管理者的判断标准、评审风格与沟通预期。",
+      "category": "职场与学术关系",
+      "id": "vogtsw-boss-skills",
+      "repository": "vogtsw/boss-skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "同事.skill",
+      "url": "https://github.com/titanwings/colleague-skill",
+      "description": "从团队资料中整理前同事的工作上下文、习惯与沟通方式。",
+      "category": "职场与学术关系",
+      "id": "titanwings-colleague-skill",
+      "repository": "titanwings/colleague-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "HR.skill",
+      "url": "https://github.com/Schlaflied/hr-skill",
+      "description": "从拒信与招聘流程中整理 HR 的沟通逻辑与决策模式，用于反向拆解筛选标准并重构求职叙事。",
+      "category": "职场与学术关系",
+      "id": "schlaflied-hr-skill",
+      "repository": "Schlaflied/hr-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "大学老师.skill",
+      "url": "https://github.com/CommitHu502Craft/professor-skill",
+      "description": "从课程资料与教师风格中整理复习重点、题型偏好与评分线索。",
+      "category": "职场与学术关系",
+      "id": "commithu502craft-professor-skill",
+      "repository": "CommitHu502Craft/professor-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "roast-cold-email-skill",
+      "url": "https://github.com/Schlaflied/roast-cold-email-skill",
+      "description": "从公司公开信息与招聘材料中整理批评性求职邮件写法，用于生成有理有据的冷联系求职邮件。",
+      "category": "职场与学术关系",
+      "id": "schlaflied-roast-cold-email-skill",
+      "repository": "Schlaflied/roast-cold-email-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "师兄.skill",
+      "url": "https://github.com/zhanghaichao520/senpai-skill",
+      "description": "从课题组材料中提炼资深成员的指导方式与救火风格。",
+      "category": "职场与学术关系",
+      "id": "zhanghaichao520-senpai-skill",
+      "repository": "zhanghaichao520/senpai-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "导师.skill",
+      "url": "https://github.com/ybq22/supervisor",
+      "description": "将导师的指导风格整理为面向学生与教育工作者的导师助手。",
+      "category": "职场与学术关系",
+      "id": "ybq22-supervisor",
+      "repository": "ybq22/supervisor",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "兄弟.skill",
+      "url": "https://github.com/realteamprinz/brother-skill",
+      "description": "从抖音、微信截图等来源蒸馏你的兄弟们（支持真实兄弟、群聊好友和网络红人）——他们的说话方式、口头禅、搞笑风格和恶搞能量。",
+      "category": "亲密关系与家庭记忆",
+      "id": "realteamprinz-brother-skill",
+      "repository": "realteamprinz/brother-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "暗恋对象.skill",
+      "url": "https://github.com/xiaoheizi8/crush-skills",
+      "description": "从聊天、照片与社交痕迹中提炼对话风格，用于个人回望与情感整理。",
+      "category": "亲密关系与家庭记忆",
+      "id": "xiaoheizi8-crush-skills",
+      "repository": "xiaoheizi8/crush-skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "前任.skill",
+      "url": "https://github.com/therealXiaomanChu/ex-skill",
+      "description": "从私人记录中整理说话方式与共同记忆，用于回忆与关系梳理。",
+      "category": "亲密关系与家庭记忆",
+      "id": "therealxiaomanchu-ex-skill",
+      "repository": "therealXiaomanChu/ex-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "MamaSkill",
+      "url": "https://github.com/jiangziyan-693/MamaSkill",
+      "description": "从亲人的聊天记录、信件与语音中整理纪念型家庭陪伴助手。",
+      "category": "亲密关系与家庭记忆",
+      "id": "jiangziyan-693-mamaskill",
+      "repository": "jiangziyan-693/MamaSkill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "父母.skill",
+      "url": "https://github.com/xiaoheizi8/parents-skills",
+      "description": "从个人材料中提炼父母的语气、习惯与家庭记忆。",
+      "category": "亲密关系与家庭记忆",
+      "id": "xiaoheizi8-parents-skills",
+      "repository": "xiaoheizi8/parents-skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "恋爱训练营.skill",
+      "url": "https://github.com/TammyTan516/relationship-training-skill",
+      "description": "基于聊天记录模拟心动对象的沟通风格，帮助用户在安全沙盒中练习表达、邀约与关系修复。",
+      "category": "亲密关系与家庭记忆",
+      "id": "tammytan516-relationship-training-skill",
+      "repository": "TammyTan516/relationship-training-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Reunion Skill",
+      "url": "https://github.com/yangdongchen66-boop/reunion-skill",
+      "description": "基于已故亲友的数字遗物构建可本地运行的纪念型陪伴助手。",
+      "category": "亲密关系与家庭记忆",
+      "id": "yangdongchen66-boop-reunion-skill",
+      "repository": "yangdongchen66-boop/reunion-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "AI 维舟.skill",
+      "url": "https://github.com/TerryTian-tech/AIWeiZhou-skill",
+      "description": "提炼维舟在社会议题上的心智与思维框架，形成可复用的方法论视角，用于分析热点议题或评价具体观点。",
+      "category": "公众人物与方法论视角",
+      "id": "terrytian-tech-aiweizhou-skill",
+      "repository": "TerryTian-tech/AIWeiZhou-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "巴菲特思维操作系统",
+      "url": "https://github.com/will2025btc/buffett-perspective",
+      "description": "提炼沃伦·巴菲特的投资与决策框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "will2025btc-buffett-perspective",
+      "repository": "will2025btc/buffett-perspective",
+      "resource_type": "persona",
+      "family": "buffett"
+    },
+    {
+      "name": "常熟阿诺（加州盛亦陶） Skill",
+      "url": "https://github.com/Ricardo-Vv/changshu-anuo",
+      "description": "提炼常熟阿诺关于“左右脑互搏”的表达与分析视角，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "ricardo-vv-changshu-anuo",
+      "repository": "Ricardo-Vv/changshu-anuo",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "陈泽.skill",
+      "url": "https://github.com/fisher-yu-like/chenze-skill",
+      "description": "主播陈泽的思维操作系统，用陈泽的认知框架分析你的问题。",
+      "category": "公众人物与方法论视角",
+      "id": "fisher-yu-like-chenze-skill",
+      "repository": "fisher-yu-like/chenze-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "马斯克.skill",
+      "url": "https://github.com/alchaincyf/elon-musk-skill",
+      "description": "提炼埃隆·马斯克的第一性原理与产品思维，形成可复用的决策框架。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-elon-musk-skill",
+      "repository": "alchaincyf/elon-musk-skill",
+      "resource_type": "persona",
+      "family": "musk"
+    },
+    {
+      "name": "峰哥亡命天涯 Skill",
+      "url": "https://github.com/rottenpen/fengge-wangmingtianya-perspective",
+      "description": "提炼“峰哥亡命天涯”的现实主义、止损导向与黑色幽默式表达结构，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "rottenpen-fengge-wangmingtianya-perspective",
+      "repository": "rottenpen/fengge-wangmingtianya-perspective",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "费曼.skill",
+      "url": "https://github.com/alchaincyf/feynman-skill",
+      "description": "提炼理查德·费曼的解释风格与求真启发式，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-feynman-skill",
+      "repository": "alchaincyf/feynman-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "郭德纲.skill",
+      "url": "https://github.com/ByteRax/guodegang-skills",
+      "description": "提炼郭德纲的表达结构、处世判断与职业方法，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "byterax-guodegang-skills",
+      "repository": "ByteRax/guodegang-skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "户晨风.skill",
+      "url": "https://github.com/Janlaywss/hu-chenfeng-skill",
+      "description": "提炼户晨风的消费现实主义视角，用于分析消费、城市与职业选择。",
+      "category": "公众人物与方法论视角",
+      "id": "janlaywss-hu-chenfeng-skill",
+      "repository": "Janlaywss/hu-chenfeng-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Ilya.skill",
+      "url": "https://github.com/alchaincyf/ilya-sutskever-skill",
+      "description": "提炼 Ilya Sutskever 对规模化、研究突破与超级智能的判断框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-ilya-sutskever-skill",
+      "repository": "alchaincyf/ilya-sutskever-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Justin Bieber ·Skill",
+      "url": "https://github.com/fisher-yu-like/justin-bieber-skill",
+      "description": "Justin Bieber 的思维操作系统，结合经历与创作与你交谈。",
+      "category": "公众人物与方法论视角",
+      "id": "fisher-yu-like-justin-bieber-skill",
+      "repository": "fisher-yu-like/justin-bieber-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "卡尔·马克思的思维框架与批判方法",
+      "url": "https://github.com/youaifuou/karl-marx-skill",
+      "description": "蒸馏自马克思 17 部原典，提炼其批判框架与辩证方法，提供日常对话与学术深析双模式输出。",
+      "category": "公众人物与方法论视角",
+      "id": "youaifuou-karl-marx-skill",
+      "repository": "youaifuou/karl-marx-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "KarlMarx Skill",
+      "url": "https://github.com/baojiachen0214/karlmarx-skill",
+      "description": "提炼马克思主义的结构分析、矛盾分析与实践检验方法，形成用于深层问题分析的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "baojiachen0214-karlmarx-skill",
+      "repository": "baojiachen0214/karlmarx-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Karpathy.skill",
+      "url": "https://github.com/alchaincyf/karpathy-skill",
+      "description": "提炼 Andrej Karpathy 对 AI 工程、教育与研究的思考框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-karpathy-skill",
+      "repository": "alchaincyf/karpathy-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "liangxi-skills",
+      "url": "https://github.com/1sh1ro/liangxi-skills",
+      "description": "从公开可见的 X 内容与交易复盘中提炼凉兮的结构判断、风险习惯与中文交易表达，形成可复用的交易方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "1sh1ro-liangxi-skills",
+      "repository": "1sh1ro/liangxi-skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "鲁迅的思维框架与反讽笔法",
+      "url": "https://github.com/youaifuou/luxun-skill",
+      "description": "蒸馏自鲁迅全集 305 篇及许寿裳年谱，提炼其撕假面的反讽笔法、\"瞒和骗\"批判框架与冷彻表达视角。",
+      "category": "公众人物与方法论视角",
+      "id": "youaifuou-luxun-skill",
+      "repository": "youaifuou/luxun-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "毛泽东.skill",
+      "url": "https://github.com/wwwaapplleecu-source/mao-skill",
+      "description": "基于公开著作提炼毛泽东的思想框架与方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "wwwaapplleecu-source-mao-skill",
+      "repository": "wwwaapplleecu-source/mao-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "毛选.skill",
+      "url": "https://github.com/leezythu/maoxuan-skill",
+      "description": "提炼《毛选》中的矛盾分析、根据地思维与战略判断框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "leezythu-maoxuan-skill",
+      "repository": "leezythu/maoxuan-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "米塞斯方法论",
+      "url": "https://github.com/LijiayuDeng/mises-perspective",
+      "description": "提炼路德维希·冯·米塞斯关于人类行为学、经济计算与干预主义批判的分析框架，形成可复用的政治经济学与制度分析方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "lijiayudeng-mises-perspective",
+      "repository": "LijiayuDeng/mises-perspective",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "MrBeast.skill",
+      "url": "https://github.com/alchaincyf/mrbeast-skill",
+      "description": "提炼 MrBeast 的内容选题、包装与观众留存方法，形成可复用的创作打法。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-mrbeast-skill",
+      "repository": "alchaincyf/mrbeast-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "芒格.skill",
+      "url": "https://github.com/alchaincyf/munger-skill",
+      "description": "提炼查理·芒格的跨学科心智模型与决策启发式，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-munger-skill",
+      "repository": "alchaincyf/munger-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "纳瓦尔.skill",
+      "url": "https://github.com/alchaincyf/naval-skill",
+      "description": "提炼纳瓦尔关于财富、杠杆与判断力的框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-naval-skill",
+      "repository": "alchaincyf/naval-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "PG.skill",
+      "url": "https://github.com/alchaincyf/paul-graham-skill",
+      "description": "提炼 Paul Graham 关于创业、写作与独立思考的框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-paul-graham-skill",
+      "repository": "alchaincyf/paul-graham-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "求是 Skill",
+      "url": "https://github.com/HughYau/qiushi-skill",
+      "description": "从相关思想方法中整理实事求是、调查研究与战略判断等工具，形成可复用的问题分析框架。",
+      "category": "公众人物与方法论视角",
+      "id": "hughyau-qiushi-skill",
+      "repository": "HughYau/qiushi-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "罗布派克.skill",
+      "url": "https://github.com/smallnest/rob-pike-skill",
+      "description": "提炼 Rob Pike 在 Unix、Go 与工程设计中的技术判断与表达风格，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "smallnest-rob-pike-skill",
+      "repository": "smallnest/rob-pike-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "内娱.skill",
+      "url": "https://github.com/yanghaoraneve/star-skill",
+      "description": "从歌词、视频、微博与评论中整理歌手或偶像的表达风格与互动方式，形成可对话的数字人格助手。",
+      "category": "公众人物与方法论视角",
+      "id": "yanghaoraneve-star-skill",
+      "repository": "yanghaoraneve/star-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "乔布斯.skill",
+      "url": "https://github.com/alchaincyf/steve-jobs-skill",
+      "description": "提炼史蒂夫·乔布斯的产品判断、叙事风格与决策启发式，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-steve-jobs-skill",
+      "repository": "alchaincyf/steve-jobs-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "塔勒布.skill",
+      "url": "https://github.com/alchaincyf/taleb-skill",
+      "description": "提炼纳西姆·塔勒布关于反脆弱与风险的启发式，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-taleb-skill",
+      "repository": "alchaincyf/taleb-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "童锦程.skill",
+      "url": "https://github.com/hotcoffeeshake/tong-jincheng-skill",
+      "description": "提炼童锦程在人际关系与情感判断上的直白视角与启发式。",
+      "category": "公众人物与方法论视角",
+      "id": "hotcoffeeshake-tong-jincheng-skill",
+      "repository": "hotcoffeeshake/tong-jincheng-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "特朗普.skill",
+      "url": "https://github.com/alchaincyf/trump-skill",
+      "description": "提炼特朗普的谈判、锚定与权力博弈分析框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-trump-skill",
+      "repository": "alchaincyf/trump-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "王二.skill",
+      "url": "https://github.com/fisher-yu-like/wang-er-skill",
+      "description": "提炼王小波作品中“王二”这个角色的精神与思维方式，形成可复用的方法论框架。",
+      "category": "公众人物与方法论视角",
+      "id": "fisher-yu-like-wang-er-skill",
+      "repository": "fisher-yu-like/wang-er-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "X 导师.skill",
+      "url": "https://github.com/alchaincyf/x-mentor-skill",
+      "description": "整合多位社交平台创作者的写作与增长打法，形成统一的导师式方法论技能。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-x-mentor-skill",
+      "repository": "alchaincyf/x-mentor-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "新青年.Skill",
+      "url": "https://github.com/SamadhiFire/xinqingnian-skill",
+      "description": "把“新中国最会解决问题的脑子”请来，当一次“临时参谋”。把《毛选》157篇文章进行蒸馏，将其方法论变成可执行的现实分析 skill。",
+      "category": "公众人物与方法论视角",
+      "id": "samadhifire-xinqingnian-skill",
+      "repository": "SamadhiFire/xinqingnian-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "张一鸣.skill",
+      "url": "https://github.com/alchaincyf/zhang-yiming-skill",
+      "description": "提炼张一鸣的产品、组织与战略判断框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-zhang-yiming-skill",
+      "repository": "alchaincyf/zhang-yiming-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "张雪峰.skill",
+      "url": "https://github.com/alchaincyf/zhangxuefeng-skill",
+      "description": "提炼张雪峰在升学、考试与职业规划方面的实用框架，形成可复用的方法论视角。",
+      "category": "公众人物与方法论视角",
+      "id": "alchaincyf-zhangxuefeng-skill",
+      "repository": "alchaincyf/zhangxuefeng-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "zizek-skill",
+      "url": "https://github.com/JikunR/zizek-skill",
+      "description": "以齐泽克式的问题意识整理前提追问、欲望追踪与矛盾揭示方法，形成可复用的分析工具。",
+      "category": "公众人物与方法论视角",
+      "id": "jikunr-zizek-skill",
+      "repository": "JikunR/zizek-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "赛博算命 Skill",
+      "url": "https://github.com/jinchenma94/bazi-skill",
+      "description": "基于出生信息与传统命理典籍整理四柱排盘与分析方法。",
+      "category": "精神性与专门化主题",
+      "id": "jinchenma94-bazi-skill",
+      "repository": "jinchenma94/bazi-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "金刚经.skill",
+      "url": "https://github.com/dull-bird/diamond-sutra-skill",
+      "description": "基于《金刚经》及相关解读整理佛学讲解框架，形成可对话的专门化技能。",
+      "category": "精神性与专门化主题",
+      "id": "dull-bird-diamond-sutra-skill",
+      "repository": "dull-bird/diamond-sutra-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "堪舆子",
+      "url": "https://github.com/voidforall/fengshui.skill",
+      "description": "从传统堪舆典籍中整理玄空飞星、八宅明镜与择日方法，形成以三元世家传人视角为人格的风水顾问技能。",
+      "category": "精神性与专门化主题",
+      "id": "voidforall-fengshui-skill",
+      "repository": "voidforall/fengshui.skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Master-skill",
+      "url": "https://github.com/xr843/Master-skill",
+      "description": "基于佛教经典文献整理汉传佛教的教学风格与讲解视角。",
+      "category": "精神性与专门化主题",
+      "id": "xr843-master-skill",
+      "repository": "xr843/Master-skill",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "Numerologist Skills",
+      "url": "https://github.com/FANzR-arch/Numerologist_skills",
+      "description": "用结构化知识库与脚本化约束整理奇门遁甲、紫微斗数等术数技能。",
+      "category": "精神性与专门化主题",
+      "id": "fanzr-arch-numerologist-skills",
+      "repository": "FANzR-arch/Numerologist_skills",
+      "resource_type": "persona",
+      "family": null
+    },
+    {
+      "name": "月老·姻缘测算 Skills",
+      "url": "https://github.com/Ming-H/yinyuan-skills",
+      "description": "将姻缘测算整理为多模式传统术数技能，用于合婚、求签与桃花运势分析。",
+      "category": "精神性与专门化主题",
+      "id": "ming-h-yinyuan-skills",
+      "repository": "Ming-H/yinyuan-skills",
+      "resource_type": "persona",
+      "family": null
+    }
+  ]
+}

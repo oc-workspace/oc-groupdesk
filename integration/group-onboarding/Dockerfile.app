@@ -12,5 +12,6 @@ COPY --chown=node:node shared /app/shared
 COPY --chown=node:node migrations /app/migrations
 COPY --chown=node:node integration /app/integration
 COPY --chown=node:node skills /app/skills
+COPY --chown=node:node catalog /app/catalog
 COPY --chown=node:node scripts /app/scripts
 COPY --chown=node:node package.json /app/package.json

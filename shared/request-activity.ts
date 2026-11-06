@@ -1,5 +1,7 @@
 export type RequestActivity={id:number;label:string;botId?:string};
 export function requestActivityLabel(path:string,method='GET'):string|null{
+ if(/^\/persona-resources\/[^/]+\/preview$/.test(path))return '正在读取公开人设来源和参考资料…';
+ if(/^\/persona-resources\/[^/]+\/import$/.test(path))return '正在存档来源并准备 Persona 草稿…';
  // Automatic onboarding job updates already have a persistent task indicator.
  if(method==='GET'&&/^\/group-onboarding\/jobs\//.test(path))return null;
  if(path==='/group-onboarding/suggest')return 'AI 正在生成配置建议…';
