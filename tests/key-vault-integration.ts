@@ -109,3 +109,11 @@ test('key disable and bot ownership transfer invalidate existing selection immed
 });
 
 test('unconfigured routes are disabled and never silently fall back to a pre-existing runtime key',async()=>{await withBot(botA,async()=>{const routes=await (await import('../server/models.js')).effectiveModelRoutes({model_routes:{text:{mode:'inherit'},image:{mode:'inherit'}}});assert.equal(routes.text.source,'disabled');assert.equal(routes.text.available,false);assert(Object.values(routes.stages).every((r:any)=>r.source==='disabled'));});});
+test('unpriced history is never displayed or budgeted as zero money; owner can reconcile before enabling spending',async()=>{
+ await withBot(botA,async()=>{await executeKeyCall(privateAlias,'synthetic-model',{feature:'chat'}, {model:'synthetic-model',max_tokens:10},1000,undefined,async(url,key,p,b,t,s,dispatch)=>{assert.equal(key,secret);await dispatch?.();return {text:JSON.stringify({usage:{prompt_tokens:10,completion_tokens:1}}),contentType:'application/json'};});});
+ let report=(await req('/key-usage','GET',undefined,a)).data;const summary=report.summary.find((s:any)=>s.key_id===privateId);assert.equal(summary.cost,null);assert.equal(summary.unknown_requests,1);const row=report.rows.find((r:any)=>r.key_id===privateId);
+ const k=(await req('/keys','GET',undefined,a)).data.keys.find((k:any)=>k.id===privateId);assert.equal((await req('/keys/'+privateId,'PUT',{revision:k.revision,name:k.name,enabled:true,archived:false,scope:'private',base_url:k.base_url,client_type:k.client_type,currency:k.currency,prices:{'synthetic-model':{input:1,output:3}},limits:{...limits(),daily_cost:1}},a)).status,200);
+ await withBot(botA,()=>assert.rejects(reserveUsage(privateAlias,'synthetic-model',{feature:'chat'},1,10),/历史用量尚未定价或核对/));
+ assert.equal((await req('/key-usage/'+row.id+'/reconcile','POST',{input:10,output:1,cached:0,cost:.000013,note:'Synthetic price reconciliation'},a)).status,200);
+ await withBot(botA,async()=>{const r=await reserveUsage(privateAlias,'synthetic-model',{feature:'chat'},1,10);await settleUsage(r,null,false);});
+});
