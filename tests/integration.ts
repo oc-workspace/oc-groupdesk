@@ -122,8 +122,8 @@ test('language overrides, group mention rules and revision acknowledgements are 
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).data.language,'ja');
   groupA=(await request('/groups/'+groupA.id,'PUT',{...groupA,allow_language_override:false})).data;
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).data.language,'en');
-  assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:groupA.id,revision:groupA.revision-1},true)).status,409);
-  assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:groupA.id,revision:groupA.revision},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:groupA.id,revision:groupA.revision-1},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:groupA.id,revision:groupA.revision},true)).status,200);
   const anonymous=await fetch(base+'/api/runtime/config/trusted-room-A');assert.equal(anonymous.status,401);
   groupA=(await request('/groups/'+groupA.id,'PUT',{...groupA,enabled:false})).data;
   assert.equal((await request('/runtime/context','POST',{...ctx,mentioned:true},true)).status,403);
@@ -216,9 +216,9 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   const pendingRow=pending.data.find((g:any)=>g.id===selected.id);
   assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision','runtime_health','runtime_health_at']);
   assert.equal(pendingRow.revision,selected.revision);assert(pendingRow.applied_revision<selected.revision);
-  assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:selected.id,revision:selected.revision-1},true)).status,409);
+  assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:selected.id,revision:selected.revision-1},true)).status,409);
   assert.deepEqual((await request('/groups/status')).data.find((g:any)=>g.id===selected.id),pendingRow);
-  assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:selected.id,revision:selected.revision},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:selected.id,revision:selected.revision},true)).status,200);
   const confirmed=(await request('/groups/status')).data.find((g:any)=>g.id===selected.id);
   assert.equal(confirmed.revision,selected.revision);assert.equal(confirmed.applied_revision,selected.revision);
   assert(Number.isFinite(Date.parse(confirmed.bot_seen_at)));
@@ -260,11 +260,11 @@ test('model credentials stay write-only while text/image routes isolate groups a
   assert.equal(configY.model_routing.text.model_id,'text-a');assert.equal(configY.model_routing.text.source,'default');
   assert(!JSON.stringify(configX).includes(secretB));assert(!JSON.stringify((await request('/overview')).data).includes(secretA));
   assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:x.id,revision:x.revision},true)).status,409);
-  assert.equal((await request('/runtime/ack','POST',{reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:x.id,revision:x.revision,model_routing_version:1},true)).status,200);
+  assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:x.id,revision:x.revision},true)).status,200);
   assert.equal((await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision-1},true)).status,409);
   const privateX=(await request('/runtime/model-credentials','POST',{group_id:x.id,revision:x.revision,credential_id:a},true)).data;
-  assert.equal(privateX.text_route.api_key,secretB);assert.equal(privateX.text_route.model_id,'text-b');
-  assert.equal((await request('/runtime/model-credentials','POST',{group_id:y.id,revision:y.revision},true)).data.text_route.api_key,secretA);
+  assert.notEqual(privateX.text_route.api_key,secretB);assert(privateX.text_route.base_url.includes('/api/model-proxy/v1'));assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret(privateX.text_route.api_key)).alias,b);assert.equal(privateX.text_route.model_id,'text-b');
+  assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret((await request('/runtime/model-credentials','POST',{group_id:y.id,revision:y.revision},true)).data.text_route.api_key)).alias,a);
   const {digest}=await import('../server/security.js');const scoped='isolated_model_scope_adapter_0000000000000';
   await pool.query('INSERT INTO runtime_adapters VALUES($1,$2,$3,now())',[digest(scoped),'model scope test',JSON.stringify(['synthetic-route-a'])]);
   const response=await fetch(base+'/api/runtime/model-credentials',{method:'POST',headers:{Authorization:'Bearer '+scoped,'Content-Type':'application/json'},body:JSON.stringify({group_id:y.id,revision:y.revision})});assert.equal(response.status,403);
@@ -318,7 +318,7 @@ test('provider batch imports protocols and reference models atomically while pre
   group=(await request('/groups/'+group.id,'PUT',{...group,model_routes:{...group.model_routes,text:{mode:'custom',credential_id:gemini.id,model_id:'gemini-2.0-flash'}}})).data;
   assert.equal((await request('/runtime/config/synthetic-route-a','GET',undefined,true)).data.model_routing.text.client_type,'gemini');
   const privateRoute=(await request('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision},true)).data.text_route;
-  assert.equal(privateRoute.client_type,'gemini');assert.equal(privateRoute.base_url,'https://api.example.com');assert.equal(privateRoute.api_key,input.credentials[0].api_key);
+  assert.equal(privateRoute.client_type,'gemini');assert(privateRoute.base_url.endsWith('/api/model-proxy'));assert.notEqual(privateRoute.api_key,input.credentials[0].api_key);assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret(privateRoute.api_key)).alias,gemini.id);
   const publicData=JSON.stringify((await request('/overview')).data),logs=JSON.stringify((await request('/logs')).data);
   for(const c of input.credentials){assert(!publicData.includes(c.api_key));assert(!logs.includes(c.api_key));}
 });
@@ -592,7 +592,7 @@ test('topic reply caps survive editing, reach linked groups and require adapter 
  group=(await request('/groups/'+group.id,'PUT',{...group,enabled:true,external_id:'synthetic-length-room',topic_ids:[topic.id]})).data;
  let cfg=(await request('/runtime/config/'+group.external_id,'GET',undefined,true)).data;
  assert.equal(cfg.topic_reply_length_contract_version,1);assert.equal(cfg.topics[0].policy.max_reply_chars,900);
- const ack={group_id:group.id,revision:group.revision,model_routing_version:1,timeout_policy_version:3,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1};
+ const ack={group_id:group.id,revision:group.revision,timeout_policy_version:3,model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1};
  const old=await request('/runtime/ack','POST',ack,true);assert.equal(old.status,409);assert.match(old.data.error,/字符上限/);
  assert.equal((await request('/runtime/ack','POST',{...ack,topic_reply_length_version:1},true)).status,200);
  for(const cap of [0,99,4001,900.5,true])assert.equal((await request('/topics/'+topic.id,'PUT',{...topic,policy:{max_reply_chars:cap}})).status,400);

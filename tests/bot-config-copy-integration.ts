@@ -37,12 +37,12 @@ after(async()=>{
  for(const id of created){const bot=await botRecord(id);await controlPool.query('DROP DATABASE '+sqlIdentifier(bot.db_name)+' WITH (FORCE)');await controlPool.query('DROP ROLE '+sqlIdentifier(bot.db_role));}
  await pool.end();
 });
-test('configuration copy creates independent IDs and re-encrypts the same authorized key',async()=>{
+test('configuration copy creates independent IDs and retains a reference without duplicating the paid key',async()=>{
  const result=await copyBotConfiguration(source,target,group,'synthetic-test');
  assert.equal(result.credentials,1);assert.equal(result.personas,2);assert.equal(result.external_id_bound,false);
  await withBot(target,async()=>{
   const c=(await pool.query('SELECT * FROM model_credentials')).rows[0];
-  assert.notEqual(c.id,credential);assert.notEqual(c.key_ciphertext,sourceCipher);assert.equal(openKey(c.key_ciphertext),'synthetic-provider-key-only');
+  assert.notEqual(c.id,credential);assert.notEqual(c.key_ciphertext,sourceCipher);assert.equal(c.key_ciphertext,'vault:v1');assert(c.vault_key_id);const central=await (await import('../server/key-vault.js')).keyForAlias(c.id);assert.equal((await import('../server/bot-secrets.js')).openControlSecret(central.secret_ciphertext),'synthetic-provider-key-only');
   const g=(await pool.query('SELECT * FROM groups')).rows[0];assert.notEqual(g.id,group);assert.equal(g.external_id,null);assert.equal(g.enabled,false);assert.equal(g.applied_revision,0);assert.equal(g.bot_seen_at,null);
   assert.equal(g.model_routes.text.credential_id,c.id);assert.equal(g.model_routes.stages.planner.credential_id,c.id);
   const defaults=(await pool.query('SELECT routes FROM model_settings')).rows[0].routes;assert.equal(defaults.text.credential_id,c.id);assert.equal(defaults.stages.planner.credential_id,c.id);
@@ -52,7 +52,7 @@ test('configuration copy creates independent IDs and re-encrypts the same author
   for(const table of ['persona_materials','persona_datasets','persona_imports','interaction_wallets','interaction_ledger','summary_schedules','summary_jobs','runtime_adapters'])assert.equal((await pool.query('SELECT count(*)::int n FROM '+table)).rows[0].n,0,table);
   assert.throws(()=>openKey(sourceCipher));
  });
- await withBot(source,async()=>{const g=(await pool.query('SELECT * FROM groups WHERE id=$1',[group])).rows[0];assert.equal(g.external_id,'old-account-chat-42');assert.equal(g.enabled,true);assert.equal((await pool.query('SELECT key_ciphertext FROM model_credentials')).rows[0].key_ciphertext,sourceCipher);});
+ await withBot(source,async()=>{const g=(await pool.query('SELECT * FROM groups WHERE id=$1',[group])).rows[0];assert.equal(g.external_id,'old-account-chat-42');assert.equal(g.enabled,true);assert.equal((await pool.query('SELECT key_ciphertext FROM model_credentials')).rows[0].key_ciphertext,'vault:v1');});
 });
 test('repeat is idempotent and does not overwrite later target edits',async()=>{
  await withBot(target,()=>pool.query("UPDATE model_credentials SET name='Target edit'"));

@@ -29,7 +29,7 @@ export function TopicAIAssist({value,models,disabled,onApply,onBusyChange,onInsp
  }
  return <section className="topic-ai-assist" aria-labelledby="topic-ai-title"><h3 id="topic-ai-title">一句话生成话题</h3><p className="hint">写下想聊什么，AI 会补齐名称、说明、回复规则和识别策略；也可以在现有草稿上继续完善。</p>
  <fieldset disabled={disabled||generating}><label>制作话题的 Prompt<textarea autoFocus rows={3} maxLength={6000} value={prompt} placeholder="例如：我想增加一个关于美食的话题" onChange={e=>setPrompt(e.target.value)}/></label>
- <ModelChoice kind="text" value={selection} onChange={setSelection} data={models} prefix="话题助填"/>
+ <ModelChoice feature="topic" kind="text" value={selection} onChange={setSelection} data={models} prefix="话题助填"/>
  <p className="hint">仅发送本次 Prompt 和当前话题草稿，会调用所选模型并可能产生费用。结果先填入下方表单，检查、编辑后再保存。</p><LoadingButton type="button" className="button primary" loading={generating} disabled={prompt.trim().length<2||!available} onClick={()=>void generate()}>{generating?'AI 正在补齐…':'AI 帮我补齐话题'}</LoadingButton></fieldset>
  {generating&&<div className="topic-ai-progress"><LoadingStatus label="AI 正在生成，完成后会自动填入表单…"/><button type="button" className="button small" onClick={stop}>停止等待</button></div>}
  <div ref={feedbackAnchor}>{error&&<p className="form-error" role="alert">{error}</p>}{notice&&<p className="hint" role="status">{notice}</p>}

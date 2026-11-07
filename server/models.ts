@@ -1,3 +1,6 @@
+import {ensureVaultCredential,syncAliases,keyForAlias,authorizedKey,botPrincipal,refreshVaultCatalog} from './key-vault.js';
+import {proxyRoute} from './model-proxy.js';
+import {controlPool} from './db.js';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import type pg from 'pg';
@@ -26,12 +29,20 @@ export const defaultRoutes=z.object({onboarding:selection.nullable().optional(),
 export type Routes=z.infer<typeof groupRoutes>;
 type Db=Pick<pg.PoolClient,'query'>;
 export async function modelOverview(db:Db=pool){
-  const credentials=(await db.query('SELECT id,name,base_url,client_type,key_hint,enabled,revision,catalog_synced_at,catalog_error FROM model_credentials ORDER BY created_at,id')).rows;
+  for(const c of (await db.query('SELECT * FROM model_credentials WHERE vault_key_id IS NULL')).rows)await ensureVaultCredential(c);
+  await syncAliases();
+  const owner=await botPrincipal();
+  const available=(await controlPool.query("SELECT k.id FROM managed_model_keys k WHERE NOT k.archived AND (k.owner_user_id=$1 OR k.scope='site' AND EXISTS(SELECT 1 FROM managed_model_grants g WHERE g.key_id=k.id AND g.user_id=$1 AND g.enabled AND g.expires_at>now() AND (cardinality(g.bot_ids)=0 OR $2=ANY(g.bot_ids))))",[owner,(await import('./key-vault.js')).botId()])).rows.map(k=>k.id);
+  const credentials=(await db.query('SELECT id,vault_key_id,name,base_url,client_type,key_hint,enabled,revision,catalog_synced_at,catalog_error FROM model_credentials ORDER BY created_at,id')).rows;
   const models=(await db.query('SELECT credential_id,model_id,display_name,capability,source,listed FROM credential_models ORDER BY model_id')).rows;
-  return {credentials:credentials.map(c=>({...c,models:models.filter(m=>m.credential_id===c.id)})),defaults:(await db.query('SELECT revision,routes FROM model_settings WHERE singleton=true')).rows[0]};
+  const grants=(await controlPool.query('SELECT key_id,model_ids,features FROM managed_model_grants WHERE user_id=$1 AND enabled AND expires_at>now()',[owner])).rows;const owned=(await controlPool.query('SELECT id FROM managed_model_keys WHERE owner_user_id=$1',[owner])).rows.map(k=>k.id);
+  return {credentials:credentials.filter(c=>available.includes(c.vault_key_id)).map(c=>({...c,allowed_features:owned.includes(c.vault_key_id)?['chat','summary','persona','topic','onboarding','analysis','interaction','image']:grants.find(g=>g.key_id===c.vault_key_id)?.features||[],models:models.filter(m=>m.credential_id===c.id&&(owned.includes(c.vault_key_id)||grants.find(g=>g.key_id===c.vault_key_id)?.model_ids.includes(m.model_id)))})),defaults:(await db.query('SELECT revision,routes FROM model_settings WHERE singleton=true')).rows[0]};
 }
 export async function validateSelection(route:z.infer<typeof selection>|null,kind:'text'|'image',db:Db=pool){
   if(!route)return;
+  const alias=(await db.query('SELECT vault_key_id FROM model_credentials WHERE id=$1',[route.credential_id])).rows[0];
+  if(alias?.vault_key_id){const k=await keyForAlias(route.credential_id,db),owner=await botPrincipal();
+  if(k.owner_user_id!==owner){const g=(await controlPool.query('SELECT * FROM managed_model_grants WHERE key_id=$1 AND user_id=$2 AND enabled AND expires_at>now()',[k.id,owner])).rows[0];requireCondition(k.scope==='site'&&g&&g.model_ids.includes(route.model_id)&&(!g.bot_ids.length||g.bot_ids.includes((await import('./key-vault.js')).botId())),403,'此 Key 或模型未获授权');}}
   const row=(await db.query('SELECT c.enabled,m.capability FROM model_credentials c JOIN credential_models m ON m.credential_id=c.id WHERE c.id=$1 AND m.model_id=$2',[route.credential_id,route.model_id])).rows[0];
   requireCondition(row?.enabled,400,'请选择已启用的 API Key 和已登记模型');
   requireCondition(row.capability===kind,400,'所选模型的功能类型不匹配');
@@ -57,7 +68,7 @@ export async function effectiveModelRoutes(group:{model_routes:Routes},db:Db=poo
   const defaults=(await db.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes;
   const configured=configuredModelRoutes(group.model_routes,defaults);
   async function resolve(value:{source:string;selection:z.infer<typeof selection>|null},kind:'text'|'image'){
-    const {selection:route,source}=value;
+    const {selection:route}=value,source=value.source==='legacy'?'disabled':value.source;
     const row=route?(await db.query('SELECT c.id credential_id,c.name,c.enabled,c.revision credential_revision,c.client_type,m.model_id,m.capability FROM model_credentials c JOIN credential_models m ON m.credential_id=c.id WHERE c.id=$1 AND m.model_id=$2',[route.credential_id,route.model_id])).rows[0]:null;
     return {source,...(row||{}),available:!!row?.enabled&&row.capability===kind};
   }
@@ -65,47 +76,24 @@ export async function effectiveModelRoutes(group:{model_routes:Routes},db:Db=poo
   return {text:await resolve(configured.text,'text'),image:await resolve(configured.image,'image'),stages};
 }
 export function hasStageRouting(routes:{stages:Record<string,{source:string}>}){return Object.values(routes.stages).some(r=>['group_stage','default_stage'].includes(r.source));}
-async function privateRoute(route:any,db:Db){
+async function privateRoute(route:any,groupId:string,stage='chat'){
   if(route.source==='legacy')return null;
   requireCondition(route.source!=='disabled'&&route.available,409,'本群模型已停用或不可用');
-  const credential=(await db.query('SELECT base_url,key_ciphertext,client_type FROM model_credentials WHERE id=$1',[route.credential_id])).rows[0];
-  return {...route,base_url:credential.base_url,api_key:openKey(credential.key_ciphertext),client_type:credential.client_type};
+  return proxyRoute(route,groupId,stage);
 }
-export async function privateStageRoutes(group:{model_routes:Routes},db:Db=pool){
-  const routes=await effectiveModelRoutes(group,db);
-  return Object.fromEntries(await Promise.all(modelStageIds.filter(stage=>stage!=='summary').map(async stage=>[stage,routes.stages[stage].available?await privateRoute(routes.stages[stage],db):null])));
+export async function privateStageRoutes(group:{id:string;model_routes:Routes},db:Db=pool){
+ const routes=await effectiveModelRoutes(group,db);return Object.fromEntries(await Promise.all(modelStageIds.filter(stage=>stage!=='summary').map(async stage=>[stage,routes.stages[stage].available?await privateRoute(routes.stages[stage],group.id,stage):null])));
 }
-export async function privateTextRoute(group:{id:string;model_routes:Routes},db:Db=pool){
-  const routes=await effectiveModelRoutes(group,db),route=routes.text as any;
-  return privateRoute(route,db);
-}
+export async function privateTextRoute(group:{id:string;model_routes:Routes},db:Db=pool){const routes=await effectiveModelRoutes(group,db);return privateRoute(routes.text,group.id);}
 export async function createCredential(input:{name:string;base_url:string;api_key:string;client_type?:ClientType},actor:string){
   keyValue.parse(input.api_key);
-  const credentialId=randomUUID(),endpoint=baseUrl(input.base_url),cipher=sealKey(input.api_key),hint='••••'+input.api_key.slice(-4);
+  const credentialId=randomUUID(),endpoint=baseUrl(input.base_url),cipher=sealKey(input.api_key),hint='••••••'+input.api_key.slice(-6);
   await transaction(async db=>{
     await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest,client_type) VALUES($1,$2,$3,$4,$5,$6,$7)',[credentialId,input.name,endpoint,cipher,hint,digest(input.api_key),clientType.parse(input.client_type||'openai')]);
     await audit(actor,'model.credential_created',credentialId,{},db);
-  });return credentialId;
+  });await ensureVaultCredential((await pool.query('SELECT * FROM model_credentials WHERE id=$1',[credentialId])).rows[0]);return credentialId;
 }
-export async function refreshCatalog(credentialId:string,actor:string,fetcher=fetchCatalog){
-  const credential=(await pool.query('SELECT * FROM model_credentials WHERE id=$1',[credentialId])).rows[0];
-  requireCondition(credential?.enabled,400,'请先启用 API Key');
-  try{
-    const models=parseCatalog(await fetcher(credential.base_url,openKey(credential.key_ciphertext),credential.client_type),credential.client_type);
-    await transaction(async db=>{
-      const current=(await db.query('SELECT revision FROM model_credentials WHERE id=$1 FOR UPDATE',[credentialId])).rows[0];
-      requireCondition(current?.revision===credential.revision,409,'API Key 已更新，请重新查询模型目录');
-      await db.query('UPDATE credential_models SET listed=false WHERE credential_id=$1',[credentialId]);
-      for(const m of models)await db.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source,listed) VALUES($1,$2,$3,$4,'catalog',true) ON CONFLICT(credential_id,model_id) DO UPDATE SET display_name=excluded.display_name,listed=true",[credentialId,m.id,m.name,m.capability]);
-      await db.query('UPDATE model_credentials SET catalog_synced_at=now(),catalog_error=NULL WHERE id=$1',[credentialId]);
-      await audit(actor,'model.catalog_refreshed',credentialId,{count:models.length},db);
-    });return {count:models.length};
-  }catch(error){
-    const message=error instanceof HttpError?error.message:'模型目录查询失败，已保留原目录';
-    await pool.query('UPDATE model_credentials SET catalog_error=$1 WHERE id=$2 AND revision=$3',[message,credentialId,credential.revision]);
-    if(error instanceof HttpError)throw error;throw new HttpError(502,message);
-  }
-}
+export async function refreshCatalog(credentialId:string,actor:string,fetcher=fetchCatalog){return refreshVaultCatalog(credentialId,fetcher);}
 
 export async function importExistingCredential(input:{name:string;base_url:string;api_key:string;model_id:string}){
   keyValue.parse(input.api_key);modelId.parse(input.model_id);
@@ -116,8 +104,8 @@ export async function importExistingCredential(input:{name:string;base_url:strin
     const defaults=(await db.query('SELECT routes FROM model_settings WHERE singleton=true FOR UPDATE')).rows[0];
     requireCondition(!defaults.routes.text||(defaults.routes.text.credential_id===existing?.id&&defaults.routes.text.model_id===input.model_id),409,'已有默认文字模型，请在后台明确修改，导入不会覆盖');
     const id=existing?.id||randomUUID();
-    if(existing)requireCondition(openKey(existing.key_ciphertext)===input.api_key,503,'已有密钥无法读取，请核对加密主密钥');
-    else await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest) VALUES($1,$2,$3,$4,$5,$6)',[id,input.name,endpoint,sealKey(input.api_key),'••••'+input.api_key.slice(-4),digest(input.api_key)]);
+    if(existing)requireCondition((existing.key_ciphertext==='vault:v1'?(await import('./bot-secrets.js')).openControlSecret((await keyForAlias(existing.id,db)).secret_ciphertext):openKey(existing.key_ciphertext))===input.api_key,503,'已有密钥无法读取，请核对加密主密钥');
+    else await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest) VALUES($1,$2,$3,$4,$5,$6)',[id,input.name,endpoint,sealKey(input.api_key),'••••••'+input.api_key.slice(-6),digest(input.api_key)]);
     await db.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source) VALUES($1,$2,$2,'text','configured') ON CONFLICT(credential_id,model_id) DO NOTHING",[id,input.model_id]);
     await validateSelection({credential_id:id,model_id:input.model_id},'text',db);
     if(!defaults.routes.text){

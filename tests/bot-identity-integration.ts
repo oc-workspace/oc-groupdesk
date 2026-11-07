@@ -33,7 +33,7 @@ test('trusted robot defaults and group overrides do not leak between robots or g
  const empty=await req('/groups/'+ga2.id,'PUT',{...ga2,policy:{...ga2.policy,identity:{...ga2.policy.identity,mention_names:[]}}},a.id);assert.equal(empty.status,200);ga2=empty.data;assert.deepEqual((await config(a,ga2)).interactions.settings.bot_aliases,[]);
 });
 test('configuration cannot be acknowledged with stale identity or an old runtime',async()=>{
- const c=await config(a,ga);const body={group_id:c.id,revision:c.revision,timeout_policy_version:3,persona_skill_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:c.reply_frequency.revision};
+ const c=await config(a,ga);const body={group_id:c.id,revision:c.revision,timeout_policy_version:3,persona_skill_version:1,model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:c.reply_frequency.revision};
  assert.equal((await req('/runtime/ack','POST',body,undefined,a.token)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...body,bot_identity_version:1,bot_identity_sha256:(await config(a,ga2)).bot_identity_sha256},undefined,a.token)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...body,bot_identity_version:1,bot_identity_sha256:c.bot_identity_sha256},undefined,a.token)).status,200);

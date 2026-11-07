@@ -2,7 +2,7 @@
 
 各文字处理阶段的独立模型、API Key、继承关系和适配器要求见 [分阶段模型配置](model-stages.md)。
 
-模型配置模块管理 OpenAI Chat Completions、OpenAI Responses 和 Gemini 原生 HTTPS 服务。OpenAI 两种使用 Bearer，Gemini 使用 x-goog-api-key，密钥不进入目录查询 URL。API Key 以 AES-256-GCM 密文存入数据库；独立的 MODEL_ENCRYPTION_KEY 保存在生产外部 env，网页只返回名称和末四位，编辑时不回显旧密钥。API 地址变化必须重新输入 Key，目录请求不跟随重定向，解析公网地址后固定连接地址并验证 TLS。
+模型配置模块管理 OpenAI Chat Completions、OpenAI Responses 和 Gemini 原生 HTTPS 服务。OpenAI 两种使用 Bearer，Gemini 使用 x-goog-api-key，密钥不进入目录查询 URL。API Key 以 AES-256-GCM 密文存入数据库；独立的 MODEL_ENCRYPTION_KEY 保存在生产外部 env，列表与下拉框只返回名称和末6位；仅Key所有人可通过独立眼睛开关查看完整Key，管理员无例外。API 地址变化必须重新输入 Key，目录请求不跟随重定向，解析公网地址后固定连接地址并验证 TLS。
 
 每个 Key 查询 /models，目录只作为服务列出的候选。若服务不提供功能元数据，按名称推测文字/生图/其他/待确认，不能据此保证权限、余额或实际调用成功。管理员可手动登记模型及文字/生图类型。查询失败保留原目录；查询成功也保留此前手动登记/现用模型，不擅自切换路由。本次查询不调用文字生成或图片生成接口。
 
@@ -30,3 +30,7 @@ Codex 模板中的 base_url、OPENAI_API_KEY、model、wire_api=responses 映射
 ## 新群接入配置助手
 
 默认模型新增独立onboarding选择，首次按当前机器人已登记的maibot-gpt / gpt-5.5初始化；找不到时保持未配置，不替换其他Key或聊天模型。可在站点更改，也可在向导本次选用其他文字模型。仅改变助手不会使群配置待确认；群文字/阶段模型继续各自设置。AI辅助只生成待人工采纳的配置建议，授权和真实群绑定由接入程序完成。详见[站点接入向导](group-onboarding-wizard.md)。
+
+## 多用户 Key 治理
+
+归属、私有/站点公用、申请审批、分配、额度和代理计量见 [API Key 治理](api-key-governance.md)。旧的运行端原始密钥快照改为75秒代理凭据，不再下发服务商Key；未配置模型不回退旧Key。

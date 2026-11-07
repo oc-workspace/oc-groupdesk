@@ -70,7 +70,7 @@ export async function processConversationJob(caller=callTextModel){
   const results:any[]=[];
   for(let start=0;start<job.input.length;start+=20){
    const batch=job.input.slice(start,start+20),context=job.input.slice(Math.max(0,start-2),start).map((r:any)=>({speaker:r.speaker,timestamp:r.timestamp,text:r.text}));
-   const response=await caller(c,job.model_id,analysisSystem,JSON.stringify({context,items:batch.map((r:any,id:number)=>({id,speaker:r.speaker,timestamp:r.timestamp,text:r.text,truncated:r.truncated}))}),{timeoutMs:90000,maxOutputTokens:6000,lowThinking:true,jsonOutput:true});
+   const response=await caller(c,job.model_id,analysisSystem,JSON.stringify({context,items:batch.map((r:any,id:number)=>({id,speaker:r.speaker,timestamp:r.timestamp,text:r.text,truncated:r.truncated}))}),{feature:'analysis',timeoutMs:90000,maxOutputTokens:6000,lowThinking:true,jsonOutput:true});
    results.push(...parseJudgements(generationText(response,c.client_type),batch.length));
   }
   await transaction(async db=>{
