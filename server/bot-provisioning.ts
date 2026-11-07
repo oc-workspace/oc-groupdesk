@@ -8,12 +8,12 @@ import {sealControlSecret} from './bot-secrets.js';
 import {requireCondition} from './security.js';
 export function sqlIdentifier(value:string){requireCondition(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value),503,'数据库标识无效');return '"'+value+'"';}
 function quote(value:string){return "'"+value.replaceAll("'","''")+"'";}
-export async function createBot(input:{name:string;wechat_id:string;host_label:string;notes:string},actor:string){
+export async function createBot(input:{name:string;wechat_id:string;host_label:string;notes:string},actor:string,ownerId?:string){
  const id=randomUUID(),namespace=id.replaceAll('-',''),database='gdb_'+namespace,role='gdr_'+namespace,password=randomBytes(32).toString('hex'),modelKey=randomBytes(32).toString('hex');
  const client=await controlPool.connect();let roleCreated=false,databaseCreated=false,inserted=false;
  try{
   await client.query('SELECT pg_advisory_lock(78511965)');
-  await client.query("INSERT INTO managed_bots(id,name,wechat_id,host_label,notes,state,database_state,db_name,db_role,db_password_ciphertext,model_key_ciphertext,data_namespace) VALUES($1,$2,$3,$4,$5,'paused','provisioning',$6,$7,$8,$9,$10)",[id,input.name,input.wechat_id,input.host_label,input.notes,database,role,sealControlSecret(password),sealControlSecret(modelKey),namespace]);inserted=true;
+  await client.query("INSERT INTO managed_bots(id,name,wechat_id,host_label,notes,state,database_state,db_name,db_role,db_password_ciphertext,model_key_ciphertext,data_namespace,owner_user_id,created_by_user_id) VALUES($1,$2,$3,$4,$5,'paused','provisioning',$6,$7,$8,$9,$10,$11,$11)",[id,input.name,input.wechat_id,input.host_label,input.notes,database,role,sealControlSecret(password),sealControlSecret(modelKey),namespace,ownerId||(await client.query("SELECT id FROM admins WHERE username=$1",[actor])).rows[0]?.id||null]);inserted=true;
   await client.query(`CREATE ROLE ${sqlIdentifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT PASSWORD ${quote(password)}`);roleCreated=true;
   await client.query(`CREATE DATABASE ${sqlIdentifier(database)} OWNER ${sqlIdentifier(role)} TEMPLATE template0`);databaseCreated=true;
   await client.query(`REVOKE ALL ON DATABASE ${sqlIdentifier(database)} FROM PUBLIC`);
