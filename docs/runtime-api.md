@@ -65,4 +65,4 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 
 ### 2026-11-03：Replyer 超时与话题长度
 
-当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见 `group-timeouts.md` 和 `topic-policy-guide.md`。
+当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见[回复控制与等待时间](reply-controls.md)和[话题策略](topic-policy-guide.md)。
