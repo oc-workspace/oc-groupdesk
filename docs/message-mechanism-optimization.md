@@ -21,7 +21,7 @@
 | 过期与恢复 | 点名请求、主动插话、总结和恢复任务各有契约 | 等待不延长原截止时间；发送前复核最新上下文 |
 | 多机器人 | 不同微信账号的资料、队列、密钥和账本独立 | 同账号跨进程协调，不把不同账号的内容或记忆合并 |
 
-详细现状见[群内回复控制](reply-controls.md)、[按群配置等待时间](group-timeouts.md)、[多机器人管理](multi-bot-management.md)和[读取器运行说明](../integration/chatlog-reader/README.md)。
+详细现状见[群内回复控制](reply-controls.md)、[按群配置等待时间](reply-controls.md)、[多机器人管理](multi-bot-management.md)和[读取器运行说明](../integration/chatlog-reader/README.md)。
 
 ## 一次回复的处理流程
 
@@ -157,7 +157,7 @@ eligible_at = max(last_guard_at + G, reply_not_before, existing_business_due)
 
 提高间隔时，所有尚未触发的发送立即遵守新下限；降低间隔不得撤销已持久预留的保护时间。已有任务的绝对截止不变。新字段缺失时保持旧配置兼容，不能静默启用一个管理员尚未选定的间隔。
 
-点名任务继续遵守现有按群总有效期，默认 420 秒；普通主动插话继续保留 90 秒时效。总结、恢复补答及接入问候沿用各自任务契约；迎新特色已有的 15 至 40 秒准备等待也不能绕过账号出口。现有模型重试、预算和致歉规则见[等待时间说明](group-timeouts.md)，迎新细节见[新人欢迎](newcomer-welcome.md)。
+点名任务继续遵守现有按群总有效期，默认 420 秒；普通主动插话继续保留 90 秒时效。总结、恢复补答及接入问候沿用各自任务契约；迎新特色已有的 15 至 40 秒准备等待也不能绕过账号出口。现有模型重试、预算和致歉规则见[等待时间说明](reply-controls.md)，迎新细节见[新人欢迎](persona-composition.md)。
 
 ## 可观测性与验收
 
@@ -198,9 +198,9 @@ eligible_at = max(last_guard_at + G, reply_not_before, existing_business_due)
 ## 相关文档
 
 - [群内回复控制](reply-controls.md)
-- [按群配置等待时间](group-timeouts.md)
+- [按群配置等待时间](reply-controls.md)
 - [多机器人管理](multi-bot-management.md)
-- [新人欢迎](newcomer-welcome.md)
+- [新人欢迎](persona-composition.md)
 - [群总结](group-summaries.md)
 - [Chatlog Reader](../integration/chatlog-reader/README.md)
 - [Linux 读取改进与原生发送评估](linux-native-transport-evaluation.md)
