@@ -16,6 +16,7 @@
 | 每日摸鱼、多语言命令、积分、奖品与兑换 | [群互动](group-interactions.md) |
 | 认真/玩笑讨论统计与按群接梗 | [讨论与接梗](conversation-insights.md) |
 | 连续回复、免点名跟进、频率与补答 | [回复控制](reply-controls.md) |
+| 消息合并、账号跨群发送间隔、排队与人工接管 | [消息机制优化方案](message-mechanism-optimization.md)，设计待实施 |
 | Planner/Replyer/API超时、请求时效与延迟致歉 | [等待时间](group-timeouts.md) |
 | 群总结、预览、定时与单次预约、自适应批次 | [群聊总结](group-summaries.md) |
 | 知识库、文件处理与私聊成员核验 | [知识与权限](knowledge-and-access.md) |
