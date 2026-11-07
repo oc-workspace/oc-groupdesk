@@ -6,6 +6,7 @@ import pg from 'pg';
 import {readFile,mkdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pool,controlPool,closeBusinessPools} from '../server/db.js';
+import {initializeUserOwners} from '../server/user-access.js';
 import {migrate} from '../server/migrate.js';
 import {createApp} from '../server/app.js';
 import {ensureLegacyIsolation,sqlIdentifier} from '../server/bot-provisioning.js';
@@ -20,11 +21,11 @@ const legacyInstance=randomUUID(),ai=randomUUID(),bi=randomUUID();
 async function req(path:string,method='GET',body?:any,botId?:string,botToken?:string){const response=await fetch(url+'/api'+path,{method,headers:{...(botToken?{Authorization:'Bearer '+botToken}:{Cookie:cookie,'X-CSRF-Token':csrf}),...(botId?{'X-GroupDesk-Bot':botId}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json(),response};}
 async function directory(){return (await req('/bots')).data;}
 async function record(id:string){return (await directory()).bots.find((x:any)=>x.id===id);}
-async function create(name:string){const r=await req('/bots','POST',{name,wechat_id:'wx_'+name,host_label:'synthetic-host',notes:''});assert.equal(r.status,201,JSON.stringify(r.data));created.push(r.data.id);return record(r.data.id);}
+async function create(name:string){const r=await req('/bots','POST',{name,wechat_id:'wx_'+name,host_label:'synthetic-host',notes:''});assert.equal(r.status,201,JSON.stringify(r.data));created.push(r.data.id);/* These fixtures represent already provisioned legacy connections; new wizard contracts are tested separately. */await controlPool.query('DELETE FROM managed_bot_onboarding WHERE bot_id=$1',[r.data.id]);return record(r.data.id);}
 async function tokenFor(bot:any){const r=await req('/bots/'+bot.id+'/connection-token','POST',{revision:(await record(bot.id)).revision});assert.equal(r.status,200,JSON.stringify(r.data));return r.data.token;}
 async function heartbeat(id:string,token:string,extra:any={}){const row=await record(id);return req('/runtime/bot-heartbeat','POST',{contract:1,bot_id:id,instance_id:id===legacyBotId?legacyInstance:id===a.id?ai:bi,account_fingerprint:(id===legacyBotId?'a':id===a.id?'b':'c').repeat(64),revision:row.revision,wechat_connected:true,reader_connected:true,maibot_connected:true,sender_queue_depth:0,active_turns:0,send_inflight:false,stopped:row.state!=='active',cutover_generation:row.activation_generation,local_ready:true,...extra},undefined,token);}
 before(async()=>{
- await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await ensureLegacyIsolation();
+ await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await ensureLegacyIsolation();await initializeUserOwners();
  server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));url='http://127.0.0.1:'+(server.address() as any).port;
  const login=await req('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD});cookie=login.response.headers.get('set-cookie')!.split(';')[0];csrf=login.data.csrf;
 });
