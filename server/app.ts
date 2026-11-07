@@ -32,6 +32,8 @@ import {registerConversationAdmin} from './conversation-insights.js';
 import {registerTopicDraftAdmin} from './topic-drafting.js';
 import type {callTextModel} from './model-generation.js';
 import {registerOnboardingAdmin,registerOnboardingRuntime} from './group-onboarding.js';
+import {registerKeyVault} from './key-vault-api.js';
+import {registerModelProxy} from './model-proxy.js';
 import {registerModelAdmin} from './models-api.js';
 import {registerRuntimeHealth} from './runtime-health.js';
 import {registerInteractionAdmin} from './interactions/admin-api.js';
@@ -70,7 +72,7 @@ async function bumpGroups(db:Pick<typeof pool,'query'>,topicId?:string,kbId?:str
   if(topicId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_topics WHERE topic_id=$1)',[topicId]);
   if(kbId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_knowledge WHERE kb_id=$1)',[kbId]);
 }
-export function createApp(options:{githubRequest?:GithubRequest;topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
+export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:import('./model-transport.js').ModelTransport;topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
   const app=express();
   app.disable('x-powered-by');
   // Direct loopback or explicitly configured proxy only; never trust arbitrary X-Forwarded-For.
@@ -81,6 +83,7 @@ export function createApp(options:{githubRequest?:GithubRequest;topicDraftCaller
   app.get('/health',async(_req,res)=>{await pool.query('SELECT 1');res.json({status:'ok',service:'groupdesk',version:'0.1.0'});});
   app.use('/api',rateLimit({windowMs:60000,limit:240,standardHeaders:'draft-7',legacyHeaders:false}));
   app.use('/api/auth/login',rateLimit({windowMs:15*60000,limit:12,skipSuccessfulRequests:true,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'登录尝试过多，请稍后再试'}}));
+  registerModelProxy(app,options.modelTransport);
   registerGithubAuth(app,options.githubRequest);
   app.post('/api/auth/login',async(req,res)=>{
     if(req.headers.origin&&req.headers.origin!==(process.env.PUBLIC_ORIGIN||'http://localhost:3110'))throw new HttpError(403,'请求来源不匹配');
@@ -152,6 +155,7 @@ export function createApp(options:{githubRequest?:GithubRequest;topicDraftCaller
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
   });
   registerUserAdmin(app);
+  registerKeyVault(app);
   registerSharedResources(app);
   registerBotAdmin(app);
   app.use('/api',async(req,res,next)=>{

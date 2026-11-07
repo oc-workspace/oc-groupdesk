@@ -1,3 +1,6 @@
+import {keyForAlias,updateKeyAliases} from './key-vault.js';
+import {controlTransaction} from './db.js';
+import {sealControlSecret} from './bot-secrets.js';
 import type express from 'express';
 import {z} from 'zod';
 import {pool,transaction,audit} from './db.js';
@@ -14,32 +17,16 @@ export function registerModelAdmin(app:express.Express){
   });
   app.put('/api/model-credentials/:id',async(req,res)=>{
     const id=z.uuid().parse(req.params.id),body=credentialBody.omit({api_key:true,client_type:true}).extend({client_type:clientType.optional(),api_key:keyValue.optional(),revision:z.number().int().positive(),enabled:z.boolean()}).parse(req.body);
-    const endpoint=baseUrl(body.base_url);
-    await transaction(async db=>{
-      const current=(await db.query('SELECT revision,base_url,client_type FROM model_credentials WHERE id=$1 FOR UPDATE',[id])).rows[0];
-      requireCondition(current?.revision===body.revision,409,'API Key 已被其他操作更新，请重新载入');
-      requireCondition(endpoint===current.base_url||body.api_key,400,'更换 API 地址时请重新输入密钥');
-      const protocol=body.client_type||current.client_type;
-      await db.query('UPDATE model_credentials SET name=$1,base_url=$2,enabled=$3,revision=revision+1,catalog_error=NULL,client_type=$5 WHERE id=$4',[body.name,endpoint,body.enabled,id,protocol]);
-      if(body.api_key)await db.query('UPDATE model_credentials SET key_ciphertext=$1,key_hint=$2,key_digest=$3,catalog_synced_at=NULL WHERE id=$4',[sealKey(body.api_key),'••••'+body.api_key.slice(-4),digest(body.api_key),id]);
-      if(endpoint!==current.base_url||body.api_key||protocol!==current.client_type){await db.query('UPDATE credential_models SET listed=false WHERE credential_id=$1',[id]);await db.query('UPDATE model_credentials SET catalog_synced_at=NULL WHERE id=$1',[id]);}
-      const defaults=(await db.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes;
-      const groups=(await db.query('SELECT id,model_routes FROM groups')).rows;
-      const affected=groups.filter(g=>{const r=configuredModelRoutes(g.model_routes,defaults);return [r.text,r.image,...Object.values(r.stages)].some(v=>v.selection?.credential_id===id);}).map(g=>g.id);
-      await db.query(`UPDATE groups g SET revision=revision+1 WHERE id=ANY($2::uuid[]) OR EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND (b.config->>'enabled')::boolean AND b.config->'model_route'->>'mode'='custom' AND b.config->'model_route'->>'credential_id'=$1) OR EXISTS(SELECT 1 FROM summary_settings s WHERE s.group_id=g.id AND s.config->'model_route'->>'mode'='custom' AND s.config->'model_route'->>'credential_id'=$1)`,[id,affected]);
-      await audit(req.admin!.username,'model.credential_updated',id,{rotated:!!body.api_key,enabled:body.enabled},db);
-    });res.json({ok:true});
+    const endpoint=baseUrl(body.base_url),k=await keyForAlias(id);
+    requireCondition(k.owner_user_id===req.admin!.id,403,'只能更换自己的 Key；管理员维护其他 Key 请到 Key 管理');
+    requireCondition(k.revision===body.revision,409,'Key 已更新，请刷新');requireCondition(endpoint===k.base_url||body.api_key,400,'更换地址时请重新填写 Key');
+    const updated=await controlTransaction(async db=>{const lock=(await db.query('SELECT revision FROM managed_model_keys WHERE id=$1 FOR UPDATE',[k.id])).rows[0];requireCondition(lock.revision===body.revision,409,'Key 已更新');return (await db.query('UPDATE managed_model_keys SET name=$2,base_url=$3,client_type=$4,enabled=$5,secret_ciphertext=COALESCE($6,secret_ciphertext),key_hint=COALESCE($7,key_hint),key_digest=COALESCE($8,key_digest),revision=revision+1 WHERE id=$1 RETURNING *',[k.id,body.name,endpoint,body.client_type||k.client_type,body.enabled,body.api_key?sealControlSecret(body.api_key):null,body.api_key?'••••••'+body.api_key.slice(-6):null,body.api_key?digest(body.api_key):null])).rows[0];});await updateKeyAliases(updated);res.json({ok:true});
   });
   app.post('/api/model-credentials/:id/refresh',async(req,res)=>res.json(await refreshCatalog(z.uuid().parse(req.params.id),req.admin!.username)));
   app.post('/api/model-credentials/:id/models',async(req,res)=>{
     const id=z.uuid().parse(req.params.id),body=z.object({model_id:modelId,capability:z.enum(['text','image'])}).parse(req.body);
-    await transaction(async db=>{
-      requireCondition((await db.query('SELECT 1 FROM model_credentials WHERE id=$1 FOR UPDATE',[id])).rowCount,404,'API Key 不存在');
-      const existing=(await db.query('SELECT capability FROM credential_models WHERE credential_id=$1 AND model_id=$2',[id,body.model_id])).rows[0];
-      requireCondition(!existing||existing.capability===body.capability||['unknown','other'].includes(existing.capability),400,'已分类的模型请使用匹配的功能类型');
-      await db.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source) VALUES($1,$2,$2,$3,'manual') ON CONFLICT(credential_id,model_id) DO UPDATE SET capability=excluded.capability,source='manual'",[id,body.model_id,body.capability]);
-      await audit(req.admin!.username,'model.manually_registered',id,{model_id:body.model_id,capability:body.capability},db);
-    });res.status(201).json({ok:true});
+    const k=await keyForAlias(id);requireCondition(k.owner_user_id===req.admin!.id||req.admin!.role==='super_admin',403,'无权维护此 Key');
+    await controlTransaction(async db=>{const current=(await db.query('SELECT * FROM managed_model_keys WHERE id=$1 FOR UPDATE',[k.id])).rows[0];const models=current.models.filter((m:any)=>m.model_id!==body.model_id);models.push({...body,display_name:body.model_id,source:'manual',listed:false});await db.query('UPDATE managed_model_keys SET models=$2 WHERE id=$1',[k.id,JSON.stringify(models)]);});await (await import('./key-vault.js')).syncAliases();res.status(201).json({ok:true});
   });
   app.put('/api/model-defaults',async(req,res)=>{
     const body=z.object({revision:z.number().int().positive(),routes:defaultRoutes}).parse(req.body);

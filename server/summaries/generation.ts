@@ -58,7 +58,7 @@ export async function processSummary(caller=callTextModel,signal?:AbortSignal){
    const checked=await valid(job);const latest=await route(checked.g,job.config);
    requireCondition(latest.available&&latest.credential_id===current.credential_id&&latest.credential_revision===current.credential_revision&&latest.model_id===current.model_id,409,'模型配置已变化，请重新创建任务');
    await update({});requireCondition(input.length<=budget,400,'本次模型材料超过所设预算');
-   const response=await caller(credential,current.model_id,rules,input,{timeoutMs:Math.min(600000,deadline-Date.now()),maxOutputTokens:partial?3072:8192,lowThinking:true,signal:combined});combined.throwIfAborted();
+   const response=await caller(credential,current.model_id,rules,input,{feature:'summary',groupId:g.id,timeoutMs:Math.min(600000,deadline-Date.now()),maxOutputTokens:partial?3072:8192,lowThinking:true,signal:combined});combined.throwIfAborted();
    return response;
   };
   let response:any,modelBatchCount=1;

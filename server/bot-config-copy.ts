@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {pool,transaction,controlTransaction,audit} from './db.js';
 import {withBot} from './bot-workspaces.js';
-import {openKey,sealKey} from './model-security.js';
+import {keyForAlias} from './key-vault.js';
 import {requireCondition} from './security.js';
 
 // Operator-only, explicitly requested configuration copy. No HTTP endpoint.
@@ -25,7 +25,7 @@ export async function copyBotConfiguration(source:string,target:string,sourceGro
    requireCondition(group,404,'源群不存在');
    const topics=(await db.query('SELECT * FROM topics ORDER BY id')).rows;
    const credentials=(await db.query('SELECT * FROM model_credentials ORDER BY id')).rows;
-   for(const c of credentials){c.clearKey=openKey(c.key_ciphertext);delete c.key_ciphertext;}
+   for(const c of credentials){const key=await keyForAlias(c.id);c.vault_key_id=key.id;delete c.key_ciphertext;}
    return {group,topics,credentials,
     models:(await db.query('SELECT * FROM credential_models')).rows,
     defaults:(await db.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes,
@@ -53,7 +53,7 @@ export async function copyBotConfiguration(source:string,target:string,sourceGro
     }
     for(const c of snapshot.credentials){
      const id=randomUUID();ids.set(c.id,id);
-     await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest,enabled,client_type,catalog_synced_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,c.name,c.base_url,sealKey(c.clearKey),c.key_hint,c.key_digest,c.enabled,c.client_type,c.catalog_synced_at]);
+     await db.query('INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest,enabled,client_type,catalog_synced_at,vault_key_id) VALUES($1,$2,$3,\'vault:v1\',$4,$5,$6,$7,$8,$9)',[id,c.name,c.base_url,c.key_hint,c.key_digest,c.enabled,c.client_type,c.catalog_synced_at,c.vault_key_id]);
     }
     for(const m of snapshot.models)await db.query('INSERT INTO credential_models(credential_id,model_id,display_name,capability,source,listed) VALUES($1,$2,$3,$4,$5,$6)',[ids.get(m.credential_id),m.model_id,m.display_name,m.capability,m.source,m.listed]);
     await db.query('UPDATE model_settings SET routes=$1,revision=revision+1 WHERE singleton=true',[remapConfiguration(snapshot.defaults,ids)]);

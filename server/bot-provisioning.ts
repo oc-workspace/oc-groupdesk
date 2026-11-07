@@ -28,11 +28,11 @@ export async function createBot(input:{name:string;wechat_id:string;host_label:s
   }finally{await business.end();}
   await client.query("UPDATE managed_bots SET database_state='ready' WHERE id=$1",[id]);
   await audit(actor,'bot.created',id,{isolated_database:true},controlPool);return id;
- }catch{
+ }catch(error){
   if(inserted)await client.query("UPDATE managed_bots SET database_state='failed',error='业务空间初始化失败，请检查服务权限；未启用此机器人' WHERE id=$1",[id]);
   // Keep a failed registration visible. Newly created empty databases may be
   // investigated by the operator; never delete a database as error recovery.
-  throw new Error('机器人业务空间初始化失败，已保持停用；请检查运行记录');
+  throw new Error('机器人业务空间初始化失败，已保持停用；请检查运行记录',{cause:error});
  }finally{await client.query('SELECT pg_advisory_unlock(78511965)');client.release();}
 }
 export async function ensureLegacyIsolation(){

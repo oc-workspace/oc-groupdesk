@@ -7,7 +7,7 @@
 | 群接入、群标识与配置确认 | [站点新群接入向导](group-onboarding-wizard.md)、[微信群接入](wechat-group-onboarding.md)、[运行接口](runtime-api.md) |
 | 话题库、群话题、AI Prompt助填、讨论深度与回复长度 | [话题策略](topic-policy-guide.md) |
 | 输出语言、AI身份与角色扮演 | [身份策略](identity-policy.md)、[话题策略](topic-policy-guide.md) |
-| API Key、模型目录与按群模型选择 | [模型路由](model-routing.md) |
+| API Key、私有/公用授权、费用与按群模型选择 | [模型路由](model-routing.md)、[Key治理](api-key-governance.md) |
 | Planner、Replyer、辅助任务和总结分阶段模型 | [阶段模型](model-stages.md) |
 | 用户、GitHub登录、管理员审核、归属和资源共享 | [用户与权限](users-and-permissions.md) |
 | Persona素材、增量归档、按人提取与人工发布 | [Persona工作室](persona-studio.md) |

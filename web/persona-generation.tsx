@@ -13,7 +13,7 @@ export function PersonaGeneration({persona:p,busy,dirty,model,models,onModelChan
   <h3>从素材制作完整草稿</h3>
   <p className="hint">先选素材并填写目标，再选择模型制作，最后在下方校对完整 SKILL.md。保存设置只保存当前内容，不会自动生成。</p>
   {placeholder&&<p className="persona-template-note" role="status">当前编辑框是初始化模板。选中素材后，点击下方「制作完整草稿」才会生成完整内容。</p>}
-  <ModelChoice kind="text" value={model} onChange={onModelChange} data={models} prefix="制作 Persona"/>
+  <ModelChoice feature="persona" kind="text" value={model} onChange={onModelChange} data={models} prefix="制作 Persona"/>
   <p className="hint">点击制作会保存当前设置，并把抽样正文和已有草稿发送给所选模型服务，可能产生费用。按素材库分层选取最多500条、共10万字符，参考资料保留独立篇幅；同库重叠筛选会合并。完整资料仍保留。单次模型请求最多4分钟，这是 Skill 归纳，不是模型微调。</p>
   <div className="model-key-actions">
    <LoadingButton type="button" className="button primary" loading={active} disabled={busy||active||p.archived||!model?.credential_id||!model?.model_id||!p.dataset_ids.length} onClick={onGenerate}>{busy?'正在处理…':active?'完整草稿制作中':dirty?'保存设置并制作完整草稿':'制作完整草稿'}</LoadingButton>

@@ -39,7 +39,7 @@ export async function generateTopicDraft(input:TopicDraftInput,actor:string,call
  await validateSelection(body,'text');
  const credential=(await pool.query('SELECT id,revision,enabled,base_url,client_type,key_ciphertext FROM model_credentials WHERE id=$1',[body.credential_id])).rows[0];
  requireCondition(credential?.enabled,400,'所选 API Key 不可用');
- const response=await caller(credential,body.model_id,topicSystemPrompt,JSON.stringify({request:body.prompt,current_draft:body.current_draft||{}}),{timeoutMs:95000,maxOutputTokens:6000,signal,lowThinking:true});
+ const response=await caller(credential,body.model_id,topicSystemPrompt,JSON.stringify({request:body.prompt,current_draft:body.current_draft||{}}),{feature:'topic',timeoutMs:95000,maxOutputTokens:6000,signal,lowThinking:true});
  signal?.throwIfAborted();
  const current=(await pool.query('SELECT revision,enabled FROM model_credentials WHERE id=$1',[credential.id])).rows[0];
  requireCondition(current?.enabled&&current.revision===credential.revision,409,'生成期间 Key 配置已变化，原草稿已保留，请重新选择后生成');

@@ -33,7 +33,7 @@ test('public contracts show stage selections and never expose keys; private rout
  assert.equal(config.model_stage_routing_contract_version,1);assert.equal(config.model_routing.stages.planner.model_id,'model-1');assert.equal(config.model_routing.stages.replyer.model_id,'model-2');assert.equal(config.model_routing.stages.utils.model_id,'model-0');
  for(const key of secrets){assert(!JSON.stringify(config).includes(key));assert(!JSON.stringify((await req('/overview')).data).includes(key));}
  const privateRoutes=(await req('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision,credential_id:a},true)).data;
- assert.equal(privateRoutes.stage_routes.planner.api_key,secrets[1]);assert.equal(privateRoutes.stage_routes.replyer.api_key,secrets[2]);assert.equal(privateRoutes.stage_routes.utils.api_key,secrets[0]);assert.equal(privateRoutes.stage_routes.summary,undefined);
+ for(const [stage,id] of [['planner',b],['replyer',c],['utils',a]]){const route=privateRoutes.stage_routes[stage];assert(!secrets.includes(route.api_key));assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret(route.api_key)).alias,id);}assert.equal(privateRoutes.stage_routes.summary,undefined);
  assert.equal((await req('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision-1},true)).status,409);
 });
 test('stage contract requires an upgraded adapter before acknowledging application',async()=>{
@@ -61,7 +61,7 @@ test('rotating a stage-only key invalidates affected group revisions without exp
  for(const g of before)assert.equal(after.find((v:any)=>v.id===g.id).revision,g.revision+1);
  group=after.find((v:any)=>v.id===group.id);
  const response=(await req('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision},true)).data;
- assert.equal(response.stage_routes.replyer.api_key,'isolated-stage-rotated-key');assert(!JSON.stringify((await req('/logs')).data).includes('isolated-stage-rotated-key'));
+ assert.notEqual(response.stage_routes.replyer.api_key,'isolated-stage-rotated-key');assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret(response.stage_routes.replyer.api_key)).alias,c);assert(!JSON.stringify((await req('/logs')).data).includes('isolated-stage-rotated-key'));
 });
 test('invalid stage selections and image-generation models are rejected atomically',async()=>{
  const before=group.revision;

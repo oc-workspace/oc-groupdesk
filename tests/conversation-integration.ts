@@ -70,7 +70,7 @@ test('per-group recognition stays opt in and requires an adapter that applied it
  a=(await req('/groups/'+a.id,'PUT',{...a,policy:{...a.policy,conversation:{enabled:true,banter_replies:true,frequency:'low',instructions:'Synthetic rule'}}})).data;
  assert.equal((await req('/runtime/config/'+a.external_id,'GET',undefined,true)).data.conversation_policy_contract_version,1);
  const other=(await req('/runtime/config/'+b.external_id,'GET',undefined,true)).data;assert.equal(other.policy.conversation.enabled,false);assert.equal(other.conversation_policy_contract_version,undefined);
- const ack={group_id:a.id,revision:a.revision,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
+ const ack={group_id:a.id,revision:a.revision,model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);
  assert.equal((await req('/runtime/ack','POST',{...ack,conversation_policy_version:1},true)).status,200);
 });
 
@@ -82,7 +82,7 @@ test('reply limits are editable per group, persistent, validated and require exe
  current=saved.data;const fetched=await readGroup(a.id);assert.deepEqual(fetched.policy.conversation.reply_limits,limits);
  assert.deepEqual((await readGroup(b.id)).policy.conversation.reply_limits,oldB.policy.conversation.reply_limits);
  const runtime=(await req('/runtime/config/'+a.external_id,'GET',undefined,true)).data;assert.equal(runtime.reply_limits_contract_version,1);assert.deepEqual(runtime.policy.conversation.reply_limits,limits);
- const ack={group_id:a.id,revision:current.revision,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,conversation_policy_version:1};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);assert.equal((await req('/runtime/ack','POST',{...ack,reply_limits_version:1},true)).status,200);
+ const ack={group_id:a.id,revision:current.revision,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,conversation_policy_version:1};assert.equal((await req('/runtime/ack','POST',ack,true)).status,409);assert.equal((await req('/runtime/ack','POST',{...ack,model_routing_version:1,reply_limits_version:1},true)).status,200);
  const invalid=await req('/groups/'+a.id,'PUT',{...current,policy:{...current.policy,conversation:{...current.policy.conversation,reply_limits:{...limits,max_rounds:0}}}});assert.equal(invalid.status,400);
 });
 
