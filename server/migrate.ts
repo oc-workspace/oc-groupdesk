@@ -24,7 +24,7 @@ export async function migrate(options:{controlPlane?:boolean;bootstrapAdmin?:boo
     if(options.bootstrapAdmin!==false&&!(await db.query('SELECT 1 FROM admins LIMIT 1')).rowCount){
       const password=process.env.ADMIN_PASSWORD;
       if(!password||password.length<16)throw new Error('ADMIN_PASSWORD must contain at least 16 characters for initial setup');
-      await db.query('INSERT INTO admins(id,username,password_hash) VALUES($1,$2,$3)',[randomUUID(),process.env.ADMIN_USERNAME||'admin',passwordHash(password)]);
+      await db.query("INSERT INTO admins(id,username,password_hash,role) VALUES($1,$2,$3,'super_admin')",[randomUUID(),process.env.ADMIN_USERNAME||'admin',passwordHash(password)]);
       const topicData=[
         ['外语交流','练习英语、日语等外语表达，讨论学习方法。','根据成员水平解释，纠错温和，提供自然表达。','blue'],
         ['创业经营','讨论产品、经营、团队与商业经验。','区分事实与个人观点，提供具体可执行的分析。','violet'],

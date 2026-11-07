@@ -1,0 +1,186 @@
+{
+  "date": "2026-11-07",
+  "timezone": "Asia/Singapore",
+  "target_system": {
+    "os": "Ubuntu 24.04",
+    "architecture": "x86_64",
+    "wechat_version": "4.1.13.23",
+    "executable_format": "ELF"
+  },
+  "isolation": {
+    "test_image": "sha256:d438de562ac84a81491c0f7a42f33d8592adf9b722609846f8e631f54f18ff16",
+    "network": "none",
+    "user": "1000:1000",
+    "read_only": true,
+    "account_mounts": false,
+    "capabilities_added": false,
+    "memory_limit_mib": 256
+  },
+  "static": {
+    "scope": "static_public_elf_only",
+    "sha256": "2ca28ea56b1a400543d0128ebaf0b93f88172dd66dc0426d3d74fdb971eab959",
+    "build_id": "ce28c3471d532eeb1f136482eeb4d0bdfd59c06e",
+    "eh_table_entries": 359513,
+    "anchors": {
+      "send_text_message_failed: MessageManager is unavailable": {
+        "found": true,
+        "locations": [
+          {
+            "file_offset": "0xd7dfb6",
+            "rva": "0xd7dfb6"
+          }
+        ],
+        "references": [
+          {
+            "instruction_rva": "0x6f8fa98",
+            "string_rva": "0xd7dfd6",
+            "eh_start": "0x6f8f0d0",
+            "next_eh_start": "0x6f8fe90",
+            "objdump_verified": true
+          },
+          {
+            "instruction_rva": "0x6f8faa3",
+            "string_rva": "0xd7dfc6",
+            "eh_start": "0x6f8f0d0",
+            "next_eh_start": "0x6f8fe90",
+            "objdump_verified": true
+          },
+          {
+            "instruction_rva": "0x6f8faae",
+            "string_rva": "0xd7dfb6",
+            "eh_start": "0x6f8f0d0",
+            "next_eh_start": "0x6f8fe90",
+            "objdump_verified": true
+          }
+        ]
+      },
+      "Failed to send text message: ": {
+        "found": true,
+        "locations": [
+          {
+            "file_offset": "0xda230c",
+            "rva": "0xda230c"
+          }
+        ],
+        "references": [
+          {
+            "instruction_rva": "0x6f90b19",
+            "string_rva": "0xda230c",
+            "eh_start": "0x6f90740",
+            "next_eh_start": "0x6f90dd0",
+            "objdump_verified": true
+          }
+        ]
+      },
+      "image send failed: ": {
+        "found": true,
+        "locations": [
+          {
+            "file_offset": "0xeb5168",
+            "rva": "0xeb5168"
+          }
+        ],
+        "references": [
+          {
+            "instruction_rva": "0x82e27a8",
+            "string_rva": "0xeb5168",
+            "eh_start": "0x82e1f90",
+            "next_eh_start": "0x82e2cc0",
+            "objdump_verified": true
+          }
+        ]
+      },
+      "File message send failed: ": {
+        "found": true,
+        "locations": [
+          {
+            "file_offset": "0xf8742e",
+            "rva": "0xf8742e"
+          }
+        ],
+        "references": [
+          {
+            "instruction_rva": "0x82e3e32",
+            "string_rva": "0xf8742e",
+            "eh_start": "0x82e2cc0",
+            "next_eh_start": "0x82e46f0",
+            "objdump_verified": true
+          }
+        ]
+      }
+    },
+    "native_send_verified": false,
+    "objdump_verified_references": 6
+  },
+  "synthetic_bridge": {
+    "messages_sent": 0,
+    "native_send_verified": false,
+    "real_wechat_injection": false,
+    "results": {
+      "baseline_without_library_rejected": true,
+      "dlopen": {
+        "clean_exit_and_socket_cleanup": true,
+        "duplicate_not_executed": true,
+        "invalid_request_rejected": true,
+        "main_thread_callback": true,
+        "same_uid_unix_socket": true,
+        "socket_mode_0600": true
+      },
+      "preload": {
+        "clean_exit_and_socket_cleanup": true,
+        "duplicate_not_executed": true,
+        "invalid_request_rejected": true,
+        "main_thread_callback": true,
+        "same_uid_unix_socket": true,
+        "socket_mode_0600": true
+      }
+    },
+    "scope": "own_synthetic_host_only"
+  },
+  "real_process_attach_detach": {
+    "scope": "same_uid_seize_interrupt_detach_only",
+    "memory_read": false,
+    "memory_write": false,
+    "breakpoints": false,
+    "library_loaded": false,
+    "messages_sent": 0,
+    "attach_detach_verified": true,
+    "elapsed_ms": 2.152,
+    "tracer_cleared": true,
+    "process_state": "S",
+    "container_started_at_unchanged": true
+  },
+  "tool_guards": {
+    "unknown_fingerprint_rejected": true,
+    "missing_file_argument_rejected": true,
+    "real_wechat_execution": false
+  },
+  "contact_check": {
+    "user_authorized_recipient_uniquely_resolved": true,
+    "recipient_identifiers_included": false,
+    "keys_or_chat_content_exported": false
+  },
+  "research": {
+    "provider": "Exa",
+    "queries": 3,
+    "results_requested_per_query": 10,
+    "results_returned": 30,
+    "directions": [
+      "native Linux sending implementations",
+      "Linux in-process function dispatch"
+    ]
+  },
+  "readiness": {
+    "real_wechat_library_load_verified": false,
+    "native_send_signature_verified": false,
+    "native_send_verified": false,
+    "server_message_id_confirmed": false,
+    "messages_sent": 0,
+    "production_code_or_configuration_changed": false,
+    "wechat_restarted": false
+  },
+  "tools_sha256": {
+    "analyze_wechat_send_anchors.py": "dc558096862cc4a7d9a8d60307fe07583166dd0f6f6946141835eac25f30f1b5",
+    "probe_native_loader_fixture.py": "29ca5766eed0258c8b869a73d53a03e7d833ab07ac45fa8374f68a5101b1a206"
+  }
+}

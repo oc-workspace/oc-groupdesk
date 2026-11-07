@@ -1,3 +1,8 @@
+import {registerGithubAuth,registerUserAdmin,type GithubRequest} from './users.js';
+import {registerSharedResources} from './shared-resources.js';
+import {accessibleBot,workspaceAccess,initializeWorkspaceOwners} from './user-access.js';
+import {userStorage,currentUserId} from './user-context.js';
+import type {SessionUser} from '../shared/user-permissions.js';
 import {botStorage,legacyBotId,dataDirectory} from './bot-context.js';
 import {controlPool} from './db.js';
 import {botRecord,botScope,ensureAdminAlias} from './bot-workspaces.js';
@@ -35,7 +40,7 @@ import {runtimeInteractions} from './interactions/config.js';
 import {registerNotificationAdmin,registerNotificationRuntime} from './notifications.js';
 import {topicPolicySchema,groupPolicySchema,parseGroupPolicy,effectivePolicy,replyLanguage,policyInstructions,catalog,languageCode,effectiveTopics} from './policies.js';
 
-declare global {namespace Express {interface Request {admin?:{id:string;username:string;csrf:string};runtimeGroups?:string[];botId?:string;}}}
+declare global {namespace Express {interface Request {admin?:SessionUser;runtimeGroups?:string[];botId?:string;}}}
 const id=z.uuid();
 const text=(max:number)=>z.string().trim().max(max);
 const language=z.enum(['auto','zh-CN','en','ja','ko','fr','de','es']);
@@ -65,7 +70,7 @@ async function bumpGroups(db:Pick<typeof pool,'query'>,topicId?:string,kbId?:str
   if(topicId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_topics WHERE topic_id=$1)',[topicId]);
   if(kbId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_knowledge WHERE kb_id=$1)',[kbId]);
 }
-export function createApp(options:{topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
+export function createApp(options:{githubRequest?:GithubRequest;topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
   const app=express();
   app.disable('x-powered-by');
   // Direct loopback or explicitly configured proxy only; never trust arbitrary X-Forwarded-For.
@@ -76,10 +81,11 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   app.get('/health',async(_req,res)=>{await pool.query('SELECT 1');res.json({status:'ok',service:'groupdesk',version:'0.1.0'});});
   app.use('/api',rateLimit({windowMs:60000,limit:240,standardHeaders:'draft-7',legacyHeaders:false}));
   app.use('/api/auth/login',rateLimit({windowMs:15*60000,limit:12,skipSuccessfulRequests:true,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'登录尝试过多，请稍后再试'}}));
+  registerGithubAuth(app,options.githubRequest);
   app.post('/api/auth/login',async(req,res)=>{
     if(req.headers.origin&&req.headers.origin!==(process.env.PUBLIC_ORIGIN||'http://localhost:3110'))throw new HttpError(403,'请求来源不匹配');
     const body=z.object({username:text(80).min(1),password:z.string().max(200)}).parse(req.body);
-    const admin=(await pool.query('SELECT * FROM admins WHERE username=$1',[body.username])).rows[0];
+    const admin=(await pool.query("SELECT * FROM admins WHERE username=$1 AND github_id IS NULL AND status='active'",[body.username])).rows[0];
     // Always perform a scrypt operation, including nonexistent usernames.
     const valid=passwordValid(body.password,admin?.password_hash||passwordHash('unused-timing-value'));
     requireCondition(admin&&valid,401,'用户名或密码错误');
@@ -90,7 +96,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
       await audit(admin.username,'auth.login',null,{},db);
     });
     res.cookie(cookieName,session,{httpOnly:true,secure:secureCookies,sameSite:'strict',maxAge:12*3600000,path:'/'});
-    res.json({username:admin.username,csrf});
+    res.json({id:admin.id,username:admin.username,display_name:admin.display_name,github_login:admin.github_login,role:admin.role,permissions:admin.permissions,csrf});
   });
   app.use('/api/runtime',async(req,res,next)=>{
     const configured=process.env.BOT_API_TOKEN||'',supplied=req.headers.authorization||'';
@@ -119,21 +125,22 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   app.use('/api',async(req,res,next)=>{
     const session=req.cookies[cookieName];
     if(!session)return res.status(401).json({error:'请先登录'});
-    const found=(await controlPool.query('SELECT a.id,a.username,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now()',[digest(session)])).rows[0];
+    const found=(await controlPool.query("SELECT a.id,a.username,a.display_name,a.github_login,a.role,a.permissions,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.status='active'",[digest(session)])).rows[0];
     if(!found)return res.status(401).json({error:'登录已过期'});
     req.admin=found;
     if(!['GET','HEAD','OPTIONS'].includes(req.method)){
       if(!secureEqual(req.headers['x-csrf-token']?.toString()||'',found.csrf))return res.status(403).json({error:'请求校验失败，请刷新页面'});
       if(req.headers.origin&&req.headers.origin!==(process.env.PUBLIC_ORIGIN||'http://localhost:3110'))return res.status(403).json({error:'请求来源不匹配'});
     }
-    next();
+    userStorage.run(found,()=>next());
   });
-  app.get('/api/auth/me',(req,res)=>res.json({username:req.admin!.username,csrf:req.admin!.csrf}));
+  app.get('/api/auth/me',(req,res)=>res.json(req.admin!));
   app.post('/api/auth/logout',async(req,res)=>{
     await pool.query('DELETE FROM sessions WHERE token_hash=$1',[digest(req.cookies[cookieName])]);
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
   });
   app.post('/api/auth/password',async(req,res)=>{
+    requireCondition(!req.admin!.github_login,400,'GitHub 账号请在 GitHub 管理登录凭据');
     const body=z.object({current:z.string().max(200),password:z.string().min(16).max(200)}).parse(req.body);
     const admin=(await pool.query('SELECT password_hash FROM admins WHERE id=$1',[req.admin!.id])).rows[0];
     requireCondition(passwordValid(body.current,admin.password_hash),403,'当前密码不正确');
@@ -144,14 +151,17 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
     });
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
   });
+  registerUserAdmin(app);
+  registerSharedResources(app);
   registerBotAdmin(app);
   app.use('/api',async(req,res,next)=>{
-    if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/'))return next();
+    if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/')||req.path==='/users'||req.path.startsWith('/users/')||req.path.startsWith('/shared-resources'))return next();
     const selected=req.headers['x-groupdesk-bot'];
-    const botId=selected===undefined?legacyBotId:z.uuid().parse(selected);
-    const record=await botRecord(botId);requireCondition(record,404,'机器人不存在');requireCondition(record.state!=='archived',409,'机器人已归档，请先在机器人管理恢复');
+    const fallback=req.admin!.role==='super_admin'?legacyBotId:(await controlPool.query("SELECT id FROM managed_bots WHERE owner_user_id=$1 AND state<>'archived' ORDER BY created_at,id LIMIT 1",[req.admin!.id])).rows[0]?.id;
+    const botId=selected===undefined?fallback:z.uuid().parse(selected);requireCondition(botId,404,'请联系管理员分配机器人');
+    const record=await accessibleBot(req.admin!,botId);requireCondition(record.state!=='archived',409,'机器人已归档，请先在机器人管理恢复');
     const scope=await botScope(botId);req.botId=botId;
-    return botStorage.run(scope,async()=>{await ensureAdminAlias(req.admin!);next();});
+    return botStorage.run(scope,async()=>{await ensureAdminAlias(req.admin!);await initializeWorkspaceOwners(record.owner_user_id);await workspaceAccess(req,res,next);});
   });
   app.get('/api/overview',async(_req,res)=>{
     const groups=(await pool.query('SELECT * FROM groups ORDER BY created_at,id')).rows;
@@ -175,7 +185,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   app.post('/api/groups',async(req,res)=>{
     const body=z.object({name:text(120).min(1)}).parse(req.body),groupId=randomUUID();
     await transaction(async db=>{
-      await db.query('INSERT INTO groups(id,name) VALUES($1,$2)',[groupId,body.name]);
+      await db.query('INSERT INTO groups(id,name,created_by_user_id) VALUES($1,$2,$3)',[groupId,body.name,currentUserId()]);
       await audit(req.admin!.username,'group.created',groupId,{},db);
     });
     res.status(201).json(await groupDetail(groupId));
@@ -230,7 +240,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
           requireCondition(body.expected[item.key]===current.revision,409,'话题已变化，请重新查看模板差异');
           await db.query('UPDATE topics SET name=$1,description=$2,instructions=$3,color=$4,policy=$5,catalog_key=$6,catalog_version=$7,catalog_hash=$8,revision=revision+1 WHERE id=$9',[item.name,item.description,item.instructions,item.color,item.policy,item.key,item.version,item.hash,current.id]);
           await bumpGroups(db,current.id);
-        }else await db.query('INSERT INTO topics(id,name,description,instructions,color,policy,catalog_key,catalog_version,catalog_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),item.name,item.description,item.instructions,item.color,item.policy,item.key,item.version,item.hash]);
+        }else await db.query('INSERT INTO topics(id,name,description,instructions,color,policy,catalog_key,catalog_version,catalog_hash,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[randomUUID(),item.name,item.description,item.instructions,item.color,item.policy,item.key,item.version,item.hash,currentUserId()]);
       }
       await audit(req.admin!.username,'catalog.imported',null,{keys:body.keys,replace:body.replace},db);
     });
@@ -239,7 +249,7 @@ export function createApp(options:{topicDraftCaller?:typeof callTextModel;intera
   app.post('/api/topics',async(req,res)=>{
     const body=topicSchema.parse(req.body),topicId=randomUUID();
     await transaction(async db=>{
-      await db.query('INSERT INTO topics(id,name,description,instructions,color,policy) VALUES($1,$2,$3,$4,$5,$6)',[topicId,body.name,body.description,body.instructions,body.color,body.policy||topicPolicySchema.parse({})]);
+      await db.query('INSERT INTO topics(id,name,description,instructions,color,policy,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[topicId,body.name,body.description,body.instructions,body.color,body.policy||topicPolicySchema.parse({}),currentUserId()]);
       await audit(req.admin!.username,'topic.created',topicId,{},db);
     });
     res.status(201).json((await pool.query('SELECT * FROM topics WHERE id=$1',[topicId])).rows[0]);
@@ -487,7 +497,8 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     const group=(await pool.query('SELECT id FROM groups WHERE external_id=$1',[text(200).min(1).parse(req.params.externalId)])).rows[0];
     requireCondition(group,404,'群未绑定');
     const config=await groupDetail(group.id);
-    config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows);
+    config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows).map(({created_by_user_id,visibility,audience_user_ids,source_resource,...topic})=>topic);
+    delete config.created_by_user_id;
     config.policy_contract_version=1;
     config.timeout_policy_contract_version=3;
     if(config.topics.some((t:any)=>t.policy.max_reply_chars!=null))config.topic_reply_length_contract_version=1;

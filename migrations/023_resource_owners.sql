@@ -1,0 +1,11 @@
+ALTER TABLE topics ADD COLUMN created_by_user_id uuid;
+ALTER TABLE topics ADD COLUMN visibility text NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','common','selected'));
+ALTER TABLE topics ADD COLUMN audience_user_ids uuid[] NOT NULL DEFAULT '{}';
+ALTER TABLE topics ADD COLUMN source_resource jsonb;
+ALTER TABLE personas ADD COLUMN created_by_user_id uuid;
+ALTER TABLE personas ADD COLUMN visibility text NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','common','selected'));
+ALTER TABLE personas ADD COLUMN audience_user_ids uuid[] NOT NULL DEFAULT '{}';
+ALTER TABLE personas ADD COLUMN source_resource jsonb;
+ALTER TABLE groups ADD COLUMN created_by_user_id uuid;
+CREATE INDEX ON topics(created_by_user_id);
+CREATE INDEX ON personas(created_by_user_id);

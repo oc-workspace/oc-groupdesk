@@ -1,3 +1,4 @@
+import {currentUserId} from './user-context.js';
 import {botIdentityBundle} from './bot-identity.js';
 import {effectivePolicy} from './policies.js';
 import {isInitialPersonaDraft} from '../shared/persona-editor.js';
@@ -86,7 +87,7 @@ export function registerPersonaAdmin(app:express.Express){
  });
  app.post('/api/personas',async(req,res)=>{
   const b=personaBody.omit({draft_skill:true}).extend({skill_name:skillName}).parse(req.body),id=randomUUID();
-  await pool.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,b.name,b.skill_name,b.description,b.goal,b.dataset_ids,makeSkill(b.skill_name,b.description||b.name,'# '+b.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。'),b.kind||'base']);
+  await pool.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill,kind,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,b.name,b.skill_name,b.description,b.goal,b.dataset_ids,makeSkill(b.skill_name,b.description||b.name,'# '+b.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。'),b.kind||'base',currentUserId()]);
   await audit(req.admin!.username,'persona.created',id);res.status(201).json({id});
  });
  app.get('/api/personas/:id',async(req,res)=>{

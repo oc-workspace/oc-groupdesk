@@ -1,3 +1,4 @@
+import {currentUserId} from './user-context.js';
 import type express from 'express';
 import {randomUUID} from 'node:crypto';
 import {mkdir,writeFile,unlink} from 'node:fs/promises';
@@ -55,8 +56,8 @@ export async function importResource(id:string,body:z.infer<typeof resourceImpor
    }}
    await db.query('INSERT INTO persona_datasets(id,collection_id,name,sender_ids) VALUES($1,$2,$3,$4)',[datasetId,collectionId,entry.name+' · 公开来源资料',[]]);
    const provenance={method:'public-resource-draft',resource_source:{catalog:personaResourceCatalog.source,catalog_commit:personaResourceCatalog.commit,catalog_entry_origin:entry.origin||'awesome-persona-distill-skills',reviewed_source_commit:entry.reviewed_commit||null,...s},source:{repository:entry.url,commit:s.commit,path:s.path,license:s.license}};
-   if(personaId)await db.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill,draft_provenance,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-    [personaId,body.name,body.skill_name,entry.description.slice(0,500),body.goal||'根据公开参考资料提炼可独立使用的表达与思考方式；保留来源许可，删除外部工具依赖。参考人物不是机器人身份，本群称呼和点名配置优先。',[datasetId],makeSkill(body.skill_name,entry.description.slice(0,500),'# '+body.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。'),provenance,body.kind]);
+   if(personaId)await db.query('INSERT INTO personas(id,name,skill_name,description,goal,dataset_ids,draft_skill,draft_provenance,kind,created_by_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [personaId,body.name,body.skill_name,entry.description.slice(0,500),body.goal||'根据公开参考资料提炼可独立使用的表达与思考方式；保留来源许可，删除外部工具依赖。参考人物不是机器人身份，本群称呼和点名配置优先。',[datasetId],makeSkill(body.skill_name,entry.description.slice(0,500),'# '+body.name+'\n\n在这里编写适用场景、表达方式、语言和边界；也可以先关联素材，再生成待人工修订的草稿。'),provenance,body.kind,currentUserId()]);
    await db.query('INSERT INTO persona_resource_imports(id,resource_id,repository,source_path,source_commit,source_sha256,snapshot,collection_id,dataset_id,persona_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[importId,id,s.repository,s.path,s.commit,s.sha256,s,collectionId,datasetId,personaId]);
    await audit(actor,'persona.resource_imported',importId,{resource_id:id,persona_id:personaId,dataset_id:datasetId,source_sha256:s.sha256},db);
    return {id:importId,persona_id:personaId,dataset_id:datasetId,collection_id:collectionId,reused:false};

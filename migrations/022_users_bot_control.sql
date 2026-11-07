@@ -1,0 +1,16 @@
+ALTER TABLE admins ADD COLUMN role text NOT NULL DEFAULT 'user' CHECK(role IN ('super_admin','user'));
+ALTER TABLE admins ADD COLUMN status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled','pending'));
+ALTER TABLE admins ADD COLUMN permissions jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE admins ADD COLUMN github_id text UNIQUE;
+ALTER TABLE admins ADD COLUMN github_login text;
+ALTER TABLE admins ADD COLUMN display_name text NOT NULL DEFAULT '';
+ALTER TABLE admins ADD COLUMN revision integer NOT NULL DEFAULT 1;
+ALTER TABLE admins ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
+UPDATE admins SET role='super_admin' WHERE github_id IS NULL;
+ALTER TABLE managed_bots ADD COLUMN owner_user_id uuid REFERENCES admins(id);
+ALTER TABLE managed_bots ADD COLUMN created_by_user_id uuid REFERENCES admins(id);
+UPDATE managed_bots SET owner_user_id=(SELECT id FROM admins WHERE role='super_admin' ORDER BY username LIMIT 1),created_by_user_id=(SELECT id FROM admins WHERE role='super_admin' ORDER BY username LIMIT 1);
+CREATE INDEX ON managed_bots(owner_user_id);
+CREATE TABLE managed_github_settings(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),client_id text NOT NULL DEFAULT '',secret_ciphertext text,enabled boolean NOT NULL DEFAULT false,registration_mode text NOT NULL DEFAULT 'review' CHECK(registration_mode IN ('auto','review')),revision integer NOT NULL DEFAULT 1);
+INSERT INTO managed_github_settings(singleton) VALUES(true);
+CREATE TABLE managed_oauth_states(state_hash text PRIMARY KEY,browser_hash text NOT NULL,verifier_ciphertext text NOT NULL,settings_revision integer NOT NULL,expires_at timestamptz NOT NULL);

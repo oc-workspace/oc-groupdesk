@@ -9,6 +9,7 @@
 | 输出语言、AI身份与角色扮演 | [身份策略](identity-policy.md)、[话题策略](topic-policy-guide.md) |
 | API Key、模型目录与按群模型选择 | [模型路由](model-routing.md) |
 | Planner、Replyer、辅助任务和总结分阶段模型 | [阶段模型](model-stages.md) |
+| 用户、GitHub登录、管理员审核、归属和资源共享 | [用户与权限](users-and-permissions.md) |
 | Persona素材、增量归档、按人提取与人工发布 | [Persona工作室](persona-studio.md) |
 | 公共人设资源浏览、选择导入、来源存档与草稿适配 | [人设资源库](persona-resources.md) |
 | 基础与特色Persona组合、公开基础模板、独立素材与完整草稿 | [Persona组合](persona-composition.md) |
@@ -16,6 +17,7 @@
 | 每日摸鱼、多语言命令、积分、奖品与兑换 | [群互动](group-interactions.md) |
 | 认真/玩笑讨论统计与按群接梗 | [讨论与接梗](conversation-insights.md) |
 | 连续回复、免点名跟进、频率与补答 | [回复控制](reply-controls.md) |
+| 消息合并、账号跨群发送间隔、排队与人工接管 | [消息机制优化方案](message-mechanism-optimization.md)，设计待实施 |
 | Planner/Replyer/API超时、请求时效与延迟致歉 | [等待时间](group-timeouts.md) |
 | 群总结、预览、定时与单次预约、自适应批次 | [群聊总结](group-summaries.md) |
 | 知识库、文件处理与私聊成员核验 | [知识与权限](knowledge-and-access.md) |
