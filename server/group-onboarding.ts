@@ -116,19 +116,24 @@ const runtimeIdentity=z.object({contract:z.literal(1),instance_id:z.uuid(),accou
 async function identity(req:express.Request,value:unknown){const input=runtimeIdentity.parse(value),b=await activeBot(req.botId!);requireCondition(b.runtime_instance_id===input.instance_id&&b.account_fingerprint===input.account_fingerprint,403,onboardingErrors.scope_mismatch);return b;}
 export function registerOnboardingRuntime(app:express.Express){
  app.post('/api/runtime/group-onboarding/claim',async(req,res)=>{
-  const b=z.object({...runtimeIdentity.shape,version:z.enum(['1','2'])}).strict().parse(req.body);await identity(req,b);
+  const b=z.object({...runtimeIdentity.shape,version:z.enum(['1','2','3'])}).strict().parse(req.body);await identity(req,b);
   const task=await transaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511971)');
    await db.query('INSERT INTO group_onboarding_agent(singleton,instance_id,seen_at,version) VALUES(true,$1,now(),$2) ON CONFLICT(singleton) DO UPDATE SET seen_at=now(),instance_id=excluded.instance_id,version=excluded.version',[b.instance_id,b.version]);
-   const j=(await db.query("SELECT * FROM group_onboarding_jobs WHERE status='queued' OR (status='working' AND lease_until<now()) ORDER BY created_at LIMIT 1 FOR UPDATE")).rows[0];if(!j)return null;
-   const lease=randomUUID();await db.query("UPDATE group_onboarding_jobs SET status='working',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() WHERE id=$1",[j.id,lease]);
+   const j=(await db.query("SELECT * FROM group_onboarding_jobs WHERE status='queued' OR (status='working' AND lease_until<now() AND ($1::boolean OR NOT(result @> '{\"receipt_only\":true}'::jsonb))) OR ($1::boolean AND kind='greeting' AND status='failed' AND error_code='greeting_pending' AND (lease_until IS NULL OR lease_until<now())) ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END,created_at LIMIT 1 FOR UPDATE",[b.version==='3'])).rows[0];if(!j)return null;
+   const receiptOnly=j.kind==='greeting'&&(j.status==='failed'||j.result?.receipt_only===true);
+   const lease=randomUUID();await db.query("UPDATE group_onboarding_jobs SET status='working',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now(),result=result||$3,error_code=NULL WHERE id=$1",[j.id,lease,receiptOnly?{receipt_only:true}:{}]);
    const selected=j.kind==='connect'?(await pool.query('SELECT result FROM group_onboarding_jobs WHERE id=$1',[j.parent_id])).rows[0]?.result?.candidates?.find((c:any)=>c.id===j.input.candidate_id):null;
-   return {id:j.id,kind:j.kind,lease_token:lease,...(selected?{candidate:selected}:{}),group_id:j.group_id,external_id:j.input.external_id||null,...(j.kind==='discover'&&j.input.group_name?{group_name:j.input.group_name}:{})};
+   return {id:j.id,kind:j.kind,lease_token:lease,...(receiptOnly?{receipt_only:true}:{}),...(selected?{candidate:selected}:{}),group_id:j.group_id,external_id:j.input.external_id||null,...(j.kind==='discover'&&j.input.group_name?{group_name:j.input.group_name}:{})};
   });res.json({task});
  });
  app.post('/api/runtime/group-onboarding/report',async(req,res)=>{
   const body=z.object({...runtimeIdentity.shape,id:z.uuid(),lease_token:z.uuid(),stage:z.enum(['queued','preflight','binding','reader','sender','runtime','ack','ready']),status:z.enum(['working','succeeded','failed']),error_code:z.string().max(80).optional(),result:z.object({candidates:z.array(candidate).max(500).optional(),external_id:z.string().max(200).optional(),chat_id:z.number().int().positive().optional(),desktop_url:z.string().regex(/^http:\/\/127\.0\.0\.1:\d+\/$/).optional(),wechat:z.boolean().optional(),reader:z.boolean().optional(),sender:z.boolean().optional(),greeting_status:z.enum(['queued','sent','failed','uncertain']).optional()}).strict().default({})}).strict().parse(req.body);await identity(req,body);
   const j=(await pool.query('SELECT * FROM group_onboarding_jobs WHERE id=$1',[body.id])).rows[0];requireCondition(j&&j.status==='working'&&j.lease_token===body.lease_token,409,'任务租约已变化，请重新读取');
+  if(body.status==='succeeded'&&j.kind==='greeting'){
+   requireCondition(body.result.greeting_status==='sent',400,'问候尚无成功送达回执');
+   requireCondition((!body.result.external_id||body.result.external_id===j.input.external_id)&&(!body.result.chat_id||j.input.external_id===`bowxt-${req.botId!.replaceAll('-','')}:${body.result.chat_id}`),400,'问候回执与任务目标群不符');
+  }
   if(body.status==='succeeded'&&j.kind==='connect'){
    const c=await discovery(j.parent_id,j.input.candidate_id,false);const external=body.result.external_id;requireCondition(external&&external===`bowxt-${req.botId!.replaceAll('-','')}:${body.result.chat_id}`,400,'新群标识不属于当前机器人');
    const exists=(await pool.query('SELECT id FROM groups WHERE external_id=$1 AND id<>$2',[external,j.group_id])).rowCount;requireCondition(!exists,409,'真实群已经绑定其他配置');

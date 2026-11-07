@@ -86,7 +86,7 @@ class GreetingTests(unittest.TestCase):
  def test_repeated_greeting_uses_one_normal_pending_task_and_never_requeues_an_uncertain_send(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'state.db'
-   with sqlite3.connect(path) as db:db.executescript('CREATE TABLE pending(id TEXT PRIMARY KEY,sender TEXT,display TEXT,kind TEXT,first REAL,last REAL,text TEXT,article INTEGER,explicit INTEGER,fast INTEGER,greeting INTEGER,chat_id TEXT,policy_revision TEXT,received_at REAL);CREATE TABLE sends(turn_id TEXT,status TEXT);CREATE TABLE turns(id TEXT,status TEXT,expires REAL);')
+   with sqlite3.connect(path) as db:db.executescript('CREATE TABLE pending(id TEXT PRIMARY KEY,sender TEXT,display TEXT,kind TEXT,first REAL,last REAL,text TEXT,article INTEGER,explicit INTEGER,fast INTEGER,greeting INTEGER,chat_id TEXT,policy_revision TEXT,received_at REAL);CREATE TABLE sends(turn_id TEXT,status TEXT);CREATE TABLE turns(id TEXT,status TEXT,expires REAL,chat_id TEXT);')
    @contextlib.contextmanager
    def connect():
     db=sqlite3.connect(path);db.row_factory=sqlite3.Row
@@ -101,7 +101,32 @@ class GreetingTests(unittest.TestCase):
     return json.loads(out.getvalue())
    self.assertEqual(run()['greeting_status'],'queued');self.assertEqual(run()['greeting_status'],'queued')
    with connect() as db:
-    self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],1);db.execute('INSERT INTO sends VALUES(?,"uncertain")',(job.replace('-',''),))
+    self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],1);db.execute('INSERT INTO turns VALUES(?,"active",?,"2")',(job.replace('-',''),time.time()+100));db.execute('INSERT INTO sends VALUES(?,"reserved")',(job.replace('-',''),))
+   self.assertEqual(run()['greeting_status'],'queued')
+   with connect() as db:db.execute('UPDATE sends SET status="uncertain"')
    self.assertEqual(run()['greeting_status'],'uncertain')
    with connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],1)
+ def test_check_only_is_read_only_handles_late_receipts_and_never_creates_or_requeues(self):
+  with tempfile.TemporaryDirectory() as t:
+   path=Path(t)/'state.db';job=uuid.uuid4().hex;original_connect=sqlite3.connect
+   with original_connect(path) as db:db.executescript('CREATE TABLE pending(id TEXT PRIMARY KEY);CREATE TABLE sends(turn_id TEXT,status TEXT);CREATE TABLE turns(id TEXT,status TEXT,expires REAL,chat_id TEXT);CREATE TABLE onboarding_admin_requests(id TEXT PRIMARY KEY,chat_id TEXT,created REAL);')
+   def readonly(url,**kw):
+    self.assertEqual(url,'file:/limits-state/limits.sqlite3?mode=ro');self.assertTrue(kw['uri']);return original_connect('file:'+str(path)+'?mode=ro',uri=True)
+   def check(chat=2):
+    out=io.StringIO()
+    with patch('sqlite3.connect',side_effect=readonly),patch.object(sys,'stdin',io.StringIO(json.dumps({'job_id':job,'chat_id':chat,'check_only':True}))),contextlib.redirect_stdout(out):
+     with self.assertRaises(SystemExit) as exit:runpy.run_path(str(Path(__file__).parent/'greeting.py'))
+     self.assertEqual(exit.exception.code,0)
+    return json.loads(out.getvalue())['greeting_status']
+   self.assertEqual(check(),'failed')
+   with original_connect(path) as db:
+    self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],0)
+    db.execute('INSERT INTO onboarding_admin_requests VALUES(?,"2",?)',(job,time.time()));db.execute('INSERT INTO turns VALUES(?,"active",?,"2")',(job,time.time()+100));db.execute('INSERT INTO sends VALUES(?,"reserved")',(job,))
+   self.assertEqual(check(),'queued')
+   with original_connect(path) as db:db.execute('UPDATE sends SET status="uncertain"')
+   self.assertEqual(check(),'uncertain')
+   with original_connect(path) as db:db.execute('UPDATE sends SET status="sent"');db.execute('UPDATE turns SET status="sent"')
+   self.assertEqual(check(),'sent')
+   with self.assertRaises(ValueError):check(3)
+   with original_connect(path) as db:self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],0)
 if __name__=='__main__':unittest.main()

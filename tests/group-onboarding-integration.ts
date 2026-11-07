@@ -75,6 +75,25 @@ test('final acknowledgement and greeting/verify actions stay separate; concurren
  assert.equal((await req('/group-onboarding/jobs/'+task.id+'/retry','POST',{},a.id)).status,409);
  const check=await req('/group-onboarding/jobs/'+connectId+'/verify','POST',{request_id:randomUUID(),confirmed:true},a.id);assert.equal(check.status,202);const verify=await claim();assert.equal(verify.kind,'verify');assert.equal((await report(verify,{wechat:true,reader:true,sender:true})).status,200);
 });
+test('late greeting receipts use a fenced read-only claim and cannot accept another group or a non-sent result',async()=>{
+ const parent=(await req('/group-onboarding/jobs/'+connectId,'GET',undefined,a.id)).data,greeting=parent.followups.greeting;
+ const before=(await overview()).groups.map((g:any)=>[g.id,g.revision,g.external_id]);
+ await withBot(a.id,()=>pool.query("UPDATE group_onboarding_jobs SET status='failed',error_code='greeting_pending',lease_until=now()-interval '1 minute' WHERE id=$1",[greeting.id]));
+ assert.equal(await claim(),null); // v1/v2 agents must never receive receipt-only work.
+ const version3=async()=>(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'3'},undefined,ta)).data.task;
+ const first=await version3();assert.equal(first.id,greeting.id);assert.equal(first.receipt_only,true);assert.equal(first.external_id,parent.group.external_id);
+ assert.equal((await report(first,{greeting_status:'queued'})).status,400);
+ assert.equal((await report(first,{greeting_status:'sent',chat_id:999})).status,400);
+ assert.equal((await report(first,{greeting_status:'sent',external_id:'bowxt-foreign:2'})).status,400);
+ await withBot(a.id,()=>pool.query("UPDATE group_onboarding_jobs SET lease_until=now()-interval '1 minute' WHERE id=$1",[greeting.id]));
+ assert.equal(await claim(),null);const reclaimed=await version3();assert.equal(reclaimed.receipt_only,true);assert.notEqual(reclaimed.lease_token,first.lease_token);
+ assert.equal((await report(first,{greeting_status:'sent'})).status,409);
+ assert.equal((await report(reclaimed,{greeting_status:'sent',chat_id:2,external_id:parent.group.external_id})).status,200);
+ const current=(await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,a.id)).data;assert.equal(current.status,'succeeded');assert.equal(current.error_code,null);assert.equal(current.result.receipt_only,true);
+ assert.equal(await version3(),null);assert.equal((await req('/group-onboarding/jobs/'+connectId+'/greeting','POST',{request_id:randomUUID(),confirmed:true},a.id)).data.id,greeting.id);
+ assert.deepEqual((await overview()).groups.map((g:any)=>[g.id,g.revision,g.external_id]),before);
+ assert.equal((await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,b.id)).status,404);
+});
 test('model helper default is independent and AI cannot choose foreign IDs or enable groups',async()=>{
  let key='';await withBot(a.id,async()=>{key=randomUUID();await pool.query("INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest,client_type) VALUES($1,'maibot-gpt','https://example.com/v1',$2,'synthetic','synthetic','openai_responses')",[key,sealKey('synthetic-not-real')]);await pool.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source) VALUES($1,'gpt-6-luna','gpt-6-luna','text','manual')",[key]);});
  let models=(await req('/models','GET',undefined,a.id)).data;const before=(await overview()).groups.map((g:any)=>g.revision);
