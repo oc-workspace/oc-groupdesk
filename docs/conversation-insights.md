@@ -24,4 +24,4 @@ Gemini分析显式请求application/json输出，参考[官方GenerationConfig](
 
 ## 连续回复与跟进参数
 
-群配置中的「连续回复与跟进」控制实际执行的轮数、重置间隔、同一成员的免点名跟进窗口，独立于下方玩笑识别开关。按群保存，不修改全局默认文件；初始值沿用2轮、180秒重置、180秒跟进，也可单独关闭轮数限制。仍须等待机器人确认配置版本。详细语义、迁移与原生部署见[integration/maibot/reply-limits/README.md](../integration/maibot/reply-limits/README.md)。
+实际轮数、重置和同成员跟进独立于玩笑识别，统一见[回复控制](reply-controls.md#连续轮数与跟进)。

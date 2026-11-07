@@ -57,7 +57,7 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 
 ## 群等待策略契约 v2
 
-`timeout_policy_contract_version=2` 与 `policy.timeouts` 下发本群的 planner_seconds、request_seconds、direct_ttl_seconds、wait_apology_seconds。旧群缺省300/310/420秒及5分钟致歉。致歉阈值存秒数，只接受1—30整分钟。校验范围、参数关系、请求绝对截止及原生客户端缓存处理见[按群配置等待时间](group-timeouts.md)。ACK未声明v2返回409；通用客户端要求apply回调在实际应用后返回匹配能力字段，不自动替旧适配器声明支持。新机器人仍能接收v1配置并按v1确认。
+`timeout_policy_contract_version=2` 与 `policy.timeouts` 下发本群的 planner_seconds、request_seconds、direct_ttl_seconds、wait_apology_seconds。旧群缺省300/310/420秒及5分钟致歉。致歉阈值存秒数，只接受1—30整分钟。校验范围、参数关系、请求绝对截止及原生客户端缓存处理见[按群配置等待时间](reply-controls.md)。ACK未声明v2返回409；通用客户端要求apply回调在实际应用后返回匹配能力字段，不自动替旧适配器声明支持。新机器人仍能接收v1配置并按v1确认。
 
 ## Persona 组合契约 v1
 
@@ -65,4 +65,4 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 
 ### 2026-11-03：Replyer 超时与话题长度
 
-当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见 `group-timeouts.md` 和 `topic-policy-guide.md`。
+当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见[回复控制与等待时间](reply-controls.md)和[话题策略](topic-policy-guide.md)。
