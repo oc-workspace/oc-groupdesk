@@ -23,16 +23,20 @@ class Agent:
   def progress():
    while not stop.wait(15):
     try:
-     stage=self.local({'id':task['id'],'kind':'progress'}).get('stage','preflight');self.api('report',{**base,'status':'working','stage':stage})
+     stage='ack' if task['kind']=='greeting' else self.local({'id':task['id'],'kind':'progress'}).get('stage','preflight');self.api('report',{**base,'status':'working','stage':stage})
     except Exception:pass
   reporter=threading.Thread(target=progress,daemon=True);reporter.start()
   try:
-   self.api('report',{**base,'status':'working','stage':'preflight'})
-   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id','group_name'} and v is not None};result=self.local(local)
+   self.api('report',{**base,'status':'working','stage':'ack' if task['kind']=='greeting' else 'preflight'})
+   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id','group_name'} and v is not None}
+   if task.get('receipt_only'):
+    if task['kind']!='greeting':raise RuntimeError('scope_mismatch')
+    local['kind']='greeting_status'
+   result=self.local(local)
    if task['kind']=='greeting':
     deadline=time.monotonic()+480
-    while result.get('greeting_status')=='queued' and time.monotonic()<deadline:
-     time.sleep(3);result=self.local(local)
+    while not task.get('receipt_only') and result.get('greeting_status') in {'queued','uncertain'} and time.monotonic()<deadline:
+     time.sleep(3);result=self.local({**local,'kind':'greeting_status'})
     if result.get('greeting_status')!='sent':raise RuntimeError('greeting_pending' if result.get('greeting_status') in {'queued','uncertain'} else 'greeting_failed')
    stop.set();reporter.join(timeout=26)
    self.api('report',{**base,'status':'succeeded','stage':'ack' if task['kind']=='connect' else 'ready','result':result})
@@ -40,13 +44,13 @@ class Agent:
    stop.set();reporter.join(timeout=26)
    code=str(e)
    allowed={'needs_login','reader_unavailable','group_missing','duplicate_name','group_limit','busy','config_changed','scope_mismatch','restart_failed','greeting_pending','greeting_failed','not_ready'}
-   try:progress=self.local({'id':task['id'],'kind':'progress'})
+   try:progress={'stage':'ack'} if task['kind']=='greeting' else self.local({'id':task['id'],'kind':'progress'})
    except Exception:progress={}
    self.api('report',{**base,'status':'failed','stage':progress.get('stage','preflight'),'result':{k:v for k,v in progress.items() if k=='desktop_url'},'error_code':code if code in allowed else 'operation_failed'})
  def run(self):
   while True:
    try:
-    task=self.api('claim',{'version':'2'}).get('task')
+    task=self.api('claim',{'version':'3'}).get('task')
     if task:self.run_one(task)
     else:time.sleep(10)
    except Exception:time.sleep(20)

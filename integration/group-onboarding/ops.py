@@ -190,14 +190,15 @@ class Driver:
   need(bound and bound[0]==group['native_id'])
   health=json.loads((self.persist/'bridge/health.json').read_text())
   return {'wechat':status.get('wechat_connected') is True,'sender':group['name'] in cfg['allowed'],'reader':bool(health.get('reader',{}).get('connected') and time.time()-health.get('reader',{}).get('checked_at',0)<90),'external_id':external,'chat_id':chat,'desktop_url':'http://127.0.0.1:'+str(self.ports()['3000/tcp'])+'/'}
- def greeting(self,job,external):
-  need(all(self.verify(external).get(k) for k in ['wechat','reader','sender']),'not_ready');chat=next(int(k) for k,v in self.validate()['groups'].items() if v==external)
+ def greeting(self,job,external,check_only=False):
+  if not check_only:need(all(self.verify(external).get(k) for k in ['wechat','reader','sender']),'not_ready')
+  chat=next((int(k) for k,v in self.validate()['groups'].items() if v==external),None);need(chat is not None)
   code=(Path(__file__).parent/'greeting.py').read_text()
-  try:return self.exec('wechat-bridge',code,{'job_id':identifier(job),'chat_id':chat},timeout=25)
+  try:return {**self.exec('wechat-bridge',code,{'job_id':identifier(job),'chat_id':chat,'check_only':check_only},timeout=25),'external_id':external,'chat_id':chat}
   except Failure:raise Failure('greeting_failed')
  def handle(self,task):
   need(isinstance(task,dict) and set(task)<={'id','kind','candidate','external_id','group_name'})
-  job=identifier(task.get('id'));kind=task.get('kind');need(kind in {'discover','connect','verify','greeting','progress'})
+  job=identifier(task.get('id'));kind=task.get('kind');need(kind in {'discover','connect','verify','greeting','greeting_status','progress'})
   need('group_name' not in task or (kind=='discover' and isinstance(task['group_name'],str) and 1<=len(task['group_name'].strip())<=200))
   if kind=='progress':return self.progress(job)
   with (self.state/'control.lock').open('a') as lock:
@@ -208,4 +209,4 @@ class Driver:
    if kind=='connect':
     c=task.get('candidate');need(isinstance(c,dict) and set(c)=={'id','native_id','name','ambiguous','external_id'});need(re.fullmatch('[a-f0-9]{64}',c['id']) and re.fullmatch(r'[A-Za-z0-9_-]{1,120}@chatroom',c['native_id']) and isinstance(c['name'],str) and 1<=len(c['name'])<=200);return self.connect(job,c)
    external=task.get('external_id');need(isinstance(external,str) and re.fullmatch('bowxt-'+self.slug+r':[1-9]\d{0,9}',external))
-   return self.verify(external) if kind=='verify' else self.greeting(job,external)
+   return self.verify(external) if kind=='verify' else self.greeting(job,external,check_only=kind=='greeting_status')
