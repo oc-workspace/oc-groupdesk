@@ -14,6 +14,12 @@
 .login-admin-option>summary{cursor:pointer;color:#73617e;font-size:13px;font-weight:600;line-height:1.8}
 .login-admin-option[open]>summary{margin-bottom:20px}
 .login-admin-option>summary:focus-visible,.login-review-github:focus-visible{outline:3px solid #8a73cd;outline-offset:4px;border-radius:5px}
+.login-review-refresh{margin-top:16px}
+.login-review-approved{background:#effaf2;border-color:#8bc69b;border-left-color:#2d8351;color:#235b38}
+.login-review-approved .login-review-icon,.login-review-approved .login-review-badge{background:#d4eedc;color:#24653d}
+.login-review-approved h3,.login-review-approved .login-review-next p,.login-review-approved .login-review-next strong{color:#205a35}
+.login-review-approved p,.login-review-approved .login-review-hint{color:#3b694a}
+.login-review-approved .login-review-next{background:#fafffb;border-color:#c0dfc9}
 @media(max-width:680px){
  .login-page-pending{grid-template-rows:auto 1fr}
  .login-page-pending .login-aside{padding:22px 24px}

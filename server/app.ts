@@ -1,4 +1,5 @@
 import {registerBotPurge} from './bot-purge.js';
+import {clearRegistrationReceipt} from './registration-status.js';
 import {registerRuntimeMaintenanceAdmin,registerRuntimeMaintenanceAgent} from './runtime-maintenance.js';
 import {registerGithubAuth,registerUserAdmin,type GithubRequest} from './users.js';
 import {registerSharedResources} from './shared-resources.js';
@@ -103,6 +104,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
       await audit(admin.username,'auth.login',null,{},db);
     });
     res.cookie(cookieName,session,{httpOnly:true,secure:secureCookies,sameSite:'strict',maxAge:12*3600000,path:'/'});
+    clearRegistrationReceipt(res);
     res.json({id:admin.id,username:admin.username,display_name:admin.display_name,github_login:admin.github_login,role:admin.role,permissions:admin.permissions,csrf});
   });
   app.use('/api/runtime',async(req,res,next)=>{
@@ -144,6 +146,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.get('/api/auth/me',(req,res)=>res.json(req.admin!));
   app.post('/api/auth/logout',async(req,res)=>{
     await pool.query('DELETE FROM sessions WHERE token_hash=$1',[digest(req.cookies[cookieName])]);
+    clearRegistrationReceipt(res);
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
   });
   app.post('/api/auth/password',async(req,res)=>{
