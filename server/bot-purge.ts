@@ -10,8 +10,8 @@ import {sqlIdentifier} from './bot-provisioning.js';
 import {legacyDataPlan,clearLegacyRows,clearLegacyFiles} from './legacy-purge.js';
 import {runtimePreview,queuePurgeRuntime} from './runtime-maintenance.js';
 import {superAdmin} from './user-access.js';
-import {digest,requireCondition} from './security.js';
-import {reasonFields,reasonDetails,type DeletionReason} from '../shared/deletion.js';
+import {digest,requireCondition,HttpError} from './security.js';
+import {reasonFields,reasonDetails,purgePreviewChangedCode,type DeletionReason} from '../shared/deletion.js';
 async function actor(id:string,db:Pick<typeof controlPool,'query'>=controlPool){const a=(await db.query("SELECT username FROM admins WHERE id=$1 AND role='super_admin' AND status='active' AND deleted_at IS NULL FOR SHARE",[id])).rows[0];requireCondition(a,403,'总管理员权限已变化');return a;}
 const record=async(id:string)=>(await controlPool.query('SELECT * FROM managed_bots WHERE id=$1',[id])).rows[0];
 async function businessConnectionHasRawKey(name:string){return business(name,async db=>!!(await db.query('SELECT 1 FROM model_credentials WHERE vault_key_id IS NULL LIMIT 1')).rowCount);}
@@ -36,13 +36,13 @@ export async function botPurgePreview(id:string){
   effects:['这是永久物理清理，不能从界面恢复；未删除的登记会先撤销接入并移出正常列表。','只处理下方勾选的范围。未通过核验的内容保留并说明原因；不会为清理扩大范围。','运行环境先停止并临时隔离，再按本次明确授权永久删除；中途失败保留进度，不是到期自动删除。','旧共用库仅清空明确业务表与登记文件，绝不删除整个数据库或站点资料根目录。']};
 }
 export async function requestBotPurge(id:string,input:{revision:number;confirmation:string;plan_hash:string;business:boolean;runtime:boolean;reason:string;reason_note:string},actorId:string){
- const a=await actor(actorId),p=await botPurgePreview(id);requireCondition(p.can_submit,409,p.blockers.join(' ')||'没有可清理范围');requireCondition(p.revision===input.revision&&p.plan_hash===input.plan_hash,409,'清理范围已变化，请重新预览');requireCondition(p.confirmation===input.confirmation,400,'请完整输入微信号确认');
+ const a=await actor(actorId),p=await botPurgePreview(id);if(p.revision!==input.revision||p.plan_hash!==input.plan_hash)throw new HttpError(409,'清理范围已变化，请重新预览',purgePreviewChangedCode);requireCondition(p.can_submit,409,p.blockers.join(' ')||'没有可清理范围');requireCondition(p.confirmation===input.confirmation,400,'请完整输入微信号确认');
  requireCondition(input.business||input.runtime,400,'请勾选清理范围');requireCondition(!input.business||p.plan.business.eligible,409,'业务数据须保留');requireCondition(!input.runtime||p.plan.runtime?.eligible,409,'运行环境尚未通过核验');
  if(!p.deleted)await deleteBotRegistration(id,p.revision,p.confirmation,a.username,input as DeletionReason);
  return controlTransaction(async db=>{
-  await db.query('SELECT pg_advisory_xact_lock(78511966)');await actor(actorId,db);const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(b.deleted_at&&b.owner_user_id&&b.revision===p.revision+(p.deleted?0:1),409,'登记状态已变化，请在已删除机器人中重新预览');
+  await db.query('SELECT pg_advisory_xact_lock(78511966)');await actor(actorId,db);const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!b||!b.deleted_at||!b.owner_user_id||b.revision!==p.revision+(p.deleted?0:1))throw new HttpError(409,'登记状态已变化，请在已删除机器人中重新预览',purgePreviewChangedCode);
   const prior=(await db.query('SELECT id,status FROM managed_bot_purges WHERE bot_id=$1',[id])).rows[0];requireCondition(!prior||!['queued','processing'].includes(prior.status),409,'已有彻底清理任务');
-  if(input.business&&id===legacyBotId){const fresh=await legacyDataPlan(b.owner_user_id,db);requireCondition(fresh.eligible&&fresh.fingerprint===p.plan.business.fingerprint,409,'旧业务范围已变化，请重新预览');}
+  if(input.business&&id===legacyBotId){const fresh=await legacyDataPlan(b.owner_user_id,db);if(!fresh.eligible||fresh.fingerprint!==p.plan.business.fingerprint)throw new HttpError(409,'旧业务范围已变化，请重新预览',purgePreviewChangedCode);}
   const job=randomUUID(),plan={business:input.business?p.plan.business:null,runtime:input.runtime?p.plan.runtime:null};
   // Failed jobs with irreversible progress resume the original job, never replace its manifest.
   requireCondition(!prior||prior.status==='completed'||prior.status==='partial'||prior.status==='cancelled',409,'请先重试或核对原失败任务，不能覆盖已执行进度');

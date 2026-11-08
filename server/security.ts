@@ -14,7 +14,7 @@ export function secureEqual(a:string,b:string){
   return timingSafeEqual(Buffer.from(digest(a)),Buffer.from(digest(b)));
 }
 export class HttpError extends Error {
-  constructor(public status:number,message:string){super(message);}
+  constructor(public status:number,message:string,public code?:string){super(message);}
 }
 export function requireCondition(condition:unknown,status:number,message:string):asserts condition {
   if(!condition)throw new HttpError(status,message);

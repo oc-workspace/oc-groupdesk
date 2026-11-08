@@ -413,7 +413,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.get('/{*path}',(_req,res)=>res.sendFile(resolve('dist/index.html')));
   app.use((err:unknown,_req:Request,res:Response,_next:NextFunction)=>{
     if(err instanceof z.ZodError)return res.status(400).json({error:err.issues.map(i=>i.path.join('.')+': '+i.message).join('；')});
-    if(err instanceof HttpError)return res.status(err.status).json({error:err.message});
+    if(err instanceof HttpError)return res.status(err.status).json({error:err.message,...(err.code?{code:err.code}:{})});
     if(err instanceof multer.MulterError)return res.status(400).json({error:err.code==='LIMIT_FILE_SIZE'?'文件不能超过 10 MB':'上传参数无效'});
     const code=(err as {code?:string}).code;
     if(code==='23505')return res.status(409).json({error:'名称或绑定 ID 已存在'});

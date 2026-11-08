@@ -14,6 +14,7 @@ import {withBot} from '../server/bot-workspaces.js';
 import {createApp} from '../server/app.js';
 import {deleteBotRegistration} from '../server/deletion.js';
 import {botPurgePreview,processBotPurge} from '../server/bot-purge.js';
+import {purgePreviewChangedCode} from '../shared/deletion.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw Error('Dedicated disposable test database required');
 let server:Server,base='',admin:any,other:any,kept='',last='';const bots:string[]=[],why={reason:'test',reason_note:'合成彻底清理测试'};
 async function req(path:string,method='GET',body?:object,user=admin){const r=await fetch(base+'/api'+path,{method,headers:{Cookie:user?.cookie||'','X-CSRF-Token':user?.csrf||'',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
@@ -44,6 +45,23 @@ test('a failed task before business deletion may be cancelled and freshly review
 });
 test('restore cancels old purge jobs and requires a new plan instead of automatically resuming deletion',async()=>{
  execFileSync('node_modules/.bin/tsx',['scripts/reset-runtime-after-restore.ts'],{env:{...process.env,GROUPDESK_RESTORE_MODE:'1'},stdio:'pipe'});assert.equal((await controlPool.query('SELECT status FROM managed_bot_purges WHERE bot_id=$1',[last])).rows[0].status,'cancelled');assert(!await processBotPurge());
+});
+test('stale cleanup previews return a refreshable conflict without queuing deletion, including a newly shared resource',async()=>{
+ const original=await botPurgePreview(legacyBotId),topic=(await controlPool.query('SELECT id,visibility FROM topics LIMIT 1')).rows[0];
+ const send=(p:any)=>req('/bots/'+legacyBotId+'/purge','POST',{...why,revision:p.revision,confirmation:p.confirmation,plan_hash:p.plan_hash,business:true,runtime:false,permanent_confirm:true});
+ const rowsBefore=Number((await controlPool.query('SELECT count(*) count FROM topics')).rows[0].count);
+ await controlPool.query('UPDATE topics SET revision=revision+1 WHERE id=$1',[topic.id]);
+ const revised=await send(original);assert.equal(revised.status,409);assert.equal(revised.data.code,purgePreviewChangedCode);
+ const current=await botPurgePreview(legacyBotId);assert.notEqual(current.plan_hash,original.plan_hash);
+ try{
+  await controlPool.query("UPDATE topics SET visibility='common' WHERE id=$1",[topic.id]);
+  const shared=await send(current);assert.equal(shared.status,409);assert.equal(shared.data.code,purgePreviewChangedCode);
+  assert.equal((await botPurgePreview(legacyBotId)).plan.business.eligible,false);
+  assert.equal((await controlPool.query('SELECT count(*)::int n FROM managed_bot_purges WHERE bot_id=$1',[legacyBotId])).rows[0].n,0);
+  assert.equal(Number((await controlPool.query('SELECT count(*) count FROM topics')).rows[0].count),rowsBefore);
+  assert.equal((await controlPool.query('SELECT deleted_at FROM managed_bots WHERE id=$1',[legacyBotId])).rows[0].deleted_at,null);
+  assert.equal((await req('/auth/me')).status,200);
+ }finally{await controlPool.query('UPDATE topics SET visibility=$2 WHERE id=$1',[topic.id,topic.visibility]);}
 });
 test('legacy shared/foreign resources and unknown foreign key dependencies block business cleanup without touching the control DB',async()=>{
  const p=await botPurgePreview(legacyBotId);assert(p.plan.business.eligible,JSON.stringify(p.plan.business.blockers));const t=(await controlPool.query('SELECT id FROM topics LIMIT 1')).rows[0].id;await controlPool.query("UPDATE topics SET visibility='common' WHERE id=$1",[t]);assert(!(await botPurgePreview(legacyBotId)).plan.business.eligible);assert.equal((await submit(legacyBotId)).status,409);await controlPool.query("UPDATE topics SET visibility='private' WHERE id=$1",[t]);
