@@ -10,6 +10,10 @@
 .nav-section-toggle small{font-size:10px;letter-spacing:0;font-weight:400;color:#7760c8}.nav-section.has-active>.nav-section-toggle{color:#7760c8}
 .sidebar-navigation .nav-item{margin:2px 0;padding:10px 12px;gap:10px;font-size:12px}.sidebar-navigation .nav-item svg{flex-shrink:0}.nav-section [hidden]{display:none!important}
 .mobile-nav-toggle{display:none}.sidebar-navigation button:focus-visible{outline:2px solid #8c73d2;outline-offset:-2px}
+.sidebar-navigation .nav-review-badge{display:inline-flex;align-items:center;justify-content:center;flex:none;gap:3px;margin-left:auto;padding:2px 7px;border:1px solid #efcf88;border-radius:5px;background:#fff0c7;color:#80500b;font-size:10px;font-weight:700;line-height:1.5;letter-spacing:0;white-space:nowrap;font-variant-numeric:tabular-nums}
+.sidebar-navigation .nav-section-toggle>.nav-review-badge{margin-left:auto}
+.sidebar-navigation .nav-section-toggle>.nav-review-badge+svg,.mobile-nav-toggle>.nav-review-badge+svg{margin-left:0}
+.sidebar-navigation .nav-item.active>.nav-review-badge{background:#fff0c7;color:#80500b}
 @media(max-width:680px){
   .app-shell>.sidebar{position:sticky;height:auto;max-height:65vh;max-height:65dvh;width:100%;min-width:0;padding:12px 14px 8px;scrollbar-gutter:auto}
   .sidebar-navigation{margin:8px 0 0}.mobile-nav-toggle{display:flex;align-items:center;gap:8px;width:100%;background:#f7f5fb;border:1px solid #eee8f6;border-radius:8px;padding:10px;color:#74618d;font-size:12px;text-align:left}

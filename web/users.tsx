@@ -7,10 +7,10 @@ import {LoadingButton,LoadingStatus} from './loading';
 import {permissionLabels} from '../shared/user-permissions';
 import type {BotDirectory} from './bots';
 type Api=(p:string,m?:string,b?:unknown)=>Promise<any>;
-export function UserAdmin({api,directory,reloadBots,notify}:{api:Api;directory:BotDirectory;reloadBots:()=>Promise<void>;notify:(s:string,error?:boolean)=>void}){
+export function UserAdmin({api,directory,reloadBots,notify,onPendingCount}:{api:Api;directory:BotDirectory;reloadBots:()=>Promise<void>;notify:(s:string,error?:boolean)=>void;onPendingCount?:(count:number)=>void}){
  const [deletedRefresh,setDeletedRefresh]=useState(0);
  const [deleting,setDeleting]=useState<string|null>(null),[data,setData]=useState<any>(null),[editing,setEditing]=useState<any>(null),[github,setGithub]=useState<any>(null),[secret,setSecret]=useState(''),[busy,setBusy]=useState(''),[error,setError]=useState(''),[connections,setConnections]=useState<Record<string,any>>({});
- const load=async()=>{const [u,g]=await Promise.all([api('/users'),api('/users/github-settings')]);setData(u);setGithub(g);const all=await Promise.all(directory.bots.map(async b=>[b.id,await api('/bots/'+b.id+'/connection')]));setConnections(Object.fromEntries(all));};
+ const load=async()=>{const [u,g]=await Promise.all([api('/users'),api('/users/github-settings')]);setData(u);setGithub(g);onPendingCount?.(u.users.filter((user:{status:string})=>user.status==='pending').length);const all=await Promise.all(directory.bots.map(async b=>[b.id,await api('/bots/'+b.id+'/connection')]));setConnections(Object.fromEntries(all));};
  useEffect(()=>{void load().catch(e=>setError(e.message));},[]);
  async function work(key:string,fn:()=>Promise<void>){setBusy(key);setError('');try{await fn();}catch(e){setError((e as Error).message);}finally{setBusy('');}}
  if(!data)return <section className="panel persona-panel">{error?<p role="alert">{error}</p>:<LoadingStatus label="正在读取用户和登录配置…"/>}</section>;
