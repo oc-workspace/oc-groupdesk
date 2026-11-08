@@ -13,7 +13,7 @@ function stopped(b:any){
  const s=b.runtime_status||{};
  return s.stopped===true&&s.sender_queue_depth===0&&s.active_turns===0&&s.send_inflight===false&&(b.stopped_revision!=null||s.revision===b.revision&&!!b.runtime_seen_at&&Date.now()-new Date(b.runtime_seen_at).getTime()<90000);
 }
-async function currentSuperAdministrator(actor:string,db:Pick<typeof pool,'query'>){const user=(await db.query('SELECT role,status FROM admins WHERE username=$1 FOR SHARE',[actor])).rows[0];requireCondition(user?.role==='super_admin'&&user.status==='active',403,'仅有效总管理员可以删除登记');}
+async function currentSuperAdministrator(actor:string,db:Pick<typeof pool,'query'>){const user=(await db.query('SELECT role,status FROM admins WHERE deleted_at IS NULL AND username=$1 FOR SHARE',[actor])).rows[0];requireCondition(user?.role==='super_admin'&&user.status==='active',403,'仅有效总管理员可以删除登记');}
 async function blockedBot(b:any,db:Pick<typeof pool,'query'>=controlPool){
  const reasons:string[]=[];
  if(!['paused','archived'].includes(b.state))reasons.push('请先暂停机器人并等待运行端确认停止。');

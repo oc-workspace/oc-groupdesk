@@ -16,7 +16,7 @@ let a='',b='',original='';const created:string[]=[];
 const g1=randomUUID(),g2=randomUUID(),gt=randomUUID(),gtv=randomUUID(),feature=randomUUID(),fv=randomUUID();
 before(async()=>{
  await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();
- for(const name of ['public_persona_A','public_persona_B'])created.push(await createBot({name,wechat_id:name,host_label:'synthetic',notes:''},'synthetic-test'));
+ for(const name of ['public_persona_A','public_persona_B'])created.push(await createBot({name,wechat_id:name,host_label:'synthetic',notes:''},'admin'));
  [a,b]=created;
  await withBot(a,async()=>{
   for(const [id,version,name,kind] of [[gt,gtv,'synthetic-gt','base'],[feature,fv,'synthetic-feature','feature']]){

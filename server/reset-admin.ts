@@ -5,7 +5,7 @@ for await(const chunk of process.stdin){input+=chunk;if(input.length>1000)throw 
 const password=input.trim();
 if(password.length<16||password.length>200)throw new Error('New password must contain 16–200 characters');
 await transaction(async db=>{
-  const admin=(await db.query('UPDATE admins SET password_hash=$1 WHERE username=$2 RETURNING id',[passwordHash(password),process.env.ADMIN_USERNAME||'admin'])).rows[0];
+  const admin=(await db.query('UPDATE admins SET password_hash=$1 WHERE deleted_at IS NULL AND username=$2 RETURNING id',[passwordHash(password),process.env.ADMIN_USERNAME||'admin'])).rows[0];
   if(!admin)throw new Error('Administrator does not exist');
   await db.query('DELETE FROM sessions WHERE admin_id=$1',[admin.id]);
   await audit('operator','auth.password_reset',null,{},db);

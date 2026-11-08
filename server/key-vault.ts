@@ -14,7 +14,7 @@ export const limitsSchema=z.object({daily_requests:z.number().int().min(1).max(1
 export const emptyLimits=()=>({daily_requests:null,monthly_requests:null,daily_tokens:null,monthly_tokens:null,daily_cost:null,monthly_cost:null,concurrency:4,alert_percent:80});
 export const pricesSchema=z.record(z.string().min(1).max(200),z.object({input:z.number().min(0).max(1e6),output:z.number().min(0).max(1e6),cached:z.number().min(0).max(1e6).optional()}).strict());
 export const botId=()=>botStorage.getStore()?.id||legacyBotId;
-export async function botPrincipal(){let bot=await botRecord(botId());requireCondition(bot,404,'机器人已删除或不存在');if(!bot.owner_user_id){const fallback=(await controlPool.query("SELECT id FROM admins WHERE role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];requireCondition(fallback,409,'机器人尚未分配所有人');bot={...bot,owner_user_id:fallback.id};}requireCondition(bot?.owner_user_id,409,'机器人尚未分配所有人');const user=(await controlPool.query("SELECT id FROM admins WHERE id=$1 AND status='active'",[bot.owner_user_id])).rows[0];requireCondition(user,403,'机器人所有人未通过审核或已停用');return user.id as string;}
+export async function botPrincipal(){let bot=await botRecord(botId());requireCondition(bot,404,'机器人已删除或不存在');if(!bot.owner_user_id){const fallback=(await controlPool.query("SELECT id FROM admins WHERE deleted_at IS NULL AND role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];requireCondition(fallback,409,'机器人尚未分配所有人');bot={...bot,owner_user_id:fallback.id};}requireCondition(bot?.owner_user_id,409,'机器人尚未分配所有人');const user=(await controlPool.query("SELECT id FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active'",[bot.owner_user_id])).rows[0];requireCondition(user,403,'机器人所有人未通过审核或已停用');return user.id as string;}
 export function publicKey(k:any,userId=currentUserId()){
  const {secret_ciphertext,key_digest,...safe}=k;return {...safe,key_hint:k.key_hint,is_owner:k.owner_user_id===userId,can_reveal:k.owner_user_id===userId};
 }
@@ -72,7 +72,7 @@ export async function reserveUsage(id:string,model:string,scope:CallScope,inputB
  const usage=await controlTransaction(async db=>{
   const live=(await db.query('SELECT * FROM managed_model_keys WHERE id=$1 FOR UPDATE',[a.key.id])).rows[0];
   requireCondition(live?.enabled&&!live.archived&&live.revision===a.key.revision,409,'Key 已更新，请重试');
-  const principal=(await db.query("SELECT b.owner_user_id FROM managed_bots b JOIN admins u ON u.id=b.owner_user_id AND b.deleted_at IS NULL WHERE b.id=$1 AND u.status='active' FOR SHARE OF b",[botId()])).rows[0];requireCondition(principal?.owner_user_id===a.userId,403,'机器人归属或用户准入已变化');
+  const principal=(await db.query("SELECT b.owner_user_id FROM managed_bots b JOIN admins u ON u.id=b.owner_user_id AND b.deleted_at IS NULL WHERE b.id=$1 AND u.deleted_at IS NULL AND u.status='active' FOR SHARE OF b",[botId()])).rows[0];requireCondition(principal?.owner_user_id===a.userId,403,'机器人归属或用户准入已变化');
   let liveGrant:any=null;
   if(live.owner_user_id!==a.userId){liveGrant=(await db.query('SELECT * FROM managed_model_grants WHERE key_id=$1 AND user_id=$2 AND enabled AND expires_at>now()',[live.id,a.userId])).rows[0];requireCondition(live.scope==='site'&&liveGrant&&(!liveGrant.bot_ids.length||liveGrant.bot_ids.includes(botId()))&&(!liveGrant.group_ids.length||!!scope.groupId&&liveGrant.group_ids.includes(scope.groupId))&&liveGrant.model_ids.includes(model)&&liveGrant.features.includes(scope.feature),403,'公用 Key 授权已变化');}
   const fresh={key:live,grant:liveGrant};

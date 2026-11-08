@@ -1,4 +1,5 @@
 import type express from 'express';
+import {registerUserDeletion} from './user-deletion.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
 import {controlPool,controlTransaction,audit} from './db.js';
@@ -17,7 +18,7 @@ export const githubRequest:GithubRequest=async(url,body,accessToken)=>{
  }catch{throw new HttpError(502,'GitHub 登录暂时不可用，请稍后重试');}
 };
 export async function createUserSession(id:string,res:express.Response){
- const session=token(),csrf=token();await controlPool.query("INSERT INTO sessions(token_hash,admin_id,csrf,expires_at) VALUES($1,$2,$3,now()+interval '12 hours')",[digest(session),id,csrf]);
+ const session=token(),csrf=token();await controlTransaction(async db=>{requireCondition((await db.query("SELECT 1 FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active' FOR SHARE",[id])).rowCount,403,'账号已停用或删除');await db.query("INSERT INTO sessions(token_hash,admin_id,csrf,expires_at) VALUES($1,$2,$3,now()+interval '12 hours')",[digest(session),id,csrf]);});
  res.cookie('groupdesk_session',session,{httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'lax',maxAge:12*3600000,path:'/'});return csrf;
 }
 export function registerGithubAuth(app:express.Express,request:GithubRequest=githubRequest){
@@ -43,7 +44,7 @@ export function registerGithubAuth(app:express.Express,request:GithubRequest=git
    const user=await controlTransaction(async db=>{
     const live=(await db.query('SELECT enabled,revision FROM managed_github_settings FOR SHARE')).rows[0];requireCondition(live.enabled&&live.revision===c.revision,409,'登录配置已改变，请重试');
     const id=randomUUID(),github=String(profile.id),name=typeof profile.name==='string'?profile.name.slice(0,120):profile.login;
-    const result=(await db.query("INSERT INTO admins(id,username,password_hash,github_id,github_login,display_name,role,permissions,status) VALUES($1,$2,'!github-only',$3,$4,$5,'user','{}',$6) ON CONFLICT(github_id) DO UPDATE SET github_login=excluded.github_login,display_name=excluded.display_name RETURNING "+fields,[id,'github:'+github,github,profile.login,name,c.registration_mode==='review'?'pending':'active'])).rows[0];
+    const result=(await db.query("INSERT INTO admins(id,username,password_hash,github_id,github_login,display_name,role,permissions,status) VALUES($1,$2,'!github-only',$3,$4,$5,'user','{}',$6) ON CONFLICT(github_id) WHERE deleted_at IS NULL DO UPDATE SET github_login=excluded.github_login,display_name=excluded.display_name,revision=admins.revision+CASE WHEN admins.github_login IS DISTINCT FROM excluded.github_login OR admins.display_name IS DISTINCT FROM excluded.display_name THEN 1 ELSE 0 END RETURNING "+fields,[id,'github:'+github+':'+id,github,profile.login,name,c.registration_mode==='review'?'pending':'active'])).rows[0];
     requireCondition(result.status!=='disabled',403,'账号已停用，请联系总管理员');await audit(result.username,'auth.github_login',result.id,{},db);return result;
    });
    if(user.status==='pending'){res.redirect(origin()+'/?login_error=pending');return;}await createUserSession(user.id,res);res.redirect(origin()+'/');
@@ -51,11 +52,13 @@ export function registerGithubAuth(app:express.Express,request:GithubRequest=git
  });
 }
 export function registerUserAdmin(app:express.Express){
- app.get('/api/users',async(req,res)=>{superAdmin(req.admin!);res.json({users:(await controlPool.query('SELECT '+fields+' FROM admins ORDER BY created_at,id')).rows,permissions:permissionLabels});});
+ registerUserDeletion(app);
+ app.get('/api/users',async(req,res)=>{superAdmin(req.admin!);res.json({users:(await controlPool.query('SELECT '+fields+' FROM admins WHERE deleted_at IS NULL ORDER BY created_at,id')).rows,permissions:permissionLabels});});
  app.put('/api/users/:id/access',async(req,res)=>{
   superAdmin(req.admin!);const id=z.uuid().parse(req.params.id),b=z.object({role:z.enum(['super_admin','user']),status:z.enum(['active','disabled','pending']),permissions:z.record(z.string(),z.boolean()).refine(p=>Object.keys(p).every(k=>Object.hasOwn(permissionLabels,k)),'未知权限'),revision:z.number().int().positive()}).strict().parse(req.body);
   await controlTransaction(async db=>{
-   const all=(await db.query('SELECT id,role,status,revision FROM admins ORDER BY id FOR UPDATE')).rows,current=all.find(u=>u.id===id);requireCondition(current&&current.revision===b.revision,409,'用户已变化，请刷新');
+   await db.query('SELECT pg_advisory_xact_lock(78511966)');
+   const all=(await db.query('SELECT id,role,status,revision FROM admins WHERE deleted_at IS NULL ORDER BY id FOR UPDATE')).rows;requireCondition(all.some(u=>u.id===req.admin!.id&&u.role==='super_admin'&&u.status==='active'),403,'仅有效总管理员可以设置权限');const current=all.find(u=>u.id===id);requireCondition(current&&current.revision===b.revision,409,'用户已变化，请刷新');
    requireCondition(b.role==='super_admin'&&b.status==='active'||all.some(u=>u.id!==id&&u.role==='super_admin'&&u.status==='active'),409,'必须保留至少一名可登录的总管理员');
    await db.query('UPDATE admins SET role=$2,status=$3,permissions=$4,revision=revision+1 WHERE id=$1',[id,b.role,b.status,b.permissions]);await db.query('DELETE FROM sessions WHERE admin_id=$1',[id]);await audit(req.admin!.username,'user.access_updated',id,{role:b.role,status:b.status,permissions:b.permissions},db);
   });res.json({ok:true});
@@ -70,6 +73,6 @@ export function registerUserAdmin(app:express.Express){
  });
  app.put('/api/users/bot-owner/:id',async(req,res)=>{
   superAdmin(req.admin!);const id=z.uuid().parse(req.params.id),b=z.object({owner_user_id:z.uuid()}).strict().parse(req.body);
-  await controlTransaction(async db=>{await db.query('SELECT pg_advisory_xact_lock(78511966)');const bot=(await db.query('SELECT state FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(bot,404,'机器人不存在');requireCondition(['paused','archived'].includes(bot.state),409,'变更归属前请先暂停并等待运行端确认');requireCondition(!(await db.query('SELECT 1 FROM managed_bot_switch WHERE target_id=$1',[id])).rowCount,409,'请先取消待执行的机器人切换');requireCondition((await db.query("SELECT 1 FROM admins WHERE id=$1 AND status='active'",[b.owner_user_id])).rowCount,400,'请选择有效用户');requireCondition((await db.query('UPDATE managed_bots SET owner_user_id=$2,revision=revision+1 WHERE deleted_at IS NULL AND id=$1 RETURNING id',[id,b.owner_user_id])).rowCount,404,'机器人不存在');await db.query('UPDATE managed_bot_onboarding SET account_confirmed_at=NULL,account_confirmed_by=NULL,reader_authorized_at=NULL,reader_authorized_by=NULL,completed_at=NULL,revision=revision+1,updated_at=now() WHERE bot_id=$1',[id]);await audit(req.admin!.username,'bot.owner_changed',id,{owner_user_id:b.owner_user_id},db);});res.json({ok:true});
+  await controlTransaction(async db=>{await db.query('SELECT pg_advisory_xact_lock(78511966)');const bot=(await db.query('SELECT state FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(bot,404,'机器人不存在');requireCondition(['paused','archived'].includes(bot.state),409,'变更归属前请先暂停并等待运行端确认');requireCondition(!(await db.query('SELECT 1 FROM managed_bot_switch WHERE target_id=$1',[id])).rowCount,409,'请先取消待执行的机器人切换');requireCondition((await db.query("SELECT 1 FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active'",[b.owner_user_id])).rowCount,400,'请选择有效用户');requireCondition((await db.query('UPDATE managed_bots SET owner_user_id=$2,revision=revision+1 WHERE deleted_at IS NULL AND id=$1 RETURNING id',[id,b.owner_user_id])).rowCount,404,'机器人不存在');await db.query('UPDATE managed_bot_onboarding SET account_confirmed_at=NULL,account_confirmed_by=NULL,reader_authorized_at=NULL,reader_authorized_by=NULL,completed_at=NULL,revision=revision+1,updated_at=now() WHERE bot_id=$1',[id]);await audit(req.admin!.username,'bot.owner_changed',id,{owner_user_id:b.owner_user_id},db);});res.json({ok:true});
  });
 }

@@ -73,3 +73,8 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 总管理员可GET `/api/bots/:id/deletion`、`/api/groups/:id/deletion`读取影响及阻止原因，再DELETE对应`/api/bots/:id`或`/api/groups/:id`，JSON为当前`revision`与完整`confirmation`（微信号/群名）。群请求必须使用所选机器人作用域；普通用户始终403，其他机器人群ID不可越权。删除不会通过此API执行Docker或微信操作。
 
 已删除机器人凭据失效且不再作为业务空间；已删除群从普通管理/业务访问排除，但授权原适配器仍可获取`enabled:false`、`removed:true`、文字/图片路由停用且无话题/知识/人设绑定的配置通知，并按现有契约ACK。这是退订配置通知，不能凭它继续请求上下文或模型；同微信真实群被明确重新登记后，以新的存活配置为准。金融用量归属保留原UUID，不清空授权限定数组（空数组原含义为不限范围），不因删除扩大Key权限。
+
+## 站点账号删除（仅总管理员）
+
+- `GET /api/users/:id/deletion`：返回kind=user、revision、confirmation、影响统计与can_delete/reasons，不返回口令或Key。
+- `DELETE /api/users/:id`：严格接收`{revision,confirmation}`，沿用管理会话/CSRF；角色403、错误输入400、旧版本/未满足前置条件409、已删除或未知404。撤销会话与授权，保留账本和创建者历史；详情见[用户管理](users-and-permissions.md)。
