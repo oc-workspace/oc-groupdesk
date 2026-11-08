@@ -37,7 +37,7 @@ export async function requestActivation(id:string,revision:number,actor:string,p
   requireCondition(locked?.state==='paused'&&locked.revision===revision&&readyForActivation(locked),409,'目标机器人状态已变化，请刷新');
   requireCondition(locked.owner_user_id,409,'请先由管理员分配机器人所有人');
   requireCondition(locked.activation_slot===activeBotsPerUser,409,'当前每个用户只能启用一个机器人');
-  requireCondition((await db.query("SELECT 1 FROM admins WHERE id=$1 AND status='active'",[locked.owner_user_id])).rowCount,409,'机器人所有人未通过审核或已停用');
+  requireCondition((await db.query("SELECT 1 FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active'",[locked.owner_user_id])).rowCount,409,'机器人所有人未通过审核或已停用');
   const pending=(await db.query('SELECT target_id FROM managed_bot_switch WHERE owner_user_id=$1 AND activation_slot=$2 FOR UPDATE',[locked.owner_user_id,locked.activation_slot])).rows[0];
   requireCondition(!pending,409,'此用户已有机器人正在等待切换，请先完成或取消');
   const current=(await db.query("SELECT * FROM managed_bots WHERE deleted_at IS NULL AND owner_user_id=$1 AND activation_slot=$2 AND state IN ('active','pausing') FOR UPDATE",[locked.owner_user_id,locked.activation_slot])).rows[0];
@@ -56,7 +56,7 @@ async function finishOneActivation(owner:string,slot:number){
   if((await db.query("SELECT 1 FROM managed_bots WHERE deleted_at IS NULL AND owner_user_id=$1 AND activation_slot=$2 AND state IN ('active','pausing')",[owner,slot])).rowCount)return false;
   const target=(await db.query('SELECT * FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[pending.target_id])).rows[0];
   if(!target||target.owner_user_id!==owner||target.activation_slot!==slot||slot!==activeBotsPerUser||target.state!=='paused'||!readyForActivation(target))return false;
-  if(!(await db.query("SELECT 1 FROM admins WHERE id=$1 AND status='active'",[owner])).rowCount)return false;
+  if(!(await db.query("SELECT 1 FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active'",[owner])).rowCount)return false;
   try{await (await import('./bot-onboarding.js')).requireOnboardingReady(target.id);}catch{return false;}
   await advanceSchedules(target.id);
   await db.query("UPDATE managed_bots SET state='active',revision=revision+1,activation_generation=activation_generation+1,error=NULL WHERE id=$1",[target.id]);

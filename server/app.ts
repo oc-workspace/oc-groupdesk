@@ -89,7 +89,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.post('/api/auth/login',async(req,res)=>{
     if(req.headers.origin&&req.headers.origin!==(process.env.PUBLIC_ORIGIN||'http://localhost:3110'))throw new HttpError(403,'请求来源不匹配');
     const body=z.object({username:text(80).min(1),password:z.string().max(200)}).parse(req.body);
-    const admin=(await pool.query("SELECT * FROM admins WHERE username=$1 AND github_id IS NULL AND status='active'",[body.username])).rows[0];
+    const admin=(await pool.query("SELECT * FROM admins WHERE deleted_at IS NULL AND username=$1 AND github_id IS NULL AND status='active'",[body.username])).rows[0];
     // Always perform a scrypt operation, including nonexistent usernames.
     const valid=passwordValid(body.password,admin?.password_hash||passwordHash('unused-timing-value'));
     requireCondition(admin&&valid,401,'用户名或密码错误');
@@ -129,7 +129,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.use('/api',async(req,res,next)=>{
     const session=req.cookies[cookieName];
     if(!session)return res.status(401).json({error:'请先登录'});
-    const found=(await controlPool.query("SELECT a.id,a.username,a.display_name,a.github_login,a.role,a.permissions,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.status='active'",[digest(session)])).rows[0];
+    const found=(await controlPool.query("SELECT a.id,a.username,a.display_name,a.github_login,a.role,a.permissions,s.csrf FROM sessions s JOIN admins a ON a.id=s.admin_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.deleted_at IS NULL AND a.status='active'",[digest(session)])).rows[0];
     if(!found)return res.status(401).json({error:'登录已过期'});
     req.admin=found;
     if(!['GET','HEAD','OPTIONS'].includes(req.method)){

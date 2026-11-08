@@ -11,7 +11,7 @@ try{
  const action=process.argv[2];
  if(action==='setup'){
   await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await ensureLegacyIsolation();
-  const id=await createBot({name:'Restore fixture',wechat_id:'synthetic_restore',host_label:'test',notes:''},'test');
+  const id=await createBot({name:'Restore fixture',wechat_id:'synthetic_restore',host_label:'test',notes:''},'admin');
   await withBot(id,async()=>{await pool.query('CREATE TABLE restore_probe(id int primary key,secret text)');await pool.query('INSERT INTO restore_probe VALUES(1,$1)',[sealKey('synthetic-model-secret')]);await mkdir(dataDirectory()+'/uploads',{recursive:true});await writeFile(dataDirectory()+'/uploads/probe.txt','synthetic-file');});
   console.log('Restore fixture created.');
  }else if(action==='destroy'){

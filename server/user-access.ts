@@ -8,7 +8,7 @@ export async function accessibleBot(user:SessionUser,id:string){const b=await bo
 export function canReadResource(user:SessionUser,r:any){return user.role==='super_admin'||r.created_by_user_id===user.id||r.visibility==='common'||r.visibility==='selected'&&r.audience_user_ids?.includes(user.id);}
 export async function initializeWorkspaceOwners(owner:string|null){if(!owner)return;for(const table of ['topics','personas','groups'])await pool.query('UPDATE '+table+' SET created_by_user_id=$1 WHERE created_by_user_id IS NULL',[owner]);}
 export async function initializeUserOwners(){
- const admin=(await controlPool.query("SELECT id FROM admins WHERE role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];if(!admin)return;
+ const admin=(await controlPool.query("SELECT id FROM admins WHERE deleted_at IS NULL AND role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];if(!admin)return;
  await controlPool.query('UPDATE managed_bots SET owner_user_id=COALESCE(owner_user_id,$1),created_by_user_id=COALESCE(created_by_user_id,$1)',[admin.id]);
  for(const b of (await controlPool.query("SELECT id,owner_user_id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN ('legacy','ready')")).rows)await withBot(b.id,()=>initializeWorkspaceOwners(b.owner_user_id));
 }
@@ -67,8 +67,8 @@ export async function workspaceAccess(req:express.Request,res:express.Response,n
   }
   if(/^\/persona-bindings\//.test(path)&&req.method==='PUT'){if(req.body.version_id)assertVersion(req.body.version_id);for(const f of req.body.features||[])assertVersion(f.version_id);}
  }
- const users=(await controlPool.query('SELECT id,username,display_name,github_login FROM admins')).rows;
- const creator=(id:string)=>{const a=users.find(a=>a.id===id);return a?{id:a.id,name:a.display_name||a.github_login||a.username}:null;};
+ const users=(await controlPool.query('SELECT id,username,display_name,github_login,deleted_at FROM admins')).rows;
+ const creator=(id:string)=>{const a=users.find(a=>a.id===id);return a?{id:a.id,name:(a.display_name||a.github_login||a.username)+(a.deleted_at?'（已删除账号）':'')}:null;};
  const decorate=(r:any,kind:string)=>({...r,audience_user_ids:isAdmin?r.audience_user_ids:undefined,creator:creator(r.created_by_user_id),can_edit:isAdmin||r.created_by_user_id===u.id&&allowed(u,kind==='topics'?'topics.create':'personas.create')});
  const group=(g:any)=>({...g,creator:creator(g.created_by_user_id),persona_binding:g.persona_version_id&&!visibleVersions.has(g.persona_version_id)?{name:'管理员配置的受限人设',version:null}:g.persona_binding,persona_features:g.persona_features?.map((f:any)=>visiblePersonas.has(f.persona_id)?f:{...f,name:'管理员配置的受限特色'})});
  const json=res.json.bind(res);res.json=((data:any)=>{

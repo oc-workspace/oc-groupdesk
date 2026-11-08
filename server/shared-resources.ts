@@ -8,14 +8,14 @@ import {allowed,type SessionUser} from '../shared/user-permissions.js';
 import {requireCondition,digest} from './security.js';
 const table=(kind:string)=>kind==='topic'?'topics':'personas';
 async function resources(user:SessionUser){
- const users=(await controlPool.query('SELECT id,username,github_login,display_name FROM admins')).rows,result:any[]=[];
+ const users=(await controlPool.query('SELECT id,username,github_login,display_name,deleted_at FROM admins')).rows,result:any[]=[];
  const bots=(await controlPool.query("SELECT id,name,owner_user_id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN ('legacy','ready') AND state<>'archived'")).rows;
  for(const bot of bots)await withBot(bot.id,async()=>{
   for(const [kind,t] of [['topic','topics'],['persona','personas']]){
    const rows=(await pool.query('SELECT id,name,created_by_user_id,visibility,audience_user_ids FROM '+t+' ORDER BY name')).rows;
    for(const r of rows){if(!canReadResource(user,r))continue;const c=users.find(u=>u.id===r.created_by_user_id);let version=null;
     if(kind==='persona')version=(await pool.query('SELECT version FROM persona_versions WHERE persona_id=$1 ORDER BY version DESC LIMIT 1',[r.id])).rows[0]?.version||null;
-    result.push({...r,...(user.role==='super_admin'?{}:{audience_user_ids:undefined}),kind,bot_id:bot.id,...(user.role==='super_admin'?{bot_name:bot.name,owner_user_id:bot.owner_user_id}:{}),creator:c?{id:c.id,name:c.display_name||c.github_login||c.username}:null,version,importable:kind==='topic'||!!version});
+    result.push({...r,...(user.role==='super_admin'?{}:{audience_user_ids:undefined}),kind,bot_id:bot.id,...(user.role==='super_admin'?{bot_name:bot.name,owner_user_id:bot.owner_user_id}:{}),creator:c?{id:c.id,name:(c.display_name||c.github_login||c.username)+(c.deleted_at?'（已删除账号）':'')}:null,version,importable:kind==='topic'||!!version});
    }
   }
  });return result;
@@ -25,7 +25,7 @@ export function registerSharedResources(app:express.Express){
  app.put('/api/shared-resources/visibility',async(req,res)=>{
   superAdmin(req.admin!);const b=z.object({bot_id:z.uuid(),id:z.uuid(),kind:z.enum(['topic','persona']),visibility:z.enum(['private','common','selected']),audience_user_ids:z.array(z.uuid()).max(1000)}).strict().parse(req.body);
   requireCondition(b.visibility!=='selected'||b.audience_user_ids.length>0,400,'请选择允许访问的用户');requireCondition(new Set(b.audience_user_ids).size===b.audience_user_ids.length,400,'用户不能重复');
-  requireCondition((await controlPool.query("SELECT count(*)::int n FROM admins WHERE id=ANY($1::uuid[]) AND status='active'",[b.audience_user_ids])).rows[0].n===b.audience_user_ids.length,400,'指定用户不存在或已停用');
+  requireCondition((await controlPool.query("SELECT count(*)::int n FROM admins WHERE deleted_at IS NULL AND id=ANY($1::uuid[]) AND status='active'",[b.audience_user_ids])).rows[0].n===b.audience_user_ids.length,400,'指定用户不存在或已停用');
   await accessibleBot(req.admin!,b.bot_id);await withBot(b.bot_id,async()=>transaction(async db=>{requireCondition((await db.query('UPDATE '+table(b.kind)+' SET visibility=$2,audience_user_ids=$3 WHERE id=$1 RETURNING id',[b.id,b.visibility,b.visibility==='selected'?b.audience_user_ids:[]])).rowCount,404,'资源不存在');await audit(req.admin!.username,'resource.visibility_updated',b.id,{kind:b.kind,visibility:b.visibility,audience:b.audience_user_ids},db);}));res.json({ok:true});
  });
  app.post('/api/shared-resources/copy',async(req,res)=>{

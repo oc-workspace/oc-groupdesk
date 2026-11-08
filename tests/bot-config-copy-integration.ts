@@ -12,7 +12,7 @@ let source='',target='',occupied='',group='',credential='',version='',persona=''
 const created:string[]=[];
 before(async()=>{
  await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();
- for(const name of ['copy_source','copy_target','copy_occupied'])created.push(await createBot({name,wechat_id:name,host_label:'synthetic',notes:''},'synthetic-test'));
+ for(const name of ['copy_source','copy_target','copy_occupied'])created.push(await createBot({name,wechat_id:name,host_label:'synthetic',notes:''},'admin'));
  [source,target,occupied]=created;
  await withBot(source,async()=>{
   credential=randomUUID();group=randomUUID();persona=randomUUID();version=randomUUID();feature=randomUUID();featureVersion=randomUUID();

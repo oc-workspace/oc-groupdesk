@@ -13,7 +13,11 @@ export async function createBot(input:{name:string;wechat_id:string;host_label:s
  const client=await controlPool.connect();let roleCreated=false,databaseCreated=false,inserted=false;
  try{
   await client.query('SELECT pg_advisory_lock(78511965)');
-  await client.query("INSERT INTO managed_bots(id,name,wechat_id,host_label,notes,state,database_state,db_name,db_role,db_password_ciphertext,model_key_ciphertext,data_namespace,owner_user_id,created_by_user_id) VALUES($1,$2,$3,$4,$5,'paused','provisioning',$6,$7,$8,$9,$10,$11,$11)",[id,input.name,input.wechat_id,input.host_label,input.notes,database,role,sealControlSecret(password),sealControlSecret(modelKey),namespace,ownerId||(await client.query("SELECT id FROM admins WHERE username=$1",[actor])).rows[0]?.id||null]);inserted=true;
+  await client.query('BEGIN');
+  await client.query('SELECT pg_advisory_xact_lock(78511966)');
+  const owner=ownerId||(await client.query("SELECT id FROM admins WHERE deleted_at IS NULL AND username=$1",[actor])).rows[0]?.id;
+  requireCondition(owner&&(await client.query("SELECT 1 FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active' FOR SHARE",[owner])).rowCount,403,'机器人所有人已停用或删除');
+  await client.query("INSERT INTO managed_bots(id,name,wechat_id,host_label,notes,state,database_state,db_name,db_role,db_password_ciphertext,model_key_ciphertext,data_namespace,owner_user_id,created_by_user_id) VALUES($1,$2,$3,$4,$5,'paused','provisioning',$6,$7,$8,$9,$10,$11,$11)",[id,input.name,input.wechat_id,input.host_label,input.notes,database,role,sealControlSecret(password),sealControlSecret(modelKey),namespace,owner]);await client.query('COMMIT');inserted=true;
   await client.query(`CREATE ROLE ${sqlIdentifier(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT PASSWORD ${quote(password)}`);roleCreated=true;
   await client.query(`CREATE DATABASE ${sqlIdentifier(database)} OWNER ${sqlIdentifier(role)} TEMPLATE template0`);databaseCreated=true;
   await client.query(`REVOKE ALL ON DATABASE ${sqlIdentifier(database)} FROM PUBLIC`);
@@ -29,6 +33,7 @@ export async function createBot(input:{name:string;wechat_id:string;host_label:s
   await client.query("UPDATE managed_bots SET database_state='ready' WHERE id=$1",[id]);
   await audit(actor,'bot.created',id,{isolated_database:true},controlPool);return id;
  }catch(error){
+  await client.query('ROLLBACK');
   if(inserted)await client.query("UPDATE managed_bots SET database_state='failed',error='业务空间初始化失败，请检查服务权限；未启用此机器人' WHERE id=$1",[id]);
   // Keep a failed registration visible. Newly created empty databases may be
   // investigated by the operator; never delete a database as error recovery.
