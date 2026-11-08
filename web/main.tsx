@@ -50,7 +50,7 @@ async function requestApi(path:string,method='GET',body?:unknown,signal?:AbortSi
   const res=await fetch('/api'+path,{method,signal,credentials:'same-origin',headers:{...(botId?{'X-GroupDesk-Bot':botId}:{}),...(!form&&body?{'Content-Type':'application/json'}:{}),...(method!=='GET'?{'X-CSRF-Token':csrf}:{})},body:body===undefined?undefined:form?body:JSON.stringify(body)});
   serverClock.update(res.headers.get('Date'));
   const result=await res.json().catch(()=>({error:'服务器返回了无效响应'}));
-  if(!res.ok){if(res.status===401&&path!=='/auth/login')window.dispatchEvent(new Event('session-expired'));throw new Error(result.error||'操作失败');}
+  if(!res.ok){if(res.status===401&&path!=='/auth/login')window.dispatchEvent(new Event('session-expired'));throw Object.assign(new Error(result.error||'操作失败'),{status:res.status,code:result.code});}
   return result;
   });
 }
