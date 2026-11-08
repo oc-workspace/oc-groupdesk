@@ -1,0 +1,19 @@
+.user-review-summary{display:flex;gap:18px;align-items:flex-start;padding:22px 24px;margin:0 0 24px;border:1px solid #e5b959;border-left:6px solid #bc7c13;border-radius:14px;background:#fff7df;color:#66430e}
+.user-review-summary-icon{width:46px;height:46px;flex:none;display:grid;place-items:center;border-radius:50%;background:#ffe6a6;color:#80520a}
+.user-review-eyebrow{display:block;font-size:12px;font-weight:700;color:#785116;margin-bottom:6px}
+.user-review-summary h2{margin:0 0 8px;font-size:24px;line-height:1.4;color:#613c06}
+.user-review-summary p{margin:0 0 8px;font-size:14px;line-height:1.8}
+.user-review-summary small{font-size:12px;line-height:1.7;color:#785b32}
+.user-review-count{display:inline-block;vertical-align:middle;margin-left:12px;padding:4px 9px;border-radius:6px;background:#f9dda0;color:#684105;font-size:12px;font-weight:700}
+.persona-version.user-access-pending{padding:16px 18px;margin:12px 0;border:1px solid #e5b959;border-left:5px solid #bc7c13;border-radius:10px;background:#fffaf0}
+.user-access-identity{min-width:0}
+.user-access-identity>strong{display:flex;align-items:center;flex-wrap:wrap;gap:10px;overflow-wrap:anywhere}
+.user-access-identity>small{overflow-wrap:anywhere}
+.user-review-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:5px;background:#f9dda0;color:#684105;font-size:12px;line-height:1.3;font-weight:700}
+@media(max-width:680px){
+ .user-review-summary{padding:18px 16px;gap:12px}
+ .user-review-summary-icon{width:36px;height:36px}
+ .user-review-summary h2{font-size:21px}
+ .persona-version.user-access-row{align-items:flex-start;flex-direction:column;gap:14px}
+ .user-access-row>.model-key-actions{flex-wrap:wrap;margin-left:0}
+}
