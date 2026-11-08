@@ -1,4 +1,6 @@
 import type express from 'express';
+import {deletionReason,reasonFields,reasonDetails,type DeletionReason} from '../shared/deletion.js';
+import {registerUserCleanup} from './user-cleanup.js';
 import {z} from 'zod';
 import {controlPool,controlTransaction,audit} from './db.js';
 import {superAdmin} from './user-access.js';
@@ -22,7 +24,8 @@ async function inspectUser(id:string,actorId:string,db:Db,lock=false){
  '不注销 GitHub 或微信，不退出真实群、不删除 Docker；不自动删除其他人的机器人或共享资源。']};
 }
 export async function userDeletionPreview(id:string,actorId:string){return inspectUser(id,actorId,controlPool);}
-export async function deleteUserAccount(id:string,revision:number,confirmation:string,actorId:string){
+export async function deleteUserAccount(id:string,revision:number,confirmation:string,actorId:string,why:DeletionReason){
+ why=deletionReason.parse(why);
  await controlTransaction(async db=>{
   // Ownership, new provisioning, access changes and key maintenance coordinate here.
   await db.query('SELECT pg_advisory_xact_lock(78511966)');
@@ -33,11 +36,12 @@ export async function deleteUserAccount(id:string,revision:number,confirmation:s
   await db.query('UPDATE managed_model_grants SET enabled=false,revision=revision+1 WHERE user_id=$1 AND enabled',[id]);
   await db.query("UPDATE managed_model_requests SET status='cancelled',review_note='站点账号已删除',reviewed_at=now() WHERE user_id=$1 AND status='pending'",[id]);
   await db.query('UPDATE managed_model_keys SET enabled=false,revision=revision+1 WHERE owner_user_id=$1 AND enabled',[id]);
-  await db.query("UPDATE admins SET deleted_at=now(),deleted_by=$2,status='disabled',permissions='{}',password_hash='!deleted-account',revision=revision+1 WHERE id=$1",[id,actor.username]);
-  await audit(actor.username,'user.account_deleted',id,{retained_history:true,session_revoked:true,github_can_register_again:true},db);
+  await db.query("UPDATE admins SET deleted_at=now(),deleted_by=$2,deletion_reason=$3,deletion_note=$4,status='disabled',permissions='{}',password_hash='!deleted-account',revision=revision+1 WHERE id=$1",[id,actor.username,why.reason,why.reason_note]);
+  await audit(actor.username,'user.account_deleted',id,{...reasonDetails(why),target_name:p.name,account:p.confirmation,retained_history:true,session_revoked:true,github_can_register_again:true},db);
  });
 }
 export function registerUserDeletion(app:express.Express){
+ registerUserCleanup(app);
  app.get('/api/users/:id/deletion',async(req,res)=>{superAdmin(req.admin!);res.json(await userDeletionPreview(z.uuid().parse(req.params.id),req.admin!.id));});
- app.delete('/api/users/:id',async(req,res)=>{superAdmin(req.admin!);const b=z.object({revision:z.number().int().positive(),confirmation:z.string().min(1).max(120)}).strict().parse(req.body);await deleteUserAccount(z.uuid().parse(req.params.id),b.revision,b.confirmation,req.admin!.id);res.json({ok:true,deleted:true});});
+ app.delete('/api/users/:id',async(req,res)=>{superAdmin(req.admin!);const b=z.object({revision:z.number().int().positive(),confirmation:z.string().min(1).max(120),...reasonFields}).strict().refine(v=>v.reason!=='other'||!!v.reason_note,'选择其他时请补充原因').parse(req.body);await deleteUserAccount(z.uuid().parse(req.params.id),b.revision,b.confirmation,req.admin!.id,b);res.json({ok:true,deleted:true});});
 }

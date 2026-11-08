@@ -16,7 +16,7 @@ export const pricesSchema=z.record(z.string().min(1).max(200),z.object({input:z.
 export const botId=()=>botStorage.getStore()?.id||legacyBotId;
 export async function botPrincipal(){let bot=await botRecord(botId());requireCondition(bot,404,'机器人已删除或不存在');if(!bot.owner_user_id){const fallback=(await controlPool.query("SELECT id FROM admins WHERE deleted_at IS NULL AND role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];requireCondition(fallback,409,'机器人尚未分配所有人');bot={...bot,owner_user_id:fallback.id};}requireCondition(bot?.owner_user_id,409,'机器人尚未分配所有人');const user=(await controlPool.query("SELECT id FROM admins WHERE deleted_at IS NULL AND id=$1 AND status='active'",[bot.owner_user_id])).rows[0];requireCondition(user,403,'机器人所有人未通过审核或已停用');return user.id as string;}
 export function publicKey(k:any,userId=currentUserId()){
- const {secret_ciphertext,key_digest,...safe}=k;return {...safe,key_hint:k.key_hint,is_owner:k.owner_user_id===userId,can_reveal:k.owner_user_id===userId};
+ const {secret_ciphertext,key_digest,...safe}=k;return {...safe,key_hint:k.key_hint,is_owner:k.owner_user_id===userId,can_reveal:k.owner_user_id===userId&&!k.secret_purged_at};
 }
 export async function ensureVaultCredential(c:any){
  if(c.vault_key_id)return (await controlPool.query('SELECT * FROM managed_model_keys WHERE id=$1',[c.vault_key_id])).rows[0];

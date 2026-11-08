@@ -504,7 +504,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
     requireCondition(group,404,'群未绑定');
     const config=await groupDetail(group.id,pool,true);
     if(config.deleted_at){config.removed=true;delete config.deleted_by;}
-    delete config.deleted_at;
+    delete config.deleted_at;delete config.deletion_reason;delete config.deletion_note;
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows).map(({created_by_user_id,visibility,audience_user_ids,source_resource,...topic})=>topic);
     delete config.created_by_user_id;
     config.policy_contract_version=1;

@@ -64,6 +64,7 @@ services:
   worker:
     <<: *app
     command: [npm, run, worker]
+    stop_grace_period: 660s
     networks: [internal, model-egress]
     depends_on:
       app:

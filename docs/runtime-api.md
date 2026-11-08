@@ -78,3 +78,9 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 
 - `GET /api/users/:id/deletion`：返回kind=user、revision、confirmation、影响统计与can_delete/reasons，不返回口令或Key。
 - `DELETE /api/users/:id`：严格接收`{revision,confirmation}`，沿用管理会话/CSRF；角色403、错误输入400、旧版本/未满足前置条件409、已删除或未知404。撤销会话与授权，保留账本和创建者历史；详情见[用户管理](users-and-permissions.md)。
+
+## 删除原因与独占数据清理
+
+所有站点用户、机器人、群DELETE请求在原revision/confirmation之外，必须有`reason`（test/violation/duplicate/inactive/other），可选`reason_note`最多500字；other要求非空说明。管理侧原因/说明不下发到运行端配置。
+
+仅总管理员：`GET /api/users/deleted`最近100账号与逐项清理状态；`GET /api/users/deletion-history`最近150条精简审计。`GET /api/users/:id/cleanup/preview`返回影响与保留项目、revision和plan_hash；`POST /api/users/:id/cleanup`严格接收`{revision,confirmation,plan_hash,reason,reason_note}`并返回202/任务ID。预览过期409，未删账号/无可清理项409，无权限403。后台再核验后执行，queued/processing/completed/partial/failed状态均可手动刷新；不将HTTP202当作完成。

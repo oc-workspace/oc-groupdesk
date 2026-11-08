@@ -1,4 +1,6 @@
 import type express from 'express';
+import {deletionReason,reasonFields,reasonDetails,type DeletionReason} from '../shared/deletion.js';
+import {legacyBotId} from './bot-context.js';
 import {z} from 'zod';
 import {pool,controlPool,transaction,controlTransaction,audit} from './db.js';
 import {botRecord,withBot} from './bot-workspaces.js';
@@ -44,7 +46,8 @@ export async function botDeletionPreview(id:string){
  return {kind:'bot',id,revision:b.revision,name:b.name,confirmation:b.wechat_id,scope:'微信号：'+b.wechat_id,can_delete:!reasons.length,reasons,counts,
   effects:['从后台移除此微信号登记、所属群及业务资源的正常访问入口；删除后不能在界面恢复。','撤销此机器人的接入凭据，取消尚未开始的接入/生成任务。','用户自己的 API Key、公用授权及用量账单独立保留；不会删除其他机器人的资源。','底层历史数据、必要审计和账目留存；不删除微信账号、微信本地记录或服务器 Docker。']};
 }
-export async function deleteBotRegistration(id:string,revision:number,confirmation:string,actor:string){
+export async function deleteBotRegistration(id:string,revision:number,confirmation:string,actor:string,why:DeletionReason){
+ why=deletionReason.parse(why);
  await controlTransaction(async db=>{
   await db.query('SELECT pg_advisory_xact_lock(78511966)');
   await currentSuperAdministrator(actor,db);
@@ -65,8 +68,8 @@ export async function deleteBotRegistration(id:string,revision:number,confirmati
   }));
   await db.query('DELETE FROM managed_bot_adapters WHERE bot_id=$1',[id]);
   await db.query("UPDATE managed_model_requests SET status='cancelled',review_note='机器人登记已删除',reviewed_at=now() WHERE bot_id=$1 AND status='pending'",[id]);
-  await db.query("UPDATE managed_bots SET deleted_at=now(),deleted_by=$2,state='archived',revision=revision+1 WHERE id=$1",[id,actor]);
-  await audit(actor,'bot.registration_deleted',id,{retained_history:true,credentials_revoked:true},db);
+  await db.query("UPDATE managed_bots SET deleted_at=now(),deleted_by=$2,deletion_reason=$3,deletion_note=$4,state='archived',revision=revision+1 WHERE id=$1",[id,actor,why.reason,why.reason_note]);
+  await audit(actor,'bot.registration_deleted',id,{...reasonDetails(why),target_name:b.name,wechat_id:b.wechat_id,retained_history:true,credentials_revoked:true},db);
  });
 }
 async function groupReasons(g:any,b:any,db:Pick<typeof pool,'query'>=controlPool){
@@ -84,7 +87,8 @@ export async function groupDeletionPreview(botId:string,id:string){
  return {kind:'group',id,revision:g.revision,name:g.name,confirmation:g.name,scope:'机器人：'+b.name+' · 微信号：'+b.wechat_id+(g.external_id?' · 群标识：'+g.external_id:''),can_delete:!reasons.length,reasons,counts,
   effects:['从群管理、群人设配置及总结/互动等正常选择入口移除此群，界面不提供恢复。','停止此群的计划与未开始任务，解除话题、知识库、人设和成员授权的群绑定。','独立话题、知识库、人设、素材、历史积分账目及 API 用量保留，不删除其他群。','不会退出或解散真实微信群，也不会删除微信本地聊天记录。']};
 }
-export async function deleteGroupConfiguration(botId:string,id:string,revision:number,confirmation:string,actor:string){
+export async function deleteGroupConfiguration(botId:string,id:string,revision:number,confirmation:string,actor:string,why:DeletionReason){
+ why=deletionReason.parse(why);
  await controlTransaction(async control=>{
   await control.query('SELECT pg_advisory_xact_lock(78511966)');
   await currentSuperAdministrator(actor,control);
@@ -103,17 +107,18 @@ export async function deleteGroupConfiguration(botId:string,id:string,revision:n
    await db.query('UPDATE memberships SET revoked_at=COALESCE(revoked_at,now()) WHERE group_id=$1',[id]);
    await db.query('DELETE FROM dm_scenes WHERE group_id=$1',[id]);
    await db.query('DELETE FROM group_topics WHERE group_id=$1',[id]);await db.query('DELETE FROM group_knowledge WHERE group_id=$1',[id]);await db.query('DELETE FROM group_persona_features WHERE group_id=$1',[id]);
-   await db.query(`UPDATE groups SET deleted_at=now(),deleted_by=$2,enabled=false,revision=revision+1,persona_version_id=NULL,model_routes='{"text":{"mode":"disabled"},"image":{"mode":"disabled"}}' WHERE id=$1`,[id,actor]);
-   await audit(actor,'group.configuration_deleted',id,{external_id:g.external_id,retained_history:true},db);
+   await db.query(`UPDATE groups SET deleted_at=now(),deleted_by=$2,deletion_reason=$3,deletion_note=$4,enabled=false,revision=revision+1,persona_version_id=NULL,model_routes='{"text":{"mode":"disabled"},"image":{"mode":"disabled"}}' WHERE id=$1`,[id,actor,why.reason,why.reason_note]);
+   await audit(actor,'group.configuration_deleted',id,{...reasonDetails(why),target_name:g.name,bot_id:botId,external_id:g.external_id,retained_history:true},db);
+   if(botId!==legacyBotId)await audit(actor,'group.configuration_deleted',id,{...reasonDetails(why),target_name:g.name,bot_id:botId,retained_history:true},control);
   });
  });
 }
-const deleteBody=z.object({revision:z.number().int().positive(),confirmation:z.string().min(1).max(120)}).strict();
+const deleteBody=z.object({revision:z.number().int().positive(),confirmation:z.string().min(1).max(120),...reasonFields}).strict().refine(v=>v.reason!=='other'||!!v.reason_note,'选择其他时请补充原因');
 export function registerBotDeletion(app:express.Express){
  app.get('/api/bots/:id/deletion',async(req,res)=>{superAdmin(req.admin!);const id=z.uuid().parse(req.params.id);res.json(await botDeletionPreview(id));});
- app.delete('/api/bots/:id',async(req,res)=>{superAdmin(req.admin!);const id=z.uuid().parse(req.params.id),b=deleteBody.parse(req.body);await deleteBotRegistration(id,b.revision,b.confirmation,req.admin!.username);res.json({ok:true,deleted:true});});
+ app.delete('/api/bots/:id',async(req,res)=>{superAdmin(req.admin!);const id=z.uuid().parse(req.params.id),b=deleteBody.parse(req.body);await deleteBotRegistration(id,b.revision,b.confirmation,req.admin!.username,b);res.json({ok:true,deleted:true});});
 }
 export function registerGroupDeletion(app:express.Express){
  app.get('/api/groups/:id/deletion',async(req,res)=>{superAdmin(req.admin!);await accessibleBot(req.admin!,req.botId!);res.json(await groupDeletionPreview(req.botId!,z.uuid().parse(req.params.id)));});
- app.delete('/api/groups/:id',async(req,res)=>{superAdmin(req.admin!);const b=deleteBody.parse(req.body);await deleteGroupConfiguration(req.botId!,z.uuid().parse(req.params.id),b.revision,b.confirmation,req.admin!.username);res.json({ok:true,deleted:true});});
+ app.delete('/api/groups/:id',async(req,res)=>{superAdmin(req.admin!);const b=deleteBody.parse(req.body);await deleteGroupConfiguration(req.botId!,z.uuid().parse(req.params.id),b.revision,b.confirmation,req.admin!.username,b);res.json({ok:true,deleted:true});});
 }
