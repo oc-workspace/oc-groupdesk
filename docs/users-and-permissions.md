@@ -54,3 +54,5 @@ Key清理保留所有人、尾号、价格、模型与账本，密文不可再�
 022_users_bot_control.sql仅控制库执行，新增角色/状态/权限、GitHub身份、机器人所有人及加密OAuth配置；023_resource_owners.sql为各业务库添加作者和共享范围，不更改群revision、话题内容或已发布Skill。GitHub使用state绑定浏览器、10分钟一次性授权状态与PKCE S256；按不可变GitHub数字ID识别，不能凭登录名或邮箱合并进admin。仅请求公开身份，不申请仓库权限；访问令牌仅登录瞬时使用，不入库。Client Secret和PKCE verifier以现有控制面主密钥AES-GCM加密存储。
 
 GitHub凭据未配置或未启用时，入口不会出现，本地admin登录持续可用。生产真实GitHub登录需管理员完成OAuth App配置后验收；模拟授权测试不能替代这一步。控制表沿用managed_命名，不向机器人业务数据库角色授权。运行端配置剔除管理侧作者/共享字段，保持原有机器人契约。
+
+运行环境另设总管理员入口[运行环境与备份](runtime-maintenance.md)，只支持已删除独立机器人；旧目录和备份只读。数据库清理与运行目录清理分别确认，删除部分记录不保证立刻缩小PostgreSQL文件，整库DROP通常释放对应文件。

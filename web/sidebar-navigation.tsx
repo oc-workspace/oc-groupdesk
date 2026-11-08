@@ -8,7 +8,7 @@ const sections=[
   {id:'content',name:'内容与人设',items:['topics','knowledge','personas','shared']},
   {id:'engagement',name:'群内互动',items:['interactions','conversation','summaries']},
   {id:'models',name:'模型与用量',items:['keys','models']},
-  {id:'management',name:'管理与设置',items:['users','members','logs','settings']},
+  {id:'management',name:'管理与设置',items:['users','runtime','members','logs','settings']},
 ];
 
 export function SidebarNavigation({items,page,storageKey,groupCount,onNavigate}:{items:NavItem[];page:string;storageKey:string;groupCount?:number;onNavigate:(page:string)=>boolean}){
