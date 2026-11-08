@@ -1,5 +1,6 @@
 import type express from 'express';
 import {registerUserDeletion} from './user-deletion.js';
+import {registerRegistrationStatus,setRegistrationReceipt,clearRegistrationReceipt} from './registration-status.js';
 import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
 import {controlPool,controlTransaction,audit} from './db.js';
@@ -22,12 +23,14 @@ export async function createUserSession(id:string,res:express.Response){
  res.cookie('groupdesk_session',session,{httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'lax',maxAge:12*3600000,path:'/'});return csrf;
 }
 export function registerGithubAuth(app:express.Express,request:GithubRequest=githubRequest){
+ registerRegistrationStatus(app);
  app.get('/api/auth/providers',async(_req,res)=>{const c=(await controlPool.query('SELECT enabled,client_id,secret_ciphertext IS NOT NULL AS configured FROM managed_github_settings')).rows[0];res.json({github:!!(c?.enabled&&c.client_id&&c.configured)});});
  app.get('/api/auth/github/start',async(_req,res)=>{
   const c=(await controlPool.query('SELECT * FROM managed_github_settings')).rows[0];requireCondition(c?.enabled&&c.client_id&&c.secret_ciphertext,503,'GitHub 登录尚未配置，请联系总管理员');
   const state=token(),browser=token(),verifier=token();await controlPool.query("DELETE FROM managed_oauth_states WHERE expires_at<now()");
   await controlPool.query("INSERT INTO managed_oauth_states VALUES($1,$2,$3,$4,now()+interval '10 minutes')",[digest(state),digest(browser),sealControlSecret(verifier),c.revision]);
   res.cookie('groupdesk_oauth',browser,{httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'lax',maxAge:600000,path:'/api/auth/github'});
+  clearRegistrationReceipt(res);
   const url=new URL('https://github.com/login/oauth/authorize');url.search=new URLSearchParams({client_id:c.client_id,redirect_uri:githubCallback(),state,scope:'',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256',allow_signup:'false'}).toString();res.redirect(url.href);
  });
  app.get('/api/auth/github/callback',async(req,res)=>{
@@ -47,7 +50,7 @@ export function registerGithubAuth(app:express.Express,request:GithubRequest=git
     const result=(await db.query("INSERT INTO admins(id,username,password_hash,github_id,github_login,display_name,role,permissions,status) VALUES($1,$2,'!github-only',$3,$4,$5,'user','{}',$6) ON CONFLICT(github_id) WHERE deleted_at IS NULL DO UPDATE SET github_login=excluded.github_login,display_name=excluded.display_name,revision=admins.revision+CASE WHEN admins.github_login IS DISTINCT FROM excluded.github_login OR admins.display_name IS DISTINCT FROM excluded.display_name THEN 1 ELSE 0 END RETURNING "+fields,[id,'github:'+github+':'+id,github,profile.login,name,c.registration_mode==='review'?'pending':'active'])).rows[0];
     requireCondition(result.status!=='disabled',403,'账号已停用，请联系总管理员');await audit(result.username,'auth.github_login',result.id,{},db);return result;
    });
-   if(user.status==='pending'){res.redirect(origin()+'/?login_error=pending');return;}await createUserSession(user.id,res);res.redirect(origin()+'/');
+   if(user.status==='pending'){setRegistrationReceipt(res,user.id);res.redirect(origin()+'/?login_error=pending');return;}clearRegistrationReceipt(res);await createUserSession(user.id,res);res.redirect(origin()+'/');
   }catch{res.redirect(origin()+'/?login_error=github');}
  });
 }

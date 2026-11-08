@@ -10,6 +10,7 @@ import {botRecord,withBot} from '../server/bot-workspaces.js';
 import {initializeUserOwners} from '../server/user-access.js';
 import {makeSkill} from '../server/persona-generation.js';
 import {digest,token} from '../server/security.js';
+import {sealControlSecret} from '../server/bot-secrets.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw Error('Dedicated test database required');
 let server:Server,base='',admin:any,a:any,b:any,botA='',botB='',privateTopic='',sharedTopic='',selectedTopic='',privatePersona='',version='',group='';const bots:string[]=[];
 let githubId=777,githubLogin='admin',calls:any[]=[];
@@ -104,7 +105,45 @@ test('GitHub OAuth binds state to browser and PKCE, rejects replay, and cannot c
 test('review mode persists a pending identity without creating a session; approval requires the administrator',async()=>{
  await settings('review');githubId=778;githubLogin='pending-demo';const s=await start(),r=await callback(s);assert(r.headers.get('location')!.includes('login_error=pending'));assert(!r.headers.getSetCookie().some(c=>c.startsWith('groupdesk_session=')));
  const u=(await controlPool.query("SELECT id,status FROM admins WHERE github_id='778'")).rows[0];assert.equal(u.status,'pending');
+ const receipt=r.headers.getSetCookie().find(c=>c.startsWith('groupdesk_registration='))!;
+ assert(receipt.includes('HttpOnly'));assert(receipt.includes('SameSite=Lax'));assert(receipt.includes('Path=/api/auth'));assert(!receipt.includes(u.id));
+ const statusUser={cookie:receipt.split(';')[0],csrf:''};
+ const pending=await req('/auth/registration-status','GET',undefined,statusUser);
+ assert.equal(pending.status,200);assert.deepEqual(pending.data,{status:'pending'});assert.equal(pending.response.headers.get('cache-control'),'no-store');
  assert.equal((await req('/users/'+u.id+'/access','PUT',{role:'super_admin',status:'active',permissions:{},revision:1},a)).status,403);
  assert.equal((await req('/users/'+u.id+'/access','PUT',{role:'user',status:'active',permissions:{},revision:1},admin)).status,200);
+ const approved=await req('/auth/registration-status','GET',undefined,statusUser);
+ assert.deepEqual(approved.data,{status:'approved'});assert(!approved.response.headers.getSetCookie().some(c=>c.startsWith('groupdesk_session=')));
+ assert.equal((await req('/auth/me','GET',undefined,statusUser)).status,401);
+ assert.equal((await req('/bots','GET',undefined,statusUser)).status,401);
  const next=await callback(await start());assert(!next.headers.get('location')!.includes('login_error'));
+ assert(next.headers.getSetCookie().some(c=>c.startsWith('groupdesk_registration=;')));
+});
+test('registration status requires a valid purpose-bound unexpired receipt and never accepts account lookup parameters',async()=>{
+ for(const path of ['/auth/registration-status','/auth/registration-status?github_login=pending-demo&user_id='+a.id]){
+  assert.deepEqual((await req(path,'GET',undefined,null)).data,{status:'unverified'});
+ }
+ const valid={purpose:'github-registration-status',userId:a.id,expiresAt:Date.now()+60000};
+ for(const raw of ['tampered',sealControlSecret(JSON.stringify({...valid,purpose:'other-secret'})),sealControlSecret(JSON.stringify({...valid,expiresAt:Date.now()-1000})),sealControlSecret(JSON.stringify({...valid,expiresAt:Date.now()+8*86400000})),sealControlSecret(JSON.stringify({...valid,userId:'invalid-id'}))]){
+  const r=await req('/auth/registration-status','GET',undefined,{cookie:'groupdesk_registration='+encodeURIComponent(raw),csrf:''});
+  assert.equal(r.status,200);assert.deepEqual(r.data,{status:'unverified'});
+  assert(r.response.headers.getSetCookie().some(c=>c.startsWith('groupdesk_registration=;')));
+ }
+});
+test('registration receipt follows live disabled/deleted state and cannot attach to a recreated GitHub identity',async()=>{
+ await settings('review');githubId=779;githubLogin='receipt-recreated';const first=await callback(await start());
+ const receipt=first.headers.getSetCookie().find(c=>c.startsWith('groupdesk_registration='))!.split(';')[0];
+ const u=(await controlPool.query("SELECT id FROM admins WHERE github_id='779' AND deleted_at IS NULL")).rows[0];
+ const viewer={cookie:receipt,csrf:''};
+ await controlPool.query("UPDATE admins SET status='disabled' WHERE id=$1",[u.id]);
+ assert.deepEqual((await req('/auth/registration-status','GET',undefined,viewer)).data,{status:'disabled'});
+ await controlPool.query("UPDATE admins SET deleted_at=now() WHERE id=$1",[u.id]);
+ const second=await callback(await start());const newReceipt=second.headers.getSetCookie().find(c=>c.startsWith('groupdesk_registration='))!.split(';')[0];
+ const replacement=(await controlPool.query("SELECT id FROM admins WHERE github_id='779' AND deleted_at IS NULL")).rows[0];assert.notEqual(replacement.id,u.id);
+ assert.deepEqual((await req('/auth/registration-status','GET',undefined,viewer)).data,{status:'unavailable'});
+ assert.deepEqual((await req('/auth/registration-status','GET',undefined,{cookie:newReceipt,csrf:''})).data,{status:'pending'});
+ const login=await req('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD},null);
+ assert(login.response.headers.getSetCookie().some(c=>c.startsWith('groupdesk_registration=;')));
+ const logout=await req('/auth/logout','POST',{},admin);
+ assert.equal(logout.status,200);assert(logout.response.headers.getSetCookie().some(c=>c.startsWith('groupdesk_registration=;')));
 });
