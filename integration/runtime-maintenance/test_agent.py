@@ -69,4 +69,42 @@ class AgentTests(unittest.TestCase):
    with self.assertRaises(OSError):agent.perform(j,self.signed(j),self.cfg)
   receipt=agent.perform(j,self.signed(j),self.cfg);self.assertEqual(receipt['state'],'quarantined');p=self.follow(j,'purge');self.assertEqual(agent.perform(p,self.signed(p),self.cfg)['state'],'purged')
 
+
+
+@unittest.skipUnless(os.geteuid()==0,'Root-owned synthetic fixture')
+class LegacyTests(unittest.TestCase):
+ def setUp(self):
+  self.base=AgentTests();self.base.setUp();self.saved={k:getattr(agent,k) for k in ['LEGACY_PERSIST','LEGACY_READER','LEGACY_PROFILE']}
+  agent.LEGACY_PERSIST=self.base.root/'legacy';agent.LEGACY_READER=self.base.root/'legacy-reader';agent.LEGACY_PROFILE=self.base.root/'legacy-profile.json';agent.LEGACY_PERSIST.mkdir();agent.LEGACY_READER.mkdir();(agent.LEGACY_PERSIST/'wechat').mkdir();(agent.LEGACY_PERSIST/'wechat'/'old').write_text('OLD SYNTHETIC DATA')
+  c=self.base.rows[0];c['name']='/wechat-bot';c['labels']={'com.docker.compose.project':'maibot-wechat','com.docker.compose.service':'wechat'};c['mounts']=[{'Type':'bind','Source':str(agent.LEGACY_PERSIST/'wechat')}];c['networks']={'maibot-wechat_bot':{}};self.base.nets[0]['name']='maibot-wechat_bot';self.base.nets[0]['labels']={'com.docker.compose.project':'maibot-wechat'}
+  self.profile={'profile':'legacy-ryubuddy-v1','bot_id':agent.LEGACY,'instance_id':self.base.instance,'containers':[{k:copy.deepcopy(c[k]) for k in ['id','name','image','labels','mounts']}],'networks':[{'id':self.base.nets[0]['id'],'name':'maibot-wechat_bot'}],'units':{}};agent.atomic(agent.LEGACY_PROFILE,self.profile)
+  self.netpatch=patch.object(agent,'legacy_networks',side_effect=lambda:copy.deepcopy(self.base.nets));self.netpatch.start()
+ def tearDown(self):
+  self.netpatch.stop()
+  for k,v in self.saved.items():setattr(agent,k,v)
+  self.base.tearDown()
+ def job(self,action='quarantine',parent=None):
+  p,_=agent.target(agent.LEGACY);return {'id':str(uuid.uuid4()),'action':action,'bot_id':agent.LEGACY,'lease_token':str(uuid.uuid4()),'plan_hash':p['quarantine']['fingerprint'] if parent else p['fingerprint'],'selection':['wechat','containers','images'],'retention_days':0,'parent_job_id':parent}
+ def signed(self,j):
+  v={'job_id':j['id'],'host':'rococo-root2','action':j['action'],'bot_id':agent.LEGACY,'lease_token':j['lease_token'],'fingerprint':j['plan_hash'],'selection':j['selection'],'parent_job_id':j.get('parent_job_id'),'expires':int(time.time())+180};payload=base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip('=');return {'payload':payload,'signature':hmac.new(self.base.cfg['permit_secret'].encode(),payload.encode(),hashlib.sha256).hexdigest()}
+ def test_profile_pins_container_identity_and_foreign_mounts_block(self):
+  self.assertFalse(agent.target(agent.LEGACY)[0]['blocked']);self.base.rows[0]['id']='e'*64;self.assertTrue(agent.target(agent.LEGACY)[0]['blocked'])
+ def test_shared_images_and_other_containers_are_retained(self):
+  other=copy.deepcopy(self.base.rows[0]);other['id']='d'*64;other['name']='/TATSUMI';other['labels']={'com.docker.compose.project':'other'};other['mounts']=[];self.base.rows.append(other)
+  p,_=agent.target(agent.LEGACY);self.assertEqual(p['shared_images'],[other['image']]);self.assertFalse(next(r for r in p['resources'] if r['kind']=='images')['present'])
+ def test_contained_hardlinks_allowed_but_external_links_blocked(self):
+  root=agent.LEGACY_PERSIST/'wechat';os.link(root/'old',root/'second');self.assertFalse(agent.size_tree(root,allow_contained_links=True)['blocked']);os.link(root/'old',self.base.root/'external');self.assertTrue(agent.size_tree(root,allow_contained_links=True)['blocked'])
+ def test_legacy_quarantine_purge_preserves_backups_unknown_files_and_other_bot(self):
+  (agent.LEGACY_READER/'backups').mkdir();(agent.LEGACY_READER/'backups'/'keep').write_text('KEEP BACKUP');(agent.LEGACY_PERSIST/'unknown').write_text('KEEP UNKNOWN');j=self.job();agent.perform(j,self.signed(j),self.base.cfg);self.assertFalse((agent.LEGACY_PERSIST/'wechat').exists());p=self.job('purge',j['id']);agent.perform(p,self.signed(p),self.base.cfg)
+  self.assertEqual((agent.LEGACY_READER/'backups'/'keep').read_text(),'KEEP BACKUP');self.assertEqual((agent.LEGACY_PERSIST/'unknown').read_text(),'KEEP UNKNOWN');self.assertTrue((agent.PERSIST/self.base.slug/'wechat/sample').exists());self.assertFalse(any('prune' in c or '-f' in c for c in self.base.calls));self.assertTrue(any(c[:3]==('docker','image','rm') for c in self.base.calls))
+ def test_legacy_restore_refuses_replaced_quarantine(self):
+  j=self.job();agent.perform(j,self.signed(j),self.base.cfg);p=agent.journal_for(agent.LEGACY);path=Path(p['paths'][0]['quarantine']);path.rename(path.with_name('held-original'));path.mkdir();r=self.job('restore',j['id'])
+  with self.assertRaises(ValueError):agent.perform(r,self.signed(r),self.base.cfg)
+
+
+
+ def test_registered_safe_children_preserve_desktop_backups(self):
+  root=agent.LEGACY_PERSIST/'wechat';(root/'xwechat_files').mkdir();(root/'xwechat_files'/'account-db').write_text('SYNTHETIC');(root/'.config').mkdir();(root/'.config'/'menu.xml.bak').write_text('KEEP DESKTOP BACKUP');p=copy.deepcopy(self.profile);p['approved_paths']=[['wechat',str(root/'xwechat_files')]];p['excluded_paths']=[{'path':str(root/'.config'),'reason':'backup retained'}];agent.atomic(agent.LEGACY_PROFILE,p)
+  j=self.job();agent.perform(j,self.signed(j),self.base.cfg);r=self.job('purge',j['id']);agent.perform(r,self.signed(r),self.base.cfg);self.assertEqual((root/'.config'/'menu.xml.bak').read_text(),'KEEP DESKTOP BACKUP');self.assertTrue((root/'old').exists());self.assertFalse((root/'xwechat_files').exists())
+
 if __name__=='__main__':unittest.main()

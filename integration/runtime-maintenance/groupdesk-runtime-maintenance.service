@@ -18,6 +18,7 @@ ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=/opt/persist/groupdesk-runtime-maintenance
 ReadWritePaths=-/opt/persist/groupdesk-bots -/opt/docker/oc-projects/groupdesk-bots
+ReadWritePaths=-/opt/persist/maibot-wechat -/opt/persist/chatlog-reader
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
 StandardOutput=journal

@@ -12,13 +12,14 @@ export function DeleteRegistration({endpoint,request,onClose,onDeleted,mode='del
  async function load(){setLoading(true);setError('');setConfirmation('');try{setPreview(await request(previewPath));}catch(e){setError((e as Error).message);}finally{setLoading(false);}}
  useEffect(()=>{let current=true;void request(previewPath).then(p=>{if(current)setPreview(p);}).catch(e=>{if(current)setError(e.message);}).finally(()=>{if(current)setLoading(false);});return()=>{current=false;};},[previewPath,request]);
  async function remove(){if(!preview||!preview.can_delete||confirmation!==preview.confirmation||!reasonValid||lock.current)return;lock.current=true;setBusy(true);setError('');try{await request(endpoint,mode==='cleanup'?'POST':'DELETE',{revision:preview.revision,confirmation,reason,reason_note:note,...(mode==='cleanup'?{plan_hash:preview.plan_hash}:{})});await onDeleted(preview.id);}catch(e){setError((e as Error).message);}finally{lock.current=false;setBusy(false);}}
- const title=mode==='cleanup'?'彻底清理独占数据':endpoint.startsWith('/users/')?'删除站点账号':endpoint.startsWith('/groups/')?'删除群聊配置':'删除微信号登记';
+ const title=mode==='cleanup'?'彻底清理独占数据':endpoint.startsWith('/users/')?'删除站点账号':endpoint.startsWith('/groups/')?'删除群聊配置':'删除登记（保留数据）';
  const labels:Record<string,string>={groups:'所属群',topics:'话题',personas:'人设',knowledge_bases:'知识库',schedules:'总结计划',members:'有效成员授权',owned_bots:'名下机器人',active_keys:'未归档Key',retained_keys:'保留Key账本',sessions:'登录会话',grants:'将撤销的授权',cleanup_bots:'可清理业务空间',cleanup_keys:'可清除私有Key密文',retained:'保留项目'};
  return <div className="modal-backdrop"><section className="modal registration-delete" role="dialog" aria-modal="true" aria-label={title}>
   <h2><AlertTriangle size={22}/>{title}</h2>
   {loading&&<LoadingStatus label="正在检查删除影响与运行状态…"/>}
   {error&&<p className="form-error" role="alert">{error}</p>}
   {preview&&!loading&&<><p className="delete-target"><strong>{preview.name}</strong>{preview.scope&&<small>{preview.scope}</small>}</p><ul className="delete-effects">{preview.effects.map(effect=><li key={effect}>{effect}</li>)}</ul>
+   {preview.kind==='bot'&&mode==='delete'&&<p className="hint">以下为关联内容数量，不是将物理删除的数量。此操作保留底层数据，基本不释放磁盘空间；可另选“彻底清理”。</p>}
    {Object.keys(preview.counts).length>0&&<div className="delete-counts">{Object.entries(preview.counts).map(([key,n])=><span key={key}>{labels[key]||key}：{n}</span>)}</div>}
    {preview.items&&<div className="cleanup-preview-items">{preview.items.map(i=><div key={i.kind+i.id}><strong>{i.name}</strong><small>{i.eligible?'将清理':'保留'}：{i.message}</small></div>)}</div>}
    {preview.can_delete&&<><label>删除 / 清理原因（必选）<select aria-label="删除原因" value={reason} disabled={busy} onChange={e=>setReason(e.target.value)}><option value="">请选择原因</option>{Object.entries(deletionReasons).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><label>补充说明{reason==='other'?'（必填）':'（可选）'}<textarea aria-label="删除原因补充说明" maxLength={500} value={note} disabled={busy} onChange={e=>setNote(e.target.value)} placeholder="用于日后查看删除日志，请勿填写密码或 Key"/></label></>}
