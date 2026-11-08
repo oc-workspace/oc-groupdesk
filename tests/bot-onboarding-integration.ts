@@ -29,11 +29,11 @@ async function provision(id:string,u:any){
 before(async()=>{
  await controlPool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');
  // Upgrade a real old-format pending switch rather than silently losing it.
- await controlPool.query("CREATE TABLE schema_migrations(name text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());INSERT INTO schema_migrations(name) VALUES('026_bot_onboarding_bot_control.sql')");
+ await controlPool.query("CREATE TABLE schema_migrations(name text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());INSERT INTO schema_migrations(name) VALUES('026_bot_onboarding_bot_control.sql'),('034_device_onboarding_bot_control.sql')");
  await migrate();await ensureLegacyIsolation();await initializeUserOwners();
  const fixture=await createBot({name:'Pending upgrade fixture',wechat_id:'pending_upgrade_fixture',host_label:'synthetic',notes:''},'admin');created.push(fixture);
  await controlPool.query('INSERT INTO managed_bot_switch(singleton,target_id) VALUES(true,$1)',[fixture]);
- await controlPool.query("DELETE FROM schema_migrations WHERE name='026_bot_onboarding_bot_control.sql'");await migrate();
+ await controlPool.query("DELETE FROM schema_migrations WHERE name IN ('026_bot_onboarding_bot_control.sql','034_device_onboarding_bot_control.sql')");await migrate();
  const pending=(await controlPool.query('SELECT * FROM managed_bot_switch')).rows[0];assert.equal(pending.target_id,fixture);assert.equal(pending.owner_user_id,(await botRecord(fixture)).owner_user_id);assert.equal(pending.activation_slot,1);await controlPool.query('DELETE FROM managed_bot_switch');
  server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));base='http://127.0.0.1:'+(server.address() as any).port;
  const login=await req('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD},{cookie:'',csrf:''});admin={...login.data,cookie:login.response.headers.get('set-cookie')!.split(';')[0]};

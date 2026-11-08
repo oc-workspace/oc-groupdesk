@@ -1,3 +1,4 @@
+import {keyFeatures} from '../shared/key-management.js';
 import {ensureVaultCredential,syncAliases,keyForAlias,authorizedKey,botPrincipal,refreshVaultCatalog} from './key-vault.js';
 import {proxyRoute} from './model-proxy.js';
 import {controlPool} from './db.js';
@@ -36,7 +37,7 @@ export async function modelOverview(db:Db=pool){
   const credentials=(await db.query('SELECT id,vault_key_id,name,base_url,client_type,key_hint,enabled,revision,catalog_synced_at,catalog_error FROM model_credentials ORDER BY created_at,id')).rows;
   const models=(await db.query('SELECT credential_id,model_id,display_name,capability,source,listed FROM credential_models ORDER BY model_id')).rows;
   const grants=(await controlPool.query('SELECT key_id,model_ids,features FROM managed_model_grants WHERE user_id=$1 AND enabled AND expires_at>now()',[owner])).rows;const owned=(await controlPool.query('SELECT id FROM managed_model_keys WHERE owner_user_id=$1',[owner])).rows.map(k=>k.id);
-  return {credentials:credentials.filter(c=>available.includes(c.vault_key_id)).map(c=>({...c,allowed_features:owned.includes(c.vault_key_id)?['chat','summary','persona','topic','onboarding','analysis','interaction','image']:grants.find(g=>g.key_id===c.vault_key_id)?.features||[],models:models.filter(m=>m.credential_id===c.id&&(owned.includes(c.vault_key_id)||grants.find(g=>g.key_id===c.vault_key_id)?.model_ids.includes(m.model_id)))})),defaults:(await db.query('SELECT revision,routes FROM model_settings WHERE singleton=true')).rows[0]};
+  return {credentials:credentials.filter(c=>available.includes(c.vault_key_id)).map(c=>({...c,allowed_features:owned.includes(c.vault_key_id)?Object.keys(keyFeatures):grants.find(g=>g.key_id===c.vault_key_id)?.features||[],models:models.filter(m=>m.credential_id===c.id&&(owned.includes(c.vault_key_id)||grants.find(g=>g.key_id===c.vault_key_id)?.model_ids.includes(m.model_id)))})),defaults:(await db.query('SELECT revision,routes FROM model_settings WHERE singleton=true')).rows[0]};
 }
 export async function validateSelection(route:z.infer<typeof selection>|null,kind:'text'|'image',db:Db=pool){
   if(!route)return;
