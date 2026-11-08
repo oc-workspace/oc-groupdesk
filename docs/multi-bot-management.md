@@ -157,3 +157,7 @@ GroupDesk `backup.sh`暂停应用写入后，一起备份控制库、所有ready
 独立实例的 `/groupdesk/mention-names.json` 保存 JSON 名字数组，例如 `["Tatsumi","Tatsumisaki"]`，只在该账号内使用，按字面、大小写不敏感及英文单词边界匹配；不继承旧 GT/小T 名字。由 `bots/install-names.py` 对准确 baseline 安装 `bot_names.NAME`，统一入口用于显式点名、名字清理及平台 at 标记；不依赖 Reader 提供结构化 at。缺少新账号名字配置时不回退到旧账号。
 
 `bot_runtime.sync` 在现有桥接 Docker 内调用 `bot_health.report`：首次及此后每小时检查发送适配器状态、Reader 连接新鲜度、MaiBot websocket；只上报当前连接文件授权的群。失败至少隔一分钟重试，成功后不再频繁巡检。不读群史/原始库，不发模型请求、不重启微信；与群配置 ACK 分开。告警配置从该机器人业务库读取，仅状态异常且已配置时推送，重复异常去重且每天最多5次。人工刷新页面查看结果。
+
+## 已删除独立运行栈清理
+
+总管理员可在「运行环境与备份」预览并暂存已删除登记的UUID独立栈，再分别确认还原或永久清理。不是归档即清空；还原不启用账号，原RyuBuddy及旧目录/备份不进入自动清理。资源核验、原因、共享保护与目录规则见[运行环境维护](runtime-maintenance.md)。

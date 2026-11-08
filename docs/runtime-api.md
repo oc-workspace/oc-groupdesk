@@ -84,3 +84,7 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 所有站点用户、机器人、群DELETE请求在原revision/confirmation之外，必须有`reason`（test/violation/duplicate/inactive/other），可选`reason_note`最多500字；other要求非空说明。管理侧原因/说明不下发到运行端配置。
 
 仅总管理员：`GET /api/users/deleted`最近100账号与逐项清理状态；`GET /api/users/deletion-history`最近150条精简审计。`GET /api/users/:id/cleanup/preview`返回影响与保留项目、revision和plan_hash；`POST /api/users/:id/cleanup`严格接收`{revision,confirmation,plan_hash,reason,reason_note}`并返回202/任务ID。预览过期409，未删账号/无可清理项409，无权限403。后台再核验后执行，queued/processing/completed/partial/failed状态均可手动刷新；不将HTTP202当作完成。
+
+## 主机运行环境维护
+
+`/api/runtime-maintenance`仅总管理员：主机盘点、预览、按明确范围暂存/还原/永久清理、取消和原任务重试。`/api/runtime-maintenance-agent/{claim,authorize,result}`使用独立主机Bearer；修改另需180秒HMAC许可，绑定任务/主机/UUID/范围/指纹/租约。不是机器人运行Token，也不能创建清理任务或提交任意路径。032控制库保存任务与最近3份盘点；网页手动刷新，不将文件盘点作为微信在线证明。边界和部署见[运行环境维护](runtime-maintenance.md)。

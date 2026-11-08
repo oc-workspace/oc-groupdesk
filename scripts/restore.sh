@@ -14,8 +14,19 @@ export RELEASE_SHA="$(cat /opt/persist/groupdesk/release-sha)"
 dc=(docker compose --env-file /opt/persist/groupdesk/secrets/app.env)
 "${dc[@]}" stop interaction-worker
 "${dc[@]}" stop app worker
+# Refuse replacement while a host operation might still have a valid permit.
+"${dc[@]}" exec -T postgres psql -U groupdesk -d groupdesk -v ON_ERROR_STOP=1 <<'SQL'
+DO $$ BEGIN
+ IF to_regclass('public.managed_runtime_jobs') IS NOT NULL THEN
+  IF EXISTS(SELECT 1 FROM managed_runtime_jobs WHERE status IN ('preparing','executing')) THEN
+   RAISE EXCEPTION 'Host maintenance still active; finish/reconcile it before restore';
+  END IF;
+ END IF;
+END $$;
+SQL
 # On failure remain stopped rather than serving partially restored data.
 "${dc[@]}" exec -T postgres pg_restore -U groupdesk -d groupdesk --no-owner --no-acl --clean --if-exists --exit-on-error < "$backup_dir/database.dump"
+"${dc[@]}" run --rm --no-deps -T -e GROUPDESK_RESTORE_MODE=1 worker /app/node_modules/.bin/tsx scripts/reset-runtime-after-restore.ts
 if [[ -f "$backup_dir/bot-databases.tsv" ]]; then
   "${dc[@]}" run --rm --no-deps -T -e GROUPDESK_RESTORE_MODE=1 worker /app/node_modules/.bin/tsx scripts/prepare-bot-restore.ts
   while IFS=$'\t' read -r bot_id bot_database bot_role; do

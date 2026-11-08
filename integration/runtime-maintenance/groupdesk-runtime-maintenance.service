@@ -1,0 +1,27 @@
+[Unit]
+Description=GroupDesk restricted runtime inventory and reviewed cleanup executor
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/docker/oc-projects/groupdesk-runtime-maintenance/current/agent.py serve --config /opt/persist/groupdesk-runtime-maintenance/secrets/agent.json
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=660
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/persist/groupdesk-runtime-maintenance
+ReadWritePaths=-/opt/persist/groupdesk-bots -/opt/docker/oc-projects/groupdesk-bots
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

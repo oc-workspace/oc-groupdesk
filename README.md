@@ -6,6 +6,7 @@ React/Vite、TypeScript/Express、PostgreSQL控制库与机器人业务库，配
 
 - [项目总览、当前能力与待办规划](docs/README.md)：唯一功能导航及规划入口。
 - [每日进度与发布证据](docs/progress/README.md)：按天保留测试、PR、部署和验收记录。
+- [运行环境与备份盘点](docs/runtime-maintenance.md)：总管理员受控清理独立栈，旧目录和备份只读。
 - [部署、备份、恢复与运行状态](docs/operations.md)：统一运维说明。
 
 开发检查：`npm run build`、`npm test`；数据库集成检查只在专用隔离测试库运行。发布严格遵循[开发与生产发布脚本说明](https://github.com/oc-workspace/openclaw-workspace/blob/main/openclaw-开发与生产发布脚本说明.md)。密钥、Cookie和真实群聊不进入Git或日志。

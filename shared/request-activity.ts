@@ -1,5 +1,7 @@
 export type RequestActivity={id:number;label:string;botId?:string};
 export function requestActivityLabel(path:string,method='GET'):string|null{
+ if(path==='/runtime-maintenance/scan')return '正在提交服务器只读盘点…';
+ if(path==='/runtime-maintenance/jobs')return '正在提交已确认的运行环境任务…';
  if(/^\/persona-resources\/[^/]+\/preview$/.test(path))return '正在读取公开人设来源和参考资料…';
  if(/^\/persona-resources\/[^/]+\/import$/.test(path))return '正在存档来源并准备 Persona 草稿…';
  // Automatic onboarding job updates already have a persistent task indicator.

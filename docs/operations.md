@@ -139,3 +139,7 @@ Compose项目名保持groupdesk。
 微信在线巡检及分级恢复见[integration/maibot/availability](../integration/maibot/availability/README.md)。微信在线状态和配置应用确认分开显示；巡检每小时运行，不影响消息采集和配置同步频率。
 
 完整功能与运维说明见[文档索引](README.md)；多机器人管理方案见[多机器人说明](multi-bot-management.md)。
+
+## 运行环境和备份盘点
+
+总管理员入口「运行环境与备份」提供主机只读盘点、已删除独立机器人受控暂存/还原/永久清理及原因审计。旧目录、现有备份与共享镜像保留，不自动到期删除；详见[操作与部署边界](runtime-maintenance.md)。整库删除、行删除和目录暂存的空间效果不同，不自动运行VACUUM FULL。032仅控制面，主机代理独立部署，不挂载Docker socket到网页。

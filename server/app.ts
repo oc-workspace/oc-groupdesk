@@ -1,3 +1,4 @@
+import {registerRuntimeMaintenanceAdmin,registerRuntimeMaintenanceAgent} from './runtime-maintenance.js';
 import {registerGithubAuth,registerUserAdmin,type GithubRequest} from './users.js';
 import {registerSharedResources} from './shared-resources.js';
 import {accessibleBot,workspaceAccess,initializeWorkspaceOwners} from './user-access.js';
@@ -85,6 +86,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.use('/api',rateLimit({windowMs:60000,limit:240,standardHeaders:'draft-7',legacyHeaders:false}));
   app.use('/api/auth/login',rateLimit({windowMs:15*60000,limit:12,skipSuccessfulRequests:true,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'登录尝试过多，请稍后再试'}}));
   registerModelProxy(app,options.modelTransport);
+  registerRuntimeMaintenanceAgent(app);
   registerGithubAuth(app,options.githubRequest);
   app.post('/api/auth/login',async(req,res)=>{
     if(req.headers.origin&&req.headers.origin!==(process.env.PUBLIC_ORIGIN||'http://localhost:3110'))throw new HttpError(403,'请求来源不匹配');
@@ -156,6 +158,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
     res.clearCookie(cookieName,{path:'/'}).json({ok:true});
   });
   registerUserAdmin(app);
+  registerRuntimeMaintenanceAdmin(app);
   registerKeyVault(app);
   registerSharedResources(app);
   registerBotAdmin(app);
