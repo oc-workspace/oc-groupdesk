@@ -6,7 +6,7 @@ an expiring server permit, a deleted bot UUID, fresh topology and a local journa
 import argparse, base64, datetime, fcntl, hashlib, hmac, json, os, re, shutil, stat, subprocess, time, urllib.request, uuid
 from pathlib import Path
 
-VERSION='runtime-maintenance-v2'
+VERSION='runtime-maintenance-v2.1'
 DEPLOY=Path('/opt/docker/oc-projects/groupdesk-bots')
 PERSIST=Path('/opt/persist/groupdesk-bots')
 QDATA=PERSIST/'.quarantine'
@@ -66,17 +66,20 @@ def size_tree(path,limit=150000,protect_backups=True,allow_contained_links=False
     except (OSError,ValueError) as e:result['blocked']=[str(e) if isinstance(e,ValueError) else '目录元数据不可读取'];result['allocated']=None;result['bytes']=None
     return result
 
+def normalized_container(row):
+    row=dict(row);row['mounts']=sorted(row.get('mounts',[]),key=lambda m:json.dumps(m,sort_keys=True,separators=(',',':')));return row
+
 def containers():
     ids=run('docker','ps','-aq').split()
     if not ids:return []
     fmt='{"id":{{json .Id}},"name":{{json .Name}},"labels":{{json .Config.Labels}},"mounts":{{json .Mounts}},"networks":{{json .NetworkSettings.Networks}},"running":{{json .State.Running}},"image":{{json .Image}},"restart":{{json .HostConfig.RestartPolicy}}}'
-    return [json.loads(line) for line in run('docker','inspect','--format',fmt,*ids).splitlines()]
+    return [normalized_container(json.loads(line)) for line in run('docker','inspect','--format',fmt,*ids).splitlines()]
 
 def networks(project):
     ids=run('docker','network','ls','-q','--filter','label=com.docker.compose.project='+project).split()
     if not ids:return []
     fmt='{"id":{{json .Id}},"name":{{json .Name}},"labels":{{json .Labels}},"containers":{{json .Containers}}}'
-    return [json.loads(line) for line in run('docker','network','inspect','--format',fmt,*ids).splitlines()]
+    return sorted([json.loads(line) for line in run('docker','network','inspect','--format',fmt,*ids).splitlines()],key=lambda n:n['id'])
 
 def units(bot_id):
     result=[]
@@ -138,7 +141,7 @@ def path_specs(bot_id):
 
 def target(bot_id,all_containers=None):
     if bot_id==LEGACY:return legacy_target(all_containers)
-    all_containers=containers() if all_containers is None else all_containers;slug=canonical(bot_id);project='gdbot-'+slug;j=journal_for(bot_id);blocked=[]
+    all_containers=[normalized_container(c) for c in (containers() if all_containers is None else all_containers)];slug=canonical(bot_id);project='gdbot-'+slug;j=journal_for(bot_id);blocked=[]
     meta_path=DEPLOY/slug/'deployment.json'
     if not meta_path.exists() and j:
         moved=next((x for x in j['paths'] if x['kind']=='deployment'),None)
@@ -345,7 +348,7 @@ def legacy_profile():
     if not stat.S_ISREG(s.st_mode) or s.st_uid!=0 or s.st_mode&0o077:raise ValueError('旧部署须受信登记后才能处理')
     p=json.loads(LEGACY_PROFILE.read_text())
     if p.get('bot_id')!=LEGACY or p.get('profile')!='legacy-ryubuddy-v1':raise ValueError('旧部署身份无效')
-    uuid.UUID(p['instance_id']);return p
+    uuid.UUID(p['instance_id']);p['containers']=[normalized_container(c) for c in p['containers']];return p
 
 def legacy_networks():
     result=[]
@@ -356,10 +359,10 @@ def legacy_networks():
             if v['name']!=n['name']:raise ValueError('旧网络身份变化')
             result.append(v)
         except subprocess.CalledProcessError:pass
-    return result
+    return sorted(result,key=lambda n:n['id'])
 
 def legacy_target(all_containers=None):
-    p=legacy_profile();rows=containers() if all_containers is None else all_containers;own=[];blocked=[];j=journal_for(LEGACY)
+    p=legacy_profile();rows=[normalized_container(c) for c in (containers() if all_containers is None else all_containers)];own=[];blocked=[];j=journal_for(LEGACY)
     pins={c['id']:c for c in p['containers']};names={c['name'] for c in p['containers']}
     for c in rows:
         if c['name'] in names and c['id'] not in pins:blocked.append('旧账号容器已被替换，须重新核验登记')
@@ -367,7 +370,7 @@ def legacy_target(all_containers=None):
             pin=pins[c['id']]
             if any(c[k]!=pin[k] for k in ['name','image','labels','mounts']):blocked.append('旧账号容器身份或挂载已变化')
             own.append(c)
-    refs={c['id'] for c in own};nets=legacy_networks()
+    own.sort(key=lambda c:c['id']);refs={c['id'] for c in own};nets=legacy_networks()
     if any(cid not in refs for n in nets for cid in (n.get('containers') or {})):blocked.append('旧网络被其他容器引用，保留')
     allowed_networks={n['name'] for n in p['networks']}
     if any(not set(c['networks'])<=allowed_networks for c in own):blocked.append('旧容器新增未知网络，保留')

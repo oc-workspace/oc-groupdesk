@@ -107,4 +107,9 @@ class LegacyTests(unittest.TestCase):
   root=agent.LEGACY_PERSIST/'wechat';(root/'xwechat_files').mkdir();(root/'xwechat_files'/'account-db').write_text('SYNTHETIC');(root/'.config').mkdir();(root/'.config'/'menu.xml.bak').write_text('KEEP DESKTOP BACKUP');p=copy.deepcopy(self.profile);p['approved_paths']=[['wechat',str(root/'xwechat_files')]];p['excluded_paths']=[{'path':str(root/'.config'),'reason':'backup retained'}];agent.atomic(agent.LEGACY_PROFILE,p)
   j=self.job();agent.perform(j,self.signed(j),self.base.cfg);r=self.job('purge',j['id']);agent.perform(r,self.signed(r),self.base.cfg);self.assertEqual((root/'.config'/'menu.xml.bak').read_text(),'KEEP DESKTOP BACKUP');self.assertTrue((root/'old').exists());self.assertFalse((root/'xwechat_files').exists())
 
+
+
+ def test_mount_order_is_ignored_but_changed_mount_content_is_rejected(self):
+  c=self.base.rows[0];second={'Type':'bind','Source':str(agent.LEGACY_PERSIST/'maibot'),'Destination':'/other'};c['mounts'].append(second);p=copy.deepcopy(self.profile);p['containers'][0]['mounts']=copy.deepcopy(c['mounts']);agent.atomic(agent.LEGACY_PROFILE,p);before=agent.target(agent.LEGACY)[0];self.assertFalse(before['blocked']);c['mounts'].reverse();after=agent.target(agent.LEGACY)[0];self.assertEqual(before['fingerprint'],after['fingerprint']);self.assertFalse(after['blocked']);c['mounts'][0]['Source']=str(self.base.root/'OTHER_BOT');self.assertTrue(agent.target(agent.LEGACY)[0]['blocked'])
+
 if __name__=='__main__':unittest.main()
