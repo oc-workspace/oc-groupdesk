@@ -1,0 +1,27 @@
+.login-page-pending .login-form{max-width:430px}
+.login-page-pending .login-form>.muted{margin-bottom:22px;color:#746680;font-size:14px}
+.login-review-notice{display:grid;grid-template-columns:46px minmax(0,1fr);gap:16px;margin:0 0 20px;padding:24px 22px;background:#fff7df;border:1px solid #e5b959;border-left:6px solid #bc7c13;border-radius:14px;box-shadow:0 12px 32px #a7660812;color:#66430e}
+.login-review-icon{width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:#ffe6a6;color:#80520a}
+.login-review-badge{display:inline-block;padding:3px 9px;margin-bottom:10px;border-radius:5px;background:#f9dda0;color:#684105;font-size:12px;font-weight:700;letter-spacing:1px}
+.login-review-notice h3{font-size:24px;line-height:1.35;font-weight:700;color:#613c06;margin:0 0 10px}
+.login-review-notice p{font-size:14px;line-height:1.8;color:#755224;margin:0}
+.login-review-next{margin-top:18px;padding:12px 14px;border:1px solid #efd59a;border-radius:9px;background:#fffdf5}
+.login-review-next strong{display:block;color:#684105;font-size:13px;margin-bottom:4px}
+.login-review-next p{font-weight:600;color:#613c06}
+.login-review-notice .login-review-hint{font-size:12px;margin-top:14px;color:#785b32}
+.login-form .login-review-github{justify-content:center;font-size:14px;font-weight:600;margin-top:0}
+.login-admin-option{border-top:1px solid #e7e1ed;margin-top:24px;padding-top:18px}
+.login-admin-option>summary{cursor:pointer;color:#73617e;font-size:13px;font-weight:600;line-height:1.8}
+.login-admin-option[open]>summary{margin-bottom:20px}
+.login-admin-option>summary:focus-visible,.login-review-github:focus-visible{outline:3px solid #8a73cd;outline-offset:4px;border-radius:5px}
+@media(max-width:680px){
+ .login-page-pending{grid-template-rows:auto 1fr}
+ .login-page-pending .login-aside{padding:22px 24px}
+ .login-page-pending .login-copy{display:none}
+ .login-page-pending .login-main{align-items:flex-start;padding:28px 20px 40px}
+ .login-review-notice{grid-template-columns:36px minmax(0,1fr);gap:12px;padding:20px 16px;border-left-width:5px}
+ .login-review-icon{width:36px;height:36px}
+ .login-review-icon svg{width:22px;height:22px}
+ .login-review-notice h3{font-size:22px}
+ .login-review-next{padding:11px 12px}
+}
