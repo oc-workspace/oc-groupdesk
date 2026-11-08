@@ -10,7 +10,7 @@ export async function initializeWorkspaceOwners(owner:string|null){if(!owner)ret
 export async function initializeUserOwners(){
  const admin=(await controlPool.query("SELECT id FROM admins WHERE role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];if(!admin)return;
  await controlPool.query('UPDATE managed_bots SET owner_user_id=COALESCE(owner_user_id,$1),created_by_user_id=COALESCE(created_by_user_id,$1)',[admin.id]);
- for(const b of (await controlPool.query("SELECT id,owner_user_id FROM managed_bots WHERE database_state IN ('legacy','ready')")).rows)await withBot(b.id,()=>initializeWorkspaceOwners(b.owner_user_id));
+ for(const b of (await controlPool.query("SELECT id,owner_user_id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN ('legacy','ready')")).rows)await withBot(b.id,()=>initializeWorkspaceOwners(b.owner_user_id));
 }
 function mutationPermission(path:string):Permission|null{
  if(/^\/topics(?:\/|$)|^\/catalog\//.test(path))return 'topics.create';
@@ -50,7 +50,7 @@ export async function workspaceAccess(req:express.Request,res:express.Response,n
  const publicSkill=foreignPersona&&persona?(await pool.query('SELECT skill_md FROM persona_versions WHERE persona_id=$1 ORDER BY version DESC LIMIT 1',[target.id])).rows[0]?.skill_md||'':null;
  res.locals.visiblePersonaVersions=visibleVersions;
  if(!isAdmin&&req.method==='GET'&&/^\/persona-bindings\/[0-9a-f-]{36}$/.test(path)){
-  const id=path.split('/')[2],g=(await pool.query('SELECT persona_version_id FROM groups WHERE id=$1',[id])).rows[0];
+  const id=path.split('/')[2],g=(await pool.query('SELECT persona_version_id FROM groups WHERE deleted_at IS NULL AND id=$1',[id])).rows[0];
   const features=(await pool.query('SELECT version_id FROM group_persona_features WHERE group_id=$1',[id])).rows;
   requireCondition((!g?.persona_version_id||visibleVersions.has(g.persona_version_id))&&features.every(f=>visibleVersions.has(f.version_id)),403,'群中包含管理员维护的受限人设，请联系管理员分享后再预览');
  }
@@ -60,7 +60,7 @@ export async function workspaceAccess(req:express.Request,res:express.Response,n
  if(mutable&&!isAdmin){
   if(path==='/group-onboarding/connect'){for(const id of req.body.config?.topic_ids||[])assertTopic(id);if(req.body.config?.base_version_id)assertVersion(req.body.config.base_version_id);for(const f of req.body.config?.features||[])assertVersion(f.version_id);}
   if(/^\/groups\/[^/]+$/.test(path)&&req.method==='PUT'){
-   const current=(await pool.query('SELECT external_id FROM groups WHERE id=$1',[path.split('/')[2]])).rows[0];
+   const current=(await pool.query('SELECT external_id FROM groups WHERE deleted_at IS NULL AND id=$1',[path.split('/')[2]])).rows[0];
    if(req.body.external_id&&req.body.external_id!==current?.external_id)requireCondition(new RegExp('^bowxt-'+req.botId!.replaceAll('-','')+':[1-9][0-9]*$').test(req.body.external_id),403,'群标识必须属于当前机器人');
    const old=(await pool.query('SELECT topic_id FROM group_topics WHERE group_id=$1',[path.split('/')[2]])).rows.map(r=>r.topic_id);
    for(const id of req.body.topic_ids||[])if(!old.includes(id))assertTopic(id);

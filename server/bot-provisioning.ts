@@ -37,6 +37,7 @@ export async function createBot(input:{name:string;wechat_id:string;host_label:s
 }
 export async function ensureLegacyIsolation(){
  const row=(await controlPool.query('SELECT * FROM managed_bots WHERE id=$1',[legacyBotId])).rows[0];
+ if(row?.deleted_at)return;
  requireCondition(row?.database_state==='legacy',503,'原机器人业务空间缺失');
  const client=await controlPool.connect();
  try{

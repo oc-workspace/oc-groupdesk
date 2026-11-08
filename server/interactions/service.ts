@@ -12,13 +12,13 @@ export type InteractionEventInput=z.infer<typeof interactionEventSchema>;
 export type RuntimeAccess={adapterHash:string;groups?:string[]};
 function allowed(access:RuntimeAccess,external:string){requireCondition(!access.groups||access.groups.includes(external),403,'适配器未授权此群');}
 async function existingEvent(id:string,access:RuntimeAccess,db:Db,lock=false){
- const row=(await db.query('SELECT e.*,g.external_id,g.enabled,g.revision current_revision FROM interaction_events e JOIN groups g ON g.id=e.group_id WHERE e.id=$1'+(lock?' FOR UPDATE OF e,g':''),[id])).rows[0];
+ const row=(await db.query('SELECT e.*,g.external_id,g.enabled,g.revision current_revision FROM interaction_events e JOIN groups g ON g.deleted_at IS NULL AND g.id=e.group_id WHERE e.id=$1'+(lock?' FOR UPDATE OF e,g':''),[id])).rows[0];
  requireCondition(row,404,'互动记录不存在');allowed(access,row.external_id);requireCondition(row.adapter_hash===access.adapterHash,403,'互动记录不属于此适配器');return row;
 }
 export async function executeInteraction(input:InteractionEventInput,access:RuntimeAccess,now=Date.now(),random=(min:number,max:number)=>randomInt(min,max)){
  const body=interactionEventSchema.parse(input);allowed(access,body.external_id);
  return transaction(async db=>{
-  const found=(await db.query('SELECT id FROM groups WHERE external_id=$1',[body.external_id])).rows[0];requireCondition(found,404,'群未绑定');
+  const found=(await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND external_id=$1',[body.external_id])).rows[0];requireCondition(found,404,'群未绑定');
   const group=await groupForInteraction(found.id,db,true),settings=await interactionSettings(group.id,db);
   const actorKey=digest(group.id+'|'+body.actor.kind+'|'+body.actor.id),requestHash=digest(JSON.stringify([actorKey,body.binding_id,normalizeInteractionText(body.text)]));
   const previous=(await db.query('SELECT * FROM interaction_events WHERE group_id=$1 AND source_id=$2',[group.id,body.source_id])).rows[0];

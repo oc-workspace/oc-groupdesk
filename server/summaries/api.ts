@@ -10,12 +10,12 @@ import {registerSourceBatches,sourceErrors} from './source-batches.js';
 const uuid=(v:unknown)=>z.uuid().parse(v);
 export function registerSummaryAdmin(app:express.Express){
  app.get('/api/summaries',async(_req,res)=>{
-  const groups=(await pool.query('SELECT id,name FROM groups ORDER BY name')).rows;
-  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows,schedules:(await pool.query('SELECT * FROM summary_schedules ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
+  const groups=(await pool.query('SELECT id,name FROM groups WHERE deleted_at IS NULL ORDER BY name')).rows;
+  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows,schedules:(await pool.query('SELECT * FROM summary_schedules WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=summary_schedules.group_id AND g.deleted_at IS NULL) ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
  });
  app.put('/api/summaries/groups/:id',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({revision:z.number().int().min(0),config:summaryConfig}).parse(req.body);
-  await transaction(async db=>{await db.query('SELECT id FROM groups WHERE id=$1 FOR UPDATE',[id]);const g=await group(id,db),s=await settings(id,db);requireCondition(s.revision===b.revision,409,'总结配置已变化，请刷新');await validateConfig(g,b.config,db);
+  await transaction(async db=>{await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id]);const g=await group(id,db),s=await settings(id,db);requireCondition(s.revision===b.revision,409,'总结配置已变化，请刷新');await validateConfig(g,b.config,db);
    await db.query('INSERT INTO summary_settings(group_id,config) VALUES($1,$2) ON CONFLICT(group_id) DO UPDATE SET config=$2,revision=summary_settings.revision+1',[id,b.config]);
    if(!b.config.enabled||b.config.timezone!==s.config.timezone)await db.query('UPDATE summary_schedules SET enabled=false,last_error=$2 WHERE group_id=$1',[id,'发布已停用或时区已变化，请检查后重新启用计划']);
    await db.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='总结配置已修改，请按新配置创建任务',finished_at=now() WHERE group_id=$1 AND status IN ('waiting_source','reading','queued','generating','preview','delivery_ready')",[id]);
@@ -45,7 +45,7 @@ export function registerSummaryRuntime(app:express.Express){
  app.post('/api/runtime/summaries/claim',async(req,res)=>{
   const b=z.object({external_id:z.string().min(1).max(200),kind:z.enum(['source','delivery'])}).parse(req.body);
   const result=await transaction(async db=>{
-   const g=(await db.query('SELECT id FROM groups WHERE external_id=$1',[b.external_id])).rows[0];requireCondition(g,404,'群不存在');await authorized(req,g.id,db);
+   const g=(await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND external_id=$1',[b.external_id])).rows[0];requireCondition(g,404,'群不存在');await authorized(req,g.id,db);
    await db.query('UPDATE summary_settings SET last_adapter_seen=now() WHERE group_id=$1',[g.id]);
    const status=b.kind==='source'?'waiting_source':'delivery_ready',j=(await db.query('SELECT * FROM summary_jobs WHERE group_id=$1 AND status=$2 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1',[g.id,status])).rows[0];if(!j)return null;
    try{await valid(j,db,b.kind==='delivery');}catch{await db.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='群或总结配置已变化' WHERE id=$1",[j.id]);return null;}

@@ -6,7 +6,7 @@ import {botStorage,legacyBotId,type BotScope} from './bot-context.js';
 import {openControlSecret} from './bot-secrets.js';
 import {requireCondition} from './security.js';
 const pools=new Map<string,{signature:string;scope:BotScope}>();
-export async function botRecord(id:string){return (await controlPool.query('SELECT * FROM managed_bots WHERE id=$1',[id])).rows[0];}
+export async function botRecord(id:string){return (await controlPool.query('SELECT * FROM managed_bots WHERE deleted_at IS NULL AND id=$1',[id])).rows[0];}
 export async function botScope(id:string){
  const row=await botRecord(id);requireCondition(row,404,'机器人不存在');requireCondition(['legacy','ready'].includes(row.database_state),409,'机器人业务空间尚未就绪');
  const base=resolve(process.env.DATA_DIR||'data');
@@ -24,7 +24,7 @@ export async function requireCurrentBotActive(){
  const id=botStorage.getStore()?.id||legacyBotId,row=await botRecord(id);
  requireCondition(row?.state==='active',409,'机器人已暂停或正在切换');return row;
 }
-export async function listedWorkspaces(activeOnly=false){return (await controlPool.query("SELECT id FROM managed_bots WHERE database_state IN ('legacy','ready') AND state<> 'archived'"+(activeOnly?" AND state='active'":"")+' ORDER BY created_at,id')).rows;}
+export async function listedWorkspaces(activeOnly=false){return (await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN ('legacy','ready') AND state<> 'archived'"+(activeOnly?" AND state='active'":"")+' ORDER BY created_at,id')).rows;}
 export async function forWorkspaces<T>(activeOnly:boolean,fn:()=>Promise<T>){let worked=false;for(const row of await listedWorkspaces(activeOnly)){try{const result=await withBot(row.id,fn);worked=!!result||worked;}catch{console.error('bot_worker_retry',row.id);}}return worked;}
 export async function ensureAdminAlias(admin:{id:string;username:string}){
  if((botStorage.getStore()?.id||legacyBotId)===legacyBotId)return;

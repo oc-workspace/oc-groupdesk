@@ -37,11 +37,11 @@ export function registerPersonaAdmin(app:express.Express){
  app.get('/api/persona-studio',async(_req,res)=>{
   res.json({...await materialOverview(),personas:(await pool.query(`SELECT p.id,p.name,p.skill_name,p.description,p.kind,p.revision,p.archived,p.created_at,(SELECT max(version) FROM persona_versions WHERE persona_id=p.id) published_version FROM personas p ORDER BY p.created_at`)).rows,
    versions:(await pool.query('SELECT id,persona_id,version,kind FROM persona_versions ORDER BY version DESC')).rows,
-   bindings:(await pool.query(`SELECT g.id group_id,g.name group_name,g.revision,g.applied_revision,g.persona_version_id,g.persona_follow_latest,v.persona_id,v.version,COALESCE((SELECT json_agg(json_build_object('persona_id',f.persona_id,'version_id',f.version_id,'follow_latest',f.follow_latest,'position',f.position,'name',p2.name,'version',v2.version) ORDER BY f.position) FROM group_persona_features f JOIN personas p2 ON p2.id=f.persona_id JOIN persona_versions v2 ON v2.id=f.version_id WHERE f.group_id=g.id),'[]'::json) features FROM groups g LEFT JOIN persona_versions v ON v.id=g.persona_version_id ORDER BY g.name`)).rows});
+   bindings:(await pool.query(`SELECT g.id group_id,g.name group_name,g.revision,g.applied_revision,g.persona_version_id,g.persona_follow_latest,v.persona_id,v.version,COALESCE((SELECT json_agg(json_build_object('persona_id',f.persona_id,'version_id',f.version_id,'follow_latest',f.follow_latest,'position',f.position,'name',p2.name,'version',v2.version) ORDER BY f.position) FROM group_persona_features f JOIN personas p2 ON p2.id=f.persona_id JOIN persona_versions v2 ON v2.id=f.version_id WHERE f.group_id=g.id),'[]'::json) features FROM groups g LEFT JOIN persona_versions v ON v.id=g.persona_version_id WHERE g.deleted_at IS NULL ORDER BY g.name`)).rows});
  });
  app.post('/api/persona-collections',async(req,res)=>{
   const b=z.object({name:z.string().trim().min(1).max(120),group_id:z.uuid().nullable().default(null)}).parse(req.body),id=randomUUID();
-  const g=b.group_id?(await pool.query('SELECT external_id FROM groups WHERE id=$1',[b.group_id])).rows[0]:null;
+  const g=b.group_id?(await pool.query('SELECT external_id FROM groups WHERE deleted_at IS NULL AND id=$1',[b.group_id])).rows[0]:null;
   requireCondition(!b.group_id||g,404,'群不存在');
   await pool.query('INSERT INTO persona_collections(id,name,group_id,source_group_id) VALUES($1,$2,$3,$4)',[id,b.name,b.group_id,null]);
   await audit(req.admin!.username,'persona.collection_created',id);res.status(201).json({id});
@@ -124,7 +124,7 @@ export function registerPersonaAdmin(app:express.Express){
   const id=uuid(req.params.id),b=z.object({archived:z.boolean(),revision}).parse(req.body);
   await transaction(async db=>{
    await db.query('SELECT id FROM personas WHERE id=$1 FOR UPDATE',[id]);
-   if(b.archived){requireCondition(!(await db.query('SELECT 1 FROM groups g JOIN persona_versions v ON v.id=g.persona_version_id WHERE v.persona_id=$1 UNION ALL SELECT 1 FROM group_persona_features WHERE persona_id=$1',[id])).rowCount,409,'请先解除或更换使用此 Persona 的群');
+   if(b.archived){requireCondition(!(await db.query('SELECT 1 FROM groups g JOIN persona_versions v ON v.id=g.persona_version_id WHERE g.deleted_at IS NULL AND v.persona_id=$1 UNION ALL SELECT 1 FROM group_persona_features WHERE persona_id=$1',[id])).rowCount,409,'请先解除或更换使用此 Persona 的群');
     requireCondition(!(await db.query("SELECT 1 FROM persona_jobs WHERE persona_id=$1 AND status IN ('pending','processing')",[id])).rowCount,409,'生成任务完成后再归档');}
    const r=await db.query('UPDATE personas SET archived=$1,revision=revision+1 WHERE id=$2 AND revision=$3',[b.archived,id,b.revision]);requireCondition(r.rowCount,409,'Persona 版本已变化，请重新载入');
    await audit(req.admin!.username,'persona.archive_changed',id,{archived:b.archived},db);
@@ -140,7 +140,7 @@ export function registerPersonaAdmin(app:express.Express){
   res.type('application/gzip').attachment(v.skill_name+'-v'+v.version+'.tar.gz').send(skillArchive(v.skill_name,v.skill_md,v.provenance));
  });
  app.get('/api/persona-bindings/:id',async(req,res)=>{
-  const group=(await pool.query('SELECT id,persona_version_id,policy,language,allow_language_override,interaction FROM groups WHERE id=$1',[uuid(req.params.id)])).rows[0];requireCondition(group,404,'群不存在');
+  const group=(await pool.query('SELECT id,persona_version_id,policy,language,allow_language_override,interaction FROM groups WHERE deleted_at IS NULL AND id=$1',[uuid(req.params.id)])).rows[0];requireCondition(group,404,'群不存在');
   const bundle=await runtimePersonaBundle(group);
   const text=renderPersonaComposition(bundle.persona_skill,bundle.persona_feature_skills,group.policy.persona==='gt-persona'?'【内置基础】由机器人加载 GT Persona。':'【内置基础】中性自然表达。');
   const identity=await botIdentityBundle({...group,policy:effectivePolicy(group)});
@@ -150,7 +150,7 @@ export function registerPersonaAdmin(app:express.Express){
  app.put('/api/persona-bindings/:id',async(req,res)=>{
   const b=z.object({revision,version_id:z.uuid().nullable(),follow_latest:z.boolean().default(false),features:z.array(z.object({version_id:z.uuid(),follow_latest:z.boolean().default(false)})).max(5).optional()}).parse(req.body),groupId=uuid(req.params.id);
   await transaction(async db=>{
-   const current=(await db.query('SELECT * FROM groups WHERE id=$1',[groupId])).rows[0];requireCondition(current,404,'群不存在');
+   const current=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];requireCondition(current,404,'群不存在');
    const inputFeatures=b.features??(await featureBindings(groupId,db)).map(f=>({version_id:f.version_id,follow_latest:f.follow_latest}));
    // Consistent lock ordering prevents two multi-skill edits locking personas in reverse order.
    const selections=[...(b.version_id?[{version_id:b.version_id,kind:'base' as const,follow_latest:b.follow_latest}]:[]),...inputFeatures.map(f=>({...f,kind:'feature' as const}))];

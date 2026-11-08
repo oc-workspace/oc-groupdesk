@@ -31,7 +31,7 @@ async function insertJob(kind:string,requestId:string,input:any,actor:string,gro
 }
 async function readJob(id:string){
  const j=(await pool.query('SELECT '+publicJob+' FROM group_onboarding_jobs WHERE id=$1',[id])).rows[0];requireCondition(j,404,'接入任务不存在');
- if(j.group_id){j.group=(await pool.query('SELECT id,name,enabled,external_id,revision,applied_revision FROM groups WHERE id=$1',[j.group_id])).rows[0];}
+ if(j.group_id){j.group=(await pool.query('SELECT id,name,enabled,external_id,revision,applied_revision FROM groups WHERE deleted_at IS NULL AND id=$1',[j.group_id])).rows[0];requireCondition(j.group,404,'群聊配置已删除或不存在');}
  if(j.kind==='connect'){
   const children=(await pool.query('SELECT DISTINCT ON(kind) '+publicJob+" FROM group_onboarding_jobs WHERE parent_id=$1 AND kind IN ('verify','greeting') ORDER BY kind,created_at DESC,id DESC",[j.id])).rows;
   j.followups={verify:children.find(v=>v.kind==='verify')||null,greeting:children.find(v=>v.kind==='greeting')||null};
@@ -49,9 +49,9 @@ export function parseOnboardingSuggestion(text:string){let value:unknown;try{val
 export function registerOnboardingAdmin(app:express.Express,caller=callTextModel){
  app.get('/api/group-onboarding',async(req,res)=>{
   const agent=(await pool.query('SELECT seen_at,version FROM group_onboarding_agent WHERE singleton=true')).rows[0]||null;
-  const jobs=(await pool.query('SELECT '+publicJob+' FROM group_onboarding_jobs ORDER BY created_at DESC LIMIT 30')).rows;
+  const jobs=(await pool.query('SELECT '+publicJob+' FROM group_onboarding_jobs WHERE group_id IS NULL OR EXISTS(SELECT 1 FROM groups g WHERE g.id=group_onboarding_jobs.group_id AND g.deleted_at IS NULL) ORDER BY created_at DESC LIMIT 30')).rows;
   const versions=(await pool.query("SELECT v.id,v.persona_id,v.version,v.kind,p.name FROM persona_versions v JOIN personas p ON p.id=v.persona_id WHERE NOT p.archived ORDER BY p.name,v.version DESC")).rows;
-  const flows=(await pool.query("SELECT j.id,j.kind,j.status,j.stage,j.group_id,j.created_at,g.name AS group_name,(j.status='succeeded' AND g.external_id IS NOT NULL AND g.revision=g.applied_revision) AS ready FROM group_onboarding_jobs j JOIN groups g ON g.id=j.group_id WHERE j.kind='connect' ORDER BY j.created_at DESC LIMIT 30")).rows;
+  const flows=(await pool.query("SELECT j.id,j.kind,j.status,j.stage,j.group_id,j.created_at,g.name AS group_name,(j.status='succeeded' AND g.external_id IS NOT NULL AND g.revision=g.applied_revision) AS ready FROM group_onboarding_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id WHERE j.kind='connect' ORDER BY j.created_at DESC LIMIT 30")).rows;
   res.json({agent,jobs,versions,flows});
  });
  app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid(),group_name:z.string().trim().min(1).max(200).optional()}).strict().parse(req.body);if(b.group_name)requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE version='2'")).rowCount,409,'指定群名读取运行端正在更新，请稍后刷新');const id=await transaction(db=>insertJob('discover',b.request_id,b.group_name?{group_name:b.group_name}:{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
@@ -59,7 +59,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
  app.post('/api/group-onboarding/jobs/:id/retry',async(req,res)=>{
   await activeBot(req.botId!);await agentReady();const id=z.uuid().parse(req.params.id);
   await transaction(async db=>{const j=(await db.query('SELECT * FROM group_onboarding_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(j&&['failed','cancelled'].includes(j.status),409,'仅失败或已取消的任务可以继续');requireCondition(j.kind!=='greeting',409,'问候不自动重发，请先核对群聊');
-   if(j.group_id){const g=(await db.query('SELECT enabled FROM groups WHERE id=$1',[j.group_id])).rows[0];requireCondition(!g?.enabled,409,'本群已启用，请使用接入检查，避免覆盖现有运行');}
+   if(j.group_id){const g=(await db.query('SELECT enabled FROM groups WHERE deleted_at IS NULL AND id=$1',[j.group_id])).rows[0];requireCondition(g,404,'群聊配置已删除或不存在');requireCondition(!g.enabled,409,'本群已启用，请使用接入检查，避免覆盖现有运行');}
    if(j.kind==='connect'){
     const fresh=(await db.query("SELECT id,result FROM group_onboarding_jobs WHERE kind='discover' AND status='succeeded' AND updated_at>now()-interval '15 minutes' ORDER BY updated_at DESC LIMIT 10")).rows;
     const binding=(await db.query('SELECT native_id FROM group_onboarding_bindings WHERE job_id=$1',[id])).rows[0];
@@ -82,7 +82,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
    const cfg=b.config;
    for(const [table,ids] of [['topics',cfg.topic_ids],['knowledge_bases',cfg.kb_ids]] as const){requireCondition(new Set(ids).size===ids.length,400,'选择项不能重复');const n=(await db.query('SELECT count(*)::int n FROM '+table+' WHERE id=ANY($1::uuid[])',[ids])).rows[0].n;requireCondition(n===ids.length,400,'选择包含当前机器人空间以外的内容');}
    await validateRoutes(cfg.model_routes,db);let sourceLanguage='auto';let policy=effectivePolicy({language:'auto',allow_language_override:true});
-   if(cfg.source_group_id){const source=(await db.query('SELECT * FROM groups WHERE id=$1',[cfg.source_group_id])).rows[0];requireCondition(source,400,'参考群不属于当前机器人');policy=effectivePolicy(source);sourceLanguage=source.language;}
+   if(cfg.source_group_id){const source=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[cfg.source_group_id])).rows[0];requireCondition(source,400,'参考群不属于当前机器人');policy=effectivePolicy(source);sourceLanguage=source.language;}
    requireCondition(cfg.language!=='source'||cfg.source_group_id,400,'沿用语言需要先选择参考群');
    policy=parseGroupPolicy({...policy,...(cfg.identity?{identity:cfg.identity}:{}),participation:cfg.participation,topic_scope:cfg.topic_scope,topic_overrides:Object.fromEntries(Object.entries(policy.topic_overrides).filter(([id])=>cfg.topic_ids.includes(id))),language:cfg.language==='source'?policy.language:{mode:cfg.language==='auto'?'follow':'fixed',allowed:[],fallback:cfg.language==='auto'?'zh-CN':cfg.language,...(cfg.language==='auto'?{}:{fixed:cfg.language}),allow_requested:true}});
    const base=cfg.base_version_id?await resolveBindingVersion(cfg.base_version_id,'base',cfg.base_follow_latest,db):null;
@@ -137,7 +137,7 @@ export function registerOnboardingRuntime(app:express.Express){
   }
   if(body.status==='succeeded'&&j.kind==='connect'){
    const c=await discovery(j.parent_id,j.input.candidate_id,false);const external=body.result.external_id;requireCondition(external&&external===`bowxt-${req.botId!.replaceAll('-','')}:${body.result.chat_id}`,400,'新群标识不属于当前机器人');
-   const exists=(await pool.query('SELECT id FROM groups WHERE external_id=$1 AND id<>$2',[external,j.group_id])).rowCount;requireCondition(!exists,409,'真实群已经绑定其他配置');
+   const exists=(await pool.query('SELECT id FROM groups WHERE deleted_at IS NULL AND external_id=$1 AND id<>$2',[external,j.group_id])).rowCount;requireCondition(!exists,409,'真实群已经绑定其他配置');
    // Append only the selected group. A crash between these steps leaves the
    // newly created group disabled; repeated reports are idempotent.
    const hash=digest(req.headers.authorization!.slice(7));
@@ -145,7 +145,7 @@ export function registerOnboardingRuntime(app:express.Express){
    const ids=[...new Set([...adapter.group_external_ids,external])];await controlPool.query('UPDATE managed_bot_adapters SET group_external_ids=$3 WHERE bot_id=$1 AND token_hash=$2',[req.botId,hash,JSON.stringify(ids)]);
    await transaction(async db=>{
     await db.query('UPDATE runtime_adapters SET group_external_ids=$2 WHERE token_hash=$1',[hash,JSON.stringify(ids)]);
-    const g=(await db.query('SELECT * FROM groups WHERE id=$1 FOR UPDATE',[j.group_id])).rows[0];requireCondition(g&&(!g.external_id||g.external_id===external),409,onboardingErrors.config_changed);
+    const g=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[j.group_id])).rows[0];requireCondition(g&&(!g.external_id||g.external_id===external),409,onboardingErrors.config_changed);
     if(j.input.config.enable){requireCondition((await db.query('SELECT 1 FROM group_topics WHERE group_id=$1 LIMIT 1',[j.group_id])).rowCount,409,'启用前请至少选择一个话题');await validateRoutes(g.model_routes,db);}
     await db.query('UPDATE groups SET external_id=$2,enabled=$3,revision=CASE WHEN external_id IS NULL THEN revision+1 ELSE revision END WHERE id=$1',[j.group_id,external,j.input.config.enable]);
     await audit('onboarding-runtime','group.onboarding_connected',j.group_id,{native_sha256:digest(c.native_id),external_id:external},db);

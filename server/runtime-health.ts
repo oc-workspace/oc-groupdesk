@@ -20,7 +20,7 @@ export function registerRuntimeHealth(app:express.Express){
   const body=runtimeHealthSchema.parse(req.body);
   requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(body.external_id),403,'此适配器未授权该群');
   await transaction(async db=>{
-   const group=(await db.query('SELECT id,runtime_health FROM groups WHERE external_id=$1 FOR UPDATE',[body.external_id])).rows[0];
+   const group=(await db.query('SELECT id,runtime_health FROM groups WHERE deleted_at IS NULL AND external_id=$1 FOR UPDATE',[body.external_id])).rows[0];
    requireCondition(group,404,'群未绑定');
    const {external_id,...health}=body;
    await db.query('UPDATE groups SET runtime_health=$1,runtime_health_at=now() WHERE id=$2',[health,group.id]);

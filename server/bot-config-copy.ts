@@ -16,12 +16,12 @@ export async function copyBotConfiguration(source:string,target:string,sourceGro
  z.uuid().parse(source);z.uuid().parse(target);z.uuid().parse(sourceGroup);
  requireCondition(source!==target,400,'源和目标机器人必须不同');
  return controlTransaction(async control=>{
-  const bots=(await control.query('SELECT id,state,database_state FROM managed_bots WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[[source,target]])).rows;
+  const bots=(await control.query('SELECT id,state,database_state FROM managed_bots WHERE deleted_at IS NULL AND id=ANY($1::uuid[]) ORDER BY id FOR UPDATE',[[source,target]])).rows;
   requireCondition(bots.length===2&&bots.every(b=>['legacy','ready'].includes(b.database_state)),409,'机器人空间尚未就绪');
   requireCondition(bots.find(b=>b.id===target)?.state==='paused',409,'目标机器人必须暂停');
   const snapshot=await withBot(source,()=>transaction(async db=>{
    await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-   const group=(await db.query('SELECT * FROM groups WHERE id=$1',[sourceGroup])).rows[0];
+   const group=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[sourceGroup])).rows[0];
    requireCondition(group,404,'源群不存在');
    const topics=(await db.query('SELECT * FROM topics ORDER BY id')).rows;
    const credentials=(await db.query('SELECT * FROM model_credentials ORDER BY id')).rows;

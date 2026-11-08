@@ -7,12 +7,12 @@ import {definitionSchema,settingsSchema,bindingSchema,prizeSchema,settingsDefaul
 import {groupForInteraction,interactionSettings,interactionBindings,interactionPrizes,validateInteractionBindings,interactionDay} from './config.js';
 import {reviewRedemption} from './service.js';
 const uuid=(v:unknown)=>z.uuid().parse(v);
-async function lockDefinitionGroups(id:string,db:any){return (await db.query("SELECT g.id FROM groups g WHERE EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND b.definition_id=$1 AND (b.config->>'enabled')::boolean) ORDER BY g.id FOR UPDATE",[id])).rows;}
+async function lockDefinitionGroups(id:string,db:any){return (await db.query("SELECT g.id FROM groups g WHERE g.deleted_at IS NULL AND EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND b.definition_id=$1 AND (b.config->>'enabled')::boolean) ORDER BY g.id FOR UPDATE",[id])).rows;}
 export function registerInteractionAdmin(app:express.Express){
  app.get('/api/interactions',async(_req,res)=>{
-  const groups=(await pool.query('SELECT id,name,enabled,revision,applied_revision,bot_seen_at FROM groups ORDER BY created_at,id')).rows;
+  const groups=(await pool.query('SELECT id,name,enabled,revision,applied_revision,bot_seen_at FROM groups WHERE deleted_at IS NULL ORDER BY created_at,id')).rows;
   for(const group of groups){group.settings=await interactionSettings(group.id);group.bindings=await interactionBindings(group.id);group.prizes=await interactionPrizes(group.id);const day=interactionDay(Date.now(),group.settings.timezone);group.usage=(await pool.query('SELECT replies,ai_calls FROM interaction_daily_usage WHERE group_id=$1 AND day_key=$2',[group.id,day])).rows[0]||{replies:0,ai_calls:0};}
-  res.json({definitions:(await pool.query('SELECT * FROM interaction_definitions ORDER BY created_at,id')).rows,groups,templates:(await pool.query('SELECT cache_key,group_id,binding_id,locale,outcome,status,model_id,error,updated_at FROM interaction_templates ORDER BY updated_at DESC LIMIT 100')).rows});
+  res.json({definitions:(await pool.query('SELECT * FROM interaction_definitions ORDER BY created_at,id')).rows,groups,templates:(await pool.query('SELECT cache_key,group_id,binding_id,locale,outcome,status,model_id,error,updated_at FROM interaction_templates WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=interaction_templates.group_id AND g.deleted_at IS NULL) ORDER BY updated_at DESC LIMIT 100')).rows});
  });
  app.post('/api/interactions/definitions',async(req,res)=>{
   const body=definitionSchema.parse(req.body),id=randomUUID();await transaction(async db=>{await db.query('INSERT INTO interaction_definitions(id,name,kind,description,instructions,commands) VALUES($1,$2,$3,$4,$5,$6)',[id,body.name,body.kind,body.description,body.instructions,body.commands]);await audit(req.admin!.username,'interaction.definition_created',id,{kind:body.kind},db);});res.status(201).json({id});
