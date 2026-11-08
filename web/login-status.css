@@ -15,6 +15,8 @@
 .login-admin-option[open]>summary{margin-bottom:20px}
 .login-admin-option>summary:focus-visible,.login-review-github:focus-visible{outline:3px solid #8a73cd;outline-offset:4px;border-radius:5px}
 .login-review-refresh{margin-top:16px}
+.login-review-confirm{margin-top:18px}
+.login-review-confirm .button{white-space:normal;text-align:center;line-height:1.6}
 .login-review-approved{background:#effaf2;border-color:#8bc69b;border-left-color:#2d8351;color:#235b38}
 .login-review-approved .login-review-icon,.login-review-approved .login-review-badge{background:#d4eedc;color:#24653d}
 .login-review-approved h3,.login-review-approved .login-review-next p,.login-review-approved .login-review-next strong{color:#205a35}
