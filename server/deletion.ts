@@ -9,7 +9,7 @@ import {requireCondition} from './security.js';
 
 // This removes a registration from the product. Tombstones preserve independent
 // billing/audit attribution and account data; it never runs Docker/WeChat tools.
-function stopped(b:any){
+export function stopped(b:any){
  if(!b||!['paused','archived'].includes(b.state))return false;
  if(!b.runtime_instance_id&&!b.account_fingerprint&&!b.runtime_seen_at)return true;
  const s=b.runtime_status||{};

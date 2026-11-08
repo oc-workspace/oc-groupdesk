@@ -1,3 +1,4 @@
+import {registerBotPurge} from './bot-purge.js';
 import {registerRuntimeMaintenanceAdmin,registerRuntimeMaintenanceAgent} from './runtime-maintenance.js';
 import {registerGithubAuth,registerUserAdmin,type GithubRequest} from './users.js';
 import {registerSharedResources} from './shared-resources.js';
@@ -161,6 +162,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   registerRuntimeMaintenanceAdmin(app);
   registerKeyVault(app);
   registerSharedResources(app);
+  registerBotPurge(app);
   registerBotAdmin(app);
   app.use('/api',async(req,res,next)=>{
     if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/')||req.path==='/users'||req.path.startsWith('/users/')||req.path.startsWith('/shared-resources'))return next();

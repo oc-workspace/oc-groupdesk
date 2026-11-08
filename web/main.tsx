@@ -75,7 +75,7 @@ function App(){
  const [account,setAccount]=useState<SessionUser|null>(null);
  const [username,setUsername]=useState<string|null>(null),[checking,setChecking]=useState(true),[directory,setDirectory]=useState<BotDirectory|null>(null),[selected,setSelected]=useState(''),[error,setError]=useState('');
  const [switchTarget,setSwitchTarget]=useState('');
- const refreshBots=async()=>{const data=await requestApi('/bots');setDirectory(data);setSelected(current=>data.bots.some((b:any)=>b.id===current&&b.state!=='archived')?current:data.bots.find((b:any)=>b.state==='active')?.id||data.bots.find((b:any)=>b.state!=='archived')?.id||data.bots[0]?.id||'');};
+ const refreshBots=async()=>{const data=await requestApi('/bots');setDirectory(data);setSelected(current=>{if(data.bots.some((b:any)=>b.id===current&&b.state!=='archived'))return current;const next=data.bots.find((b:any)=>b.state==='active')?.id||data.bots.find((b:any)=>b.state!=='archived')?.id||data.bots[0]?.id||'';if(current&&next)try{sessionStorage.setItem('groupdesk:bot-next-page:'+next,'bots');}catch{}return next;});};
  useEffect(()=>{requestApi('/auth/me').then(r=>{csrf=r.csrf;setAccount(r);setUsername(r.display_name||r.github_login||r.username);}).catch(()=>{}).finally(()=>setChecking(false));const expired=()=>{setUsername(null);setAccount(null);setDirectory(null);};window.addEventListener('session-expired',expired);return()=>window.removeEventListener('session-expired',expired);},[]);
  useEffect(()=>{if(username)void refreshBots().catch(e=>setError(e.message));},[username]);
  const scoped=useMemo(()=>bindBotApi(selected,requestApi),[selected]);

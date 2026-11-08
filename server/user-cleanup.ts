@@ -13,19 +13,19 @@ import {deletionReason,reasonFields,reasonDetails,type DeletionReason} from '../
 
 type Item={kind:'bot'|'key';id:string;name:string;eligible:boolean;message:string};
 const present=async(path:string)=>{try{return await lstat(path);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e;}};
-async function botPath(b:any){
+export async function botPath(b:any){
  const ns=b.id.replaceAll('-','');
  requireCondition(b.id!==legacyBotId&&/^[a-f0-9]{32}$/.test(ns)&&b.data_namespace===ns&&b.db_name==='gdb_'+ns&&b.db_role==='gdr_'+ns,409,'存储绑定不符合独立机器人规范，需人工核对');
  const base=resolve(process.env.DATA_DIR||'data'),parent=join(base,'bots'),path=join(parent,ns);
  for(const p of [base,parent,path]){const st=await present(p);requireCondition(!st||st.isDirectory()&&!st.isSymbolicLink(),409,'资料目录不是可信独立目录，需人工核对');if(st)requireCondition(await realpath(p)===p,409,'资料目录存在路径跳转，需人工核对');}
  return path;
 }
-async function business<T>(name:string,fn:(db:pg.Client)=>Promise<T>){
+export async function business<T>(name:string,fn:(db:pg.Client)=>Promise<T>){
  const url=new URL(process.env.DATABASE_URL!);url.pathname='/'+name;
  const db=new pg.Client({connectionString:url.href,connectionTimeoutMillis:5000,statement_timeout:10000});
  try{await db.connect();return await fn(db);}finally{await db.end();}
 }
-async function botEligible(b:any,user:string,resuming=false):Promise<string>{
+export async function botEligible(b:any,user:string,resuming=false):Promise<string>{
  if(!b.deleted_at||b.owner_user_id!==user)return '机器人未删除或已不属于此账号';
  if(b.storage_purged_at)return '独立业务库与资料目录已清理';
  if(b.id===legacyBotId||b.database_state==='legacy')return '原始兼容业务空间与站点控制库共用，保留并需人工处理';
@@ -84,7 +84,7 @@ export async function requestCleanup(id:string,revision:number,confirmation:stri
   await audit(actor.username,'user.cleanup_requested',id,{...reasonDetails(why),target_name:p.name,cleanup_id:job.id,counts:p.counts},db);return job.id;
  });
 }
-async function retainDeletionHistory(b:any,db:pg.PoolClient){
+export async function retainDeletionHistory(b:any,db:pg.PoolClient){
  await business(b.db_name,async source=>{
   const rows=(await source.query("SELECT id,actor,action,target,details,created_at FROM audit_logs WHERE action='group.configuration_deleted' ORDER BY id")).rows;
   for(const row of rows)await db.query("INSERT INTO audit_logs(actor,action,target,details,created_at) SELECT $1,'cleanup.retained_group_deletion',$2,$3,$4 WHERE NOT EXISTS(SELECT 1 FROM audit_logs WHERE action='cleanup.retained_group_deletion' AND details->>'bot_id'=$5 AND details->>'source_event_id'=$6)",[String(row.actor).slice(0,200),row.target,{bot_id:b.id,source_event_id:String(row.id),reason:row.details.reason||null,reason_label:row.details.reason_label||'历史未填写',reason_note:String(row.details.reason_note||'').slice(0,500),target_name:String(row.details.target_name||'').slice(0,120)},row.created_at,b.id,String(row.id)]);
@@ -141,7 +141,7 @@ export async function processDeletionCleanup(){
 }
 export function registerUserCleanup(app:express.Express){
  app.get('/api/users/deleted',async(req,res)=>{superAdmin(req.admin!);const users=(await controlPool.query('SELECT a.id,a.username,a.github_login,a.display_name,a.deleted_at,a.deleted_by,a.deletion_reason,a.deletion_note,j.id cleanup_id,j.status cleanup_status,j.error cleanup_error,j.updated_at cleanup_updated_at FROM admins a LEFT JOIN managed_deletion_cleanups j ON j.user_id=a.id WHERE a.deleted_at IS NOT NULL ORDER BY a.deleted_at DESC,a.id LIMIT 100')).rows;for(const u of users)u.cleanup_items=u.cleanup_id?(await controlPool.query('SELECT kind,target_id,name,state,phase,message FROM managed_deletion_cleanup_items WHERE cleanup_id=$1 ORDER BY kind,target_id',[u.cleanup_id])).rows:[];res.json({users,limit:100});});
- app.get('/api/users/deletion-history',async(req,res)=>{superAdmin(req.admin!);res.json({logs:(await controlPool.query("SELECT id,actor,action,target,details,created_at FROM audit_logs WHERE action IN ('user.account_deleted','bot.registration_deleted','group.configuration_deleted','user.cleanup_requested','user.cleanup_finished','cleanup.retained_group_deletion') ORDER BY created_at DESC,id DESC LIMIT 150")).rows,limit:150});});
+ app.get('/api/users/deletion-history',async(req,res)=>{superAdmin(req.admin!);res.json({logs:(await controlPool.query("SELECT id,actor,action,target,details,created_at FROM audit_logs WHERE action IN ('user.account_deleted','bot.registration_deleted','group.configuration_deleted','user.cleanup_requested','user.cleanup_finished','cleanup.retained_group_deletion','bot.purge_requested','bot.purge_completed','bot.purge_retry','bot.purge_cancelled') ORDER BY created_at DESC,id DESC LIMIT 150")).rows,limit:150});});
  app.get('/api/users/:id/cleanup/preview',async(req,res)=>{superAdmin(req.admin!);res.json(await cleanupPreview(z.uuid().parse(req.params.id)));});
  app.post('/api/users/:id/cleanup',async(req,res)=>{superAdmin(req.admin!);const b=z.object({revision:z.number().int().positive(),confirmation:z.string().min(1).max(120),plan_hash:z.string().regex(/^[a-f0-9]{64}$/),...reasonFields}).strict().refine(v=>v.reason!=='other'||!!v.reason_note,'选择其他时请补充原因').parse(req.body);res.status(202).json({id:await requestCleanup(z.uuid().parse(req.params.id),b.revision,b.confirmation,b.plan_hash,req.admin!.id,b),status:'queued'});});
 }

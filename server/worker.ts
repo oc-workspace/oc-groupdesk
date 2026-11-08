@@ -1,3 +1,4 @@
+import {processBotPurge} from './bot-purge.js';
 import {processDeletionCleanup} from './user-cleanup.js';
 import {dataDirectory} from './bot-context.js';
 import {forWorkspaces} from './bot-workspaces.js';
@@ -56,7 +57,7 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
   process.on('SIGTERM',()=>{running=false;summaryAbort.abort();});process.on('SIGINT',()=>{running=false;summaryAbort.abort();});
   console.log('GroupDesk worker ready');
   while(running){
-    try{if(!await processDeletionCleanup()&&!await forWorkspaces(false,async()=>await processNext()||await processPersonaJob()||await processConversationJob()))await new Promise(r=>setTimeout(r,2000));}
+    try{if(!await processBotPurge()&&!await processDeletionCleanup()&&!await forWorkspaces(false,async()=>await processNext()||await processPersonaJob()||await processConversationJob()))await new Promise(r=>setTimeout(r,2000));}
     catch{console.error('worker_retry');await new Promise(r=>setTimeout(r,3000));}
   }
   await Promise.allSettled(summaryTasks);await pool.end();

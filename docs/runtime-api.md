@@ -88,3 +88,5 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 ## 主机运行环境维护
 
 `/api/runtime-maintenance`仅总管理员：主机盘点、预览、按明确范围暂存/还原/永久清理、取消和原任务重试。`/api/runtime-maintenance-agent/{claim,authorize,result}`使用独立主机Bearer；修改另需180秒HMAC许可，绑定任务/主机/UUID/范围/指纹/租约。不是机器人运行Token，也不能创建清理任务或提交任意路径。032控制库保存任务与最近3份盘点；网页手动刷新，不将文件盘点作为微信在线证明。边界和部署见[运行环境维护](runtime-maintenance.md)。
+
+`GET /api/bots/deleted`提供总管理员最近100个已删除机器人及清理进度；`GET /api/bots/:id/purge/preview`返回范围、保留项和计划指纹，`POST /api/bots/:id/purge`要求版本、完整微信号、计划指纹、业务/运行范围、原因及明确永久确认；`POST .../retry`只续原任务，主机失败先核对原主机队列。033不向业务角色授权，接口在工作空间选择前验证总管理员，不因没有可选机器人而失去清理入口。

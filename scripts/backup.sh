@@ -10,6 +10,7 @@ trap '"${dc[@]}" start app worker interaction-worker >/dev/null' EXIT
 "${dc[@]}" stop interaction-worker
 "${dc[@]}" stop app worker
 [[ "$("${dc[@]}" exec -T --interactive=false postgres psql -U groupdesk -d groupdesk -Atc "SELECT count(*) FROM managed_deletion_cleanups WHERE status='processing'")" == "0" ]] || { echo "Cleanup interrupted; restart and finish it before backup"; exit 1; }
+[[ "$("${dc[@]}" exec -T --interactive=false postgres psql -U groupdesk -d groupdesk -Atc "SELECT count(*) FROM managed_bot_purges WHERE status='processing'")" == "0" ]] || { echo "Bot purge interrupted; reconcile it before backup"; exit 1; }
 "${dc[@]}" exec -T --interactive=false postgres pg_dump -U groupdesk -d groupdesk -Fc > "$backup_dir/database.dump"
 # Freeze metadata and every robot database in the same application pause.
 if [[ "$("${dc[@]}" exec -T --interactive=false postgres psql -U groupdesk -d groupdesk -Atc "SELECT to_regclass('public.managed_bots') IS NOT NULL")" == "t" ]]; then
