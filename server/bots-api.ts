@@ -11,7 +11,7 @@ import {requestPause,requestActivation,archiveBot} from './bot-lifecycle.js';
 import {token,digest,requireCondition} from './security.js';
 const metadata=z.object({name:z.string().trim().min(1).max(80),wechat_id:z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.\-]+$/),host_label:z.string().trim().max(100).default('rococo-root2'),notes:z.string().max(1000).default('')}).strict();
 const publicFields='id,name,wechat_id,host_label,notes,state,database_state,revision,activation_generation,runtime_status,runtime_seen_at,stopped_revision,pause_requested_at,error,created_at';
-export function registerBotAdmin(app:express.Express){
+export function registerBotAdmin(app:express.Express,installationCaller?:typeof import('./model-generation.js').callTextModel){
  registerBotDeletion(app);
  app.get('/api/bots',async(req,res)=>{
   const rows=(await controlPool.query('SELECT '+publicFields+',owner_user_id,created_by_user_id FROM managed_bots WHERE deleted_at IS NULL AND ($1::boolean OR owner_user_id=$2) ORDER BY created_at,id',[req.admin!.role==='super_admin',req.admin!.id])).rows;
@@ -32,7 +32,7 @@ export function registerBotAdmin(app:express.Express){
   res.json({ok:true,pending:['pause','activate'].includes(action)});
  });
  app.post('/api/bots/:id/cancel-activation',async(req,res)=>{const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);requireCondition(allowed(req.admin!,'bots.manage'),403,'没有管理机器人的权限');z.object({}).strict().parse(req.body);await controlTransaction(async db=>{await db.query('SELECT pg_advisory_xact_lock(78511966)');const current=(await db.query('SELECT owner_user_id FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(current&&(req.admin!.role==='super_admin'||current.owner_user_id===req.admin!.id),404,'机器人不存在或无权访问');const saved=await db.query('DELETE FROM managed_bot_switch WHERE target_id=$1 RETURNING target_id',[id]);requireCondition(saved.rowCount,409,'切换任务已结束，请刷新');await audit(req.admin!.username,'bot.activation_cancelled',id,{},db);});res.json({ok:true});});
- registerBotOnboarding(app);
+ registerBotOnboarding(app,installationCaller);
  app.post('/api/bots/:id/connection-token',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);requireCondition(allowed(req.admin!,'bots.manage'),403,'没有管理机器人的权限');const body=z.object({revision:z.number().int().positive()}).strict().parse(req.body),value=token(),hash=digest(value);
   await controlTransaction(async db=>{const b=(await db.query('SELECT * FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(b&&(req.admin!.role==='super_admin'||b.owner_user_id===req.admin!.id),404,'机器人不存在或无权访问');requireCondition(b?.state==='paused'&&b.revision===body.revision&&b.database_state==='ready',409,'请先准备好停用状态的独立业务空间');

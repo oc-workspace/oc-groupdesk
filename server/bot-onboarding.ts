@@ -1,3 +1,4 @@
+import {registerDeviceOnboarding} from './device-onboarding.js';
 import type express from 'express';
 import {z} from 'zod';
 import {controlPool,controlTransaction,pool,audit} from './db.js';
@@ -32,17 +33,17 @@ export async function onboardingReport(id:string,userId:string,admin:boolean){
  const sameAccount=f.requested_wechat_id===b.wechat_id;
  const ownerConfirmed=sameAccount&&f.account_confirmed_by===b.owner_user_id&&!!f.account_confirmed_at;
  const authorized=ownerConfirmed&&f.reader_authorized_by===b.owner_user_id&&!!f.reader_authorized_at;
- const prepared=!!f.environment_prepared_at||!!b.runtime_instance_id;
+ const prepared=!!f.environment_prepared_at||!!b.runtime_instance_id&&!!b.account_fingerprint;
  const fresh=!!b.runtime_seen_at&&Date.now()-new Date(b.runtime_seen_at).getTime()<90000;
  const runtime=!!b.account_fingerprint&&fresh&&b.runtime_status?.revision===b.revision&&b.runtime_status?.wechat_connected===true&&b.runtime_status?.reader_connected===true&&b.runtime_status?.maibot_connected===true&&b.runtime_status?.local_ready===true;
  const models=['legacy','ready'].includes(b.database_state)&&await botModelsReady(id);
  const groups=['legacy','ready'].includes(b.database_state)?await withBot(id,async()=>(await pool.query('SELECT count(*)::int n FROM groups WHERE deleted_at IS NULL AND external_id IS NOT NULL')).rows[0].n):0;
  const canActivate=b.state==='paused'&&prepared&&ownerConfirmed&&authorized&&models&&readyForActivation(b);
  const flags=[true,prepared,ownerConfirmed,authorized,runtime,models,!!f.completed_at||b.state==='active',groups>0];
- const names=['保存微信资料','准备独立运行环境','登录并确认微信账号','授权聊天读取','检查微信与机器人连接','配置 Key 与文字模型','启用机器人','查看微信群与继续接入'];
+ const names=['保存微信资料','选择并准备运行环境','登录并确认微信账号','授权聊天读取','检查微信与机器人连接','配置 Key 与文字模型','启用机器人','查看微信群与继续接入'];
  const details=[
   '已保存 '+b.name+' · '+b.wechat_id,
-  prepared?'运行环境已准备；真实在线情况在第5步单独核对。':'已提交接入申请，等待管理员按现有部署方式准备独立环境。',
+  prepared?'运行环境已准备；真实在线情况在第5步单独核对。':f.deployment_mode==='self_hosted'?'已保存自部署选择。先复制安装提示词交给有设备操作权限的本地 AI，检测并准备本机器人环境。':'已保存接入申请，沿用站点托管流程；等待管理员准备独立微信、MaiBot、读取器及桥接。无需现在扫码。',
   ownerConfirmed?'账号所有人已确认登录账号；系统连接情况仍需第5步核验。':prepared?'打开管理员提供的专属登录入口，用此微信扫码并完成手机确认。':'环境准备好后，这里会提供登录指引。',
   authorized?'已记录当前所有人的账号专属读取授权；不代表读取器已经连接。':'允许本账号的数据库读取、必要的受控启动取钥及加密保存，供此机器人的互动和总结使用。',
   runtime?'微信、读取器和MaiBot的当前版本上报正常。':'等待管理员完成首次群绑定、读取器与运行端配置，再核对真实上报；当前部署工具要求至少绑定一个群。过期或未连接不会标记通过。',
@@ -51,6 +52,7 @@ export async function onboardingReport(id:string,userId:string,admin:boolean){
   groups?'已有绑定的微信群。':'首次群绑定由管理员按现有部署流程配合完成；运行端连接后，可在这里管理已有群或继续接入更多群。'];
  const first=flags.slice(0,7).findIndex(v=>!v);
  return {bot_id:id,name:b.name,wechat_id:b.wechat_id,state:b.state,bot_revision:b.revision,revision:f.revision,created_at:f.created_at,completed_at:f.completed_at,
+  deployment_mode:f.deployment_mode||'hosted',deployment_mode_confirmed:!!f.deployment_mode,device_kind:f.device_kind,device_os:f.device_os,installation_model:f.installation_model,installation_plan:f.installation_plan,installation_plan_at:f.installation_plan_at,device_paired:!!(await controlPool.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL AND instance_id=$2',[id,b.runtime_instance_id])).rowCount,can_change_deployment:b.state==='paused'&&!prepared&&!ownerConfirmed&&!authorized&&!b.runtime_instance_id&&!b.account_fingerprint,
   desktop_url:prepared?f.desktop_url:'',desktop_is_local:!!f.desktop_url&&new URL(f.desktop_url).hostname==='127.0.0.1',
   account_confirmed:ownerConfirmed,reader_authorized:authorized,environment_prepared:prepared,runtime_ready:runtime,models_ready:models,can_activate:canActivate,
   can_confirm:userId===b.owner_user_id,can_prepare:admin,active_limit:1,switch_pending:!!(await controlPool.query('SELECT 1 FROM managed_bot_switch WHERE target_id=$1',[id])).rowCount,
@@ -69,7 +71,8 @@ function desktopUrl(value:string){
  requireCondition(u.protocol==='https:'||u.protocol==='http:'&&u.hostname==='127.0.0.1'&&['18080','18180'].includes(u.port),400,'请使用HTTPS登录入口；原本机隧道仅允许18080或18180');
  return u.href;
 }
-export function registerBotOnboarding(app:express.Express){
+export function registerBotOnboarding(app:express.Express,installationCaller?:typeof import('./model-generation.js').callTextModel){
+ registerDeviceOnboarding(app,installationCaller);
  app.get('/api/bots/:id/onboarding',async(req,res)=>{const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);res.json(await onboardingReport(id,req.admin!.id,req.admin!.role==='super_admin'));});
  app.post('/api/bots/:id/onboarding',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);requireCondition(allowed(req.admin!,'bots.create')||allowed(req.admin!,'bots.manage'),403,'没有机器人接入权限');
@@ -88,7 +91,7 @@ export function registerBotOnboarding(app:express.Express){
   await controlTransaction(async db=>{
    const b=(await db.query('SELECT * FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(b&&b.state!=='archived'&&b.owner_user_id===req.admin!.id,403,'必须由机器人当前所有人确认');
    const f=(await db.query('SELECT * FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[id])).rows[0];requireCondition(f&&f.revision===body.revision&&f.requested_wechat_id===b.wechat_id&&body.wechat_id===b.wechat_id,409,'任务或微信账号已变化，请刷新后重新确认');
-   requireCondition(f.environment_prepared_at||b.runtime_instance_id,409,'请先等待运行环境准备完成');
+   requireCondition(f.environment_prepared_at||b.runtime_instance_id&&b.account_fingerprint,409,'请先等待运行环境准备完成');
    if(action==='authorize-reader')requireCondition(f.account_confirmed_at&&f.account_confirmed_by===req.admin!.id,409,'请先登录并确认微信账号');
    const clause=action==='confirm-account'?'account_confirmed_at=now(),account_confirmed_by=$2':'reader_authorized_at=now(),reader_authorized_by=$2';
    await db.query('UPDATE managed_bot_onboarding SET '+clause+',revision=revision+1,updated_at=now() WHERE bot_id=$1',[id,req.admin!.id]);

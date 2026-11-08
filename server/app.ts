@@ -1,3 +1,4 @@
+import {registerDevicePairing} from './device-onboarding.js';
 import {registerBotPurge} from './bot-purge.js';
 import {clearRegistrationReceipt} from './registration-status.js';
 import {registerRuntimeMaintenanceAdmin,registerRuntimeMaintenanceAgent} from './runtime-maintenance.js';
@@ -76,7 +77,7 @@ async function bumpGroups(db:Pick<typeof pool,'query'>,topicId?:string,kbId?:str
   if(topicId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_topics WHERE topic_id=$1)',[topicId]);
   if(kbId)await db.query('UPDATE groups SET revision=revision+1 WHERE id IN(SELECT group_id FROM group_knowledge WHERE kb_id=$1)',[kbId]);
 }
-export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:import('./model-transport.js').ModelTransport;topicDraftCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
+export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:import('./model-transport.js').ModelTransport;topicDraftCaller?:typeof callTextModel;installationCaller?:typeof callTextModel;interactions?:{clock?:()=>number;random?:(min:number,max:number)=>number}}={}){
   const app=express();
   app.disable('x-powered-by');
   // Direct loopback or explicitly configured proxy only; never trust arbitrary X-Forwarded-For.
@@ -88,6 +89,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.use('/api',rateLimit({windowMs:60000,limit:240,standardHeaders:'draft-7',legacyHeaders:false}));
   app.use('/api/auth/login',rateLimit({windowMs:15*60000,limit:12,skipSuccessfulRequests:true,standardHeaders:'draft-7',legacyHeaders:false,message:{error:'登录尝试过多，请稍后再试'}}));
   registerModelProxy(app,options.modelTransport);
+  registerDevicePairing(app);
   registerRuntimeMaintenanceAgent(app);
   registerGithubAuth(app,options.githubRequest);
   app.post('/api/auth/login',async(req,res)=>{
@@ -166,7 +168,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   registerKeyVault(app);
   registerSharedResources(app);
   registerBotPurge(app);
-  registerBotAdmin(app);
+  registerBotAdmin(app,options.installationCaller);
   app.use('/api',async(req,res,next)=>{
     if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/')||req.path==='/users'||req.path.startsWith('/users/')||req.path.startsWith('/shared-resources'))return next();
     const selected=req.headers['x-groupdesk-bot'];
