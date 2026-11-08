@@ -3,6 +3,7 @@ Use in a local AI tool with the user's permission. No API keys in arguments.
 """
 import argparse,getpass,json,os,platform,re,shutil,subprocess,uuid,urllib.request,urllib.parse
 from pathlib import Path
+APPROVED_SITE = 'https://groupdesk.rococo.dev'
 
 def command(args):
     try:
@@ -39,8 +40,9 @@ def inspect_device():
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*_args,**_kwargs):raise ValueError('Refusing credential redirect')
 def pair(site,bot_id,directory):
+    if os.name=='nt':raise ValueError('Windows目前仅支持只读检查；配对凭据的私有存储尚待验证，请联系管理员或使用站点托管。')
     url=urllib.parse.urlsplit(site)
-    if url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
+    if site.rstrip('/')!=APPROVED_SITE or url.scheme!='https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('','/'):
         raise ValueError('Use the HTTPS GroupDesk site origin, without credentials')
     bot_id=str(uuid.UUID(bot_id));directory=Path(directory).expanduser().resolve()
     if directory.exists():raise ValueError('Destination exists; choose a NEW directory to avoid replacing another bot')
