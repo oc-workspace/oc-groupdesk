@@ -7,7 +7,7 @@ import {effectiveModelRoutes,validateSelection} from '../models.js';
 import {summaryConfig,summaryDefaults,resolveWindow,nextOccurrence} from '../../shared/summaries.js';
 export type Db=Pick<typeof pool,'query'>;
 export async function settings(groupId:string,db:Db=pool){const s=(await db.query('SELECT * FROM summary_settings WHERE group_id=$1',[groupId])).rows[0];return s||{group_id:groupId,revision:0,config:summaryDefaults(),last_adapter_seen:null};}
-export async function group(groupId:string,db:Db=pool){const g=(await db.query('SELECT * FROM groups WHERE id=$1',[groupId])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;}
+export async function group(groupId:string,db:Db=pool){const g=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;}
 export function language(g:any,c:any){const l=g.policy.language;return c.language==='group'?(l.mode==='fixed'?l.fixed:l.fallback)||'zh-CN':c.language;}
 export async function validateConfig(g:any,c:any,db:Db=pool){
  const l=g.policy.language,lang=language(g,c);
@@ -19,7 +19,7 @@ export async function route(g:any,c:any,db:Db=pool){const routes=await effective
 export async function valid(job:any,db:Db=pool,send=false){await requireCurrentBotActive();const g=await group(job.group_id,db),s=await settings(g.id,db);requireCondition(g.enabled&&g.external_id===job.external_id&&g.revision===job.group_revision&&s.revision===job.settings_revision,409,'群或总结配置已变化，请重新创建任务');if(send)requireCondition(s.config.enabled,409,'本群总结发布已停用');return {g,s};}
 export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolean,requestId:string,now=Date.now(),scheduleId:string|null=null,occurrence:string|null=null){
  await requireCurrentBotActive();
- await db.query('SELECT id FROM groups WHERE id=$1 FOR UPDATE',[groupId]);
+ await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[groupId]);
  const g=await group(groupId,db),s=await settings(groupId,db),c=summaryConfig.parse(s.config);
  requireCondition(g.enabled&&g.external_id,409,'请先启用群并连接机器人');if(publish)requireCondition(c.enabled,409,'请先保存并启用本群总结发布');
  await validateConfig(g,c,db);const r=await route(g,c,db);requireCondition(r.available,409,'本群总结模型不可用，请选择API Key和模型');

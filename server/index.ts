@@ -9,7 +9,7 @@ import {pool} from './db.js';
 if((process.env.BOT_API_TOKEN||'').length<32)throw new Error('BOT_API_TOKEN must contain at least 32 characters');
 await migrate();
 await ensureLegacyIsolation();
-for(const bot of (await controlPool.query("SELECT id FROM managed_bots WHERE database_state='ready'")).rows)await withBot(bot.id,()=>migrate({controlPlane:false,bootstrapAdmin:false}));
+for(const bot of (await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND database_state='ready'")).rows)await withBot(bot.id,()=>migrate({controlPlane:false,bootstrapAdmin:false}));
 await initializeUserOwners();
 await initializeKeyVault();
 const server=createApp().listen(Number(process.env.PORT||3110),'0.0.0.0',()=>console.log('GroupDesk ready on port '+(process.env.PORT||3110)));

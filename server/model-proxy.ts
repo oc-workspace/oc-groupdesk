@@ -26,7 +26,7 @@ export async function executeKeyCall(alias:string,model:string,scope:CallScope,b
  }catch(e){await settleUsage(reservation,null,dispatched,'request_failed');throw e;}
 }
 export async function proxyRoute(route:any,groupId:string,stage='chat'){
- await authorizedKey(route.credential_id,route.model_id,'chat',groupId);const g=(await pool.query('SELECT revision FROM groups WHERE id=$1',[groupId])).rows[0];
+ await authorizedKey(route.credential_id,route.model_id,'chat',groupId);const g=(await pool.query('SELECT revision FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];
  const key=await keyForAlias(route.credential_id),permit=sealControlSecret(JSON.stringify({bot:botId(),group:groupId,revision:g.revision,alias:route.credential_id,key:key.id,key_revision:key.revision,model:route.model_id,stage,expires:Date.now()+75000}));
  const origin=new URL(process.env.PUBLIC_ORIGIN||'http://localhost:3110').origin;
  return {...route,base_url:origin+'/api/model-proxy'+(key.client_type==='gemini'?'':'/v1'),api_key:permit,client_type:key.client_type};
@@ -37,7 +37,7 @@ export function registerModelProxy(app:express.Express,transport:ModelTransport=
   const s=z.object({bot:z.uuid(),group:z.uuid(),revision:z.number(),alias:z.uuid(),key:z.uuid(),key_revision:z.number(),model:z.string(),stage:z.string(),expires:z.number()}).strict().parse(p);requireCondition(s.expires>Date.now()&&s.expires<Date.now()+80000,401,'模型调用租约已过期');
   const b=await botRecord(s.bot);requireCondition(b?.state==='active',403,'机器人已暂停');
   await botStorage.run(await botScope(s.bot),async()=>{
-   const g=(await pool.query('SELECT revision,enabled FROM groups WHERE id=$1',[s.group])).rows[0];requireCondition(g?.enabled&&g.revision===s.revision,409,'群配置已变化');
+   const g=(await pool.query('SELECT revision,enabled FROM groups WHERE deleted_at IS NULL AND id=$1',[s.group])).rows[0];requireCondition(g?.enabled&&g.revision===s.revision,409,'群配置已变化');
    const k=await keyForAlias(s.alias);requireCondition(k.id===s.key&&k.revision===s.key_revision,409,'Key 已更新');
    const path=req.path.slice('/api/model-proxy'.length);let streaming=false;
    if(k.client_type==='gemini'){const gen='/v1beta/models/'+encodeURIComponent(s.model);requireCondition([gen+':generateContent',gen+':streamGenerateContent'].includes(path),403,'模型接口与授权不符');streaming=path.endsWith(':streamGenerateContent');}

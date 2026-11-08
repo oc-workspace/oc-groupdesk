@@ -14,7 +14,7 @@ export function registerBotRuntime(app:express.Express){
   requireCondition(body.bot_id===req.botId,403,'接入凭据不属于此机器人');
   await controlTransaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511966)');
-   const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 FOR UPDATE',[req.botId])).rows[0];requireCondition(b&&b.state!=='archived',409,'机器人已归档');
+   const b=(await db.query('SELECT * FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[req.botId])).rows[0];requireCondition(b&&b.state!=='archived',409,'机器人已归档');
    requireCondition(!b.runtime_instance_id||b.runtime_instance_id===body.instance_id,409,'此机器人已绑定其他运行实例');
    requireCondition(!b.account_fingerprint||b.account_fingerprint===body.account_fingerprint,409,'微信账号数据库与已绑定账号不符，已拒绝接入');
    await db.query('UPDATE managed_bots SET runtime_instance_id=$2,account_fingerprint=$3,runtime_status=$4,runtime_seen_at=now() WHERE id=$1',[b.id,body.instance_id,body.account_fingerprint,JSON.stringify(body)]);

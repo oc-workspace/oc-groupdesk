@@ -11,7 +11,7 @@ export function cleanPersonaIdentity(text:string){return withPersonaIdentityBoun
 async function inventory(db:Pick<typeof pool,'query'>,lock=false){
  const personas=(await db.query('SELECT id,skill_name,kind,revision,draft_skill,draft_provenance FROM personas ORDER BY id'+(lock?' FOR UPDATE':''))).rows;
  const versions=(await db.query('SELECT * FROM persona_versions ORDER BY persona_id,version')).rows;
- const groups=(await db.query('SELECT id,policy,revision,persona_version_id,persona_follow_latest FROM groups ORDER BY id'+(lock?' FOR UPDATE':''))).rows;
+ const groups=(await db.query('SELECT id,policy,revision,persona_version_id,persona_follow_latest FROM groups WHERE deleted_at IS NULL ORDER BY id'+(lock?' FOR UPDATE':''))).rows;
  return {personas,versions,groups};
 }
 export async function identityMaintenancePlan(){

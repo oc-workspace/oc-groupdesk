@@ -7,7 +7,7 @@ import {requireCondition} from '../security.js';
 import {settingsSchema,settingsDefault,bindingSchema,commandKeys} from './schema.js';
 export type Db=Pick<pg.PoolClient,'query'>;
 export async function groupForInteraction(id:string,db:Db=pool,lock=false){
- const g=(await db.query('SELECT * FROM groups WHERE id=$1'+(lock?' FOR UPDATE':''),[id])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;
+ const g=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1'+(lock?' FOR UPDATE':''),[id])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;
 }
 export async function interactionSettings(groupId:string,db:Db=pool){
  const row=(await db.query('SELECT settings FROM interaction_settings WHERE group_id=$1',[groupId])).rows[0];return settingsSchema.parse({...settingsDefault(),...row?.settings});

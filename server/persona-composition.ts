@@ -49,11 +49,11 @@ export async function resolveBindingVersion(versionId:string,kind:'base'|'featur
  return (await runtimePersona(latest.id,db))!;
 }
 export async function advanceFollowers(personaId:string,versionId:string,db:DB){
- const affected=(await db.query('SELECT g.id FROM groups g WHERE (g.persona_follow_latest AND g.persona_version_id IN(SELECT id FROM persona_versions WHERE persona_id=$1)) OR EXISTS(SELECT 1 FROM group_persona_features f WHERE f.group_id=g.id AND f.persona_id=$1 AND f.follow_latest) ORDER BY g.id FOR UPDATE',[personaId])).rows;
+ const affected=(await db.query('SELECT g.id FROM groups g WHERE g.deleted_at IS NULL AND ((g.persona_follow_latest AND g.persona_version_id IN(SELECT id FROM persona_versions WHERE persona_id=$1)) OR EXISTS(SELECT 1 FROM group_persona_features f WHERE f.group_id=g.id AND f.persona_id=$1 AND f.follow_latest)) ORDER BY g.id FOR UPDATE',[personaId])).rows;
  for(const {id} of affected){
   await db.query('UPDATE groups SET persona_version_id=CASE WHEN persona_follow_latest AND persona_version_id IN(SELECT id FROM persona_versions WHERE persona_id=$1) THEN $2 ELSE persona_version_id END,revision=revision+1 WHERE id=$3',[personaId,versionId,id]);
   await db.query('UPDATE group_persona_features SET version_id=$1 WHERE group_id=$2 AND persona_id=$3 AND follow_latest',[versionId,id,personaId]);
-  const group=(await db.query('SELECT id,persona_version_id FROM groups WHERE id=$1',[id])).rows[0];
+  const group=(await db.query('SELECT id,persona_version_id FROM groups WHERE deleted_at IS NULL AND id=$1',[id])).rows[0];
   await runtimePersonaBundle(group,db); // Reject an oversized publication atomically.
  }
  return affected.map(r=>r.id);

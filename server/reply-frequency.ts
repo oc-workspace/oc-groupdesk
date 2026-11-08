@@ -11,7 +11,7 @@ export async function replyFrequency(){return (await pool.query('SELECT revision
 export function registerReplyFrequency(app:express.Express){
  app.get('/api/reply-frequency',async(_req,res)=>{
   const value=await replyFrequency();
-  const groups=(await pool.query('SELECT id,name,enabled,reply_frequency_applied_revision applied_revision FROM groups ORDER BY name')).rows;
+  const groups=(await pool.query('SELECT id,name,enabled,reply_frequency_applied_revision applied_revision FROM groups WHERE deleted_at IS NULL ORDER BY name')).rows;
   res.json({...value,groups});
  });
  app.put('/api/reply-frequency',async(req,res)=>{

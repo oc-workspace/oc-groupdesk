@@ -66,3 +66,10 @@ MaiBot接入实现见integration/maibot。30秒同步、75秒租约；失联/撤
 ### 2026-11-03：Replyer 超时与话题长度
 
 当前运行时等待契约为 v3：`policy.timeouts.replyer_seconds` 与 Planner 独立，ACK 必须声明 `timeout_policy_version: 3`。其他时间字段语义不变。存在非空 `topics[].policy.max_reply_chars` 时，配置增加 `topic_reply_length_contract_version: 1`，ACK 同时须带 `topic_reply_length_version: 1`；没有自定义上限时不要求此能力。详见[回复控制与等待时间](reply-controls.md)和[话题策略](topic-policy-guide.md)。
+
+
+## 删除登记与禁用通知
+
+总管理员可GET `/api/bots/:id/deletion`、`/api/groups/:id/deletion`读取影响及阻止原因，再DELETE对应`/api/bots/:id`或`/api/groups/:id`，JSON为当前`revision`与完整`confirmation`（微信号/群名）。群请求必须使用所选机器人作用域；普通用户始终403，其他机器人群ID不可越权。删除不会通过此API执行Docker或微信操作。
+
+已删除机器人凭据失效且不再作为业务空间；已删除群从普通管理/业务访问排除，但授权原适配器仍可获取`enabled:false`、`removed:true`、文字/图片路由停用且无话题/知识/人设绑定的配置通知，并按现有契约ACK。这是退订配置通知，不能凭它继续请求上下文或模型；同微信真实群被明确重新登记后，以新的存活配置为准。金融用量归属保留原UUID，不清空授权限定数组（空数组原含义为不限范围），不因删除扩大Key权限。

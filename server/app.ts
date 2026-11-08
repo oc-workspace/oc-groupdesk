@@ -6,6 +6,7 @@ import type {SessionUser} from '../shared/user-permissions.js';
 import {botStorage,legacyBotId,dataDirectory} from './bot-context.js';
 import {controlPool} from './db.js';
 import {botRecord,botScope,ensureAdminAlias} from './bot-workspaces.js';
+import {registerGroupDeletion} from './deletion.js';
 import {registerBotAdmin} from './bots-api.js';
 import {registerBotRuntime} from './bot-runtime-api.js';
 import {registerReplyFrequency,replyFrequency} from './reply-frequency.js';
@@ -58,8 +59,8 @@ const cookieName='groupdesk_session';
 const dataRoot=dataDirectory;
 const secureCookies=process.env.COOKIE_SECURE!=='false';
 
-export async function groupDetail(groupId:string,db:Pick<typeof pool,'query'>=pool){
-  const group=(await db.query('SELECT * FROM groups WHERE id=$1',[groupId])).rows[0];
+export async function groupDetail(groupId:string,db:Pick<typeof pool,'query'>=pool,includeDeleted=false){
+  const group=(await db.query('SELECT * FROM groups WHERE id=$1'+(includeDeleted?'':' AND deleted_at IS NULL'),[groupId])).rows[0];
   requireCondition(group,404,'群不存在');
   group.topic_ids=(await db.query('SELECT topic_id FROM group_topics WHERE group_id=$1 ORDER BY topic_id',[groupId])).rows.map(r=>r.topic_id);
   group.kb_ids=(await db.query('SELECT kb_id FROM group_knowledge WHERE group_id=$1 ORDER BY kb_id',[groupId])).rows.map(r=>r.kb_id);
@@ -161,14 +162,15 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   app.use('/api',async(req,res,next)=>{
     if(req.path.startsWith('/auth/')||req.path==='/bots'||req.path.startsWith('/bots/')||req.path==='/users'||req.path.startsWith('/users/')||req.path.startsWith('/shared-resources'))return next();
     const selected=req.headers['x-groupdesk-bot'];
-    const fallback=req.admin!.role==='super_admin'?legacyBotId:(await controlPool.query("SELECT id FROM managed_bots WHERE owner_user_id=$1 AND state<>'archived' ORDER BY created_at,id LIMIT 1",[req.admin!.id])).rows[0]?.id;
+    const fallback=(await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND ($1::boolean OR owner_user_id=$2) AND state<>'archived' ORDER BY (id=$3) DESC,created_at,id LIMIT 1",[req.admin!.role==='super_admin',req.admin!.id,legacyBotId])).rows[0]?.id;
     const botId=selected===undefined?fallback:z.uuid().parse(selected);requireCondition(botId,404,'请联系管理员分配机器人');
     const record=await accessibleBot(req.admin!,botId);requireCondition(record.state!=='archived',409,'机器人已归档，请先在机器人管理恢复');
     const scope=await botScope(botId);req.botId=botId;
     return botStorage.run(scope,async()=>{await ensureAdminAlias(req.admin!);await initializeWorkspaceOwners(record.owner_user_id);await workspaceAccess(req,res,next);});
   });
+  registerGroupDeletion(app);
   app.get('/api/overview',async(_req,res)=>{
-    const groups=(await pool.query('SELECT * FROM groups ORDER BY created_at,id')).rows;
+    const groups=(await pool.query('SELECT * FROM groups WHERE deleted_at IS NULL ORDER BY created_at,id')).rows;
     for(const group of groups){
       group.policy=effectivePolicy(group);
       group.persona_features=await featureBindings(group.id);
@@ -184,7 +186,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
     });
   });
   app.get('/api/groups/status',async(_req,res)=>{
-    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled,runtime_health,runtime_health_at FROM groups ORDER BY id')).rows);
+    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled,runtime_health,runtime_health_at FROM groups WHERE deleted_at IS NULL ORDER BY id')).rows);
   });
   app.post('/api/groups',async(req,res)=>{
     const body=z.object({name:text(120).min(1)}).parse(req.body),groupId=randomUUID();
@@ -199,7 +201,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
     requireCondition(!body.enabled||!!body.external_id,400,'启用前请先绑定微信真实群 ID');
     requireCondition(!body.enabled||body.topic_ids.length>0,400,'启用前请至少选择一个话题');
     await transaction(async db=>{
-      const current=(await db.query('SELECT * FROM groups WHERE id=$1 FOR UPDATE',[groupId])).rows[0];
+      const current=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[groupId])).rows[0];
       requireCondition(current,404,'群不存在');
       requireCondition(body.revision===current.revision,409,'配置已被其他操作更新，请刷新后重试');
       if(body.model_routes){if(body.model_routes.stages===undefined&&current.model_routes.stages!==undefined)body.model_routes.stages=current.model_routes.stages;await validateRoutes(body.model_routes,db);await db.query('UPDATE groups SET model_routes=$1 WHERE id=$2',[body.model_routes,groupId]);}
@@ -362,7 +364,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
     res.json({results:await searchKnowledge([kbId],body.query),method:'关键词检索（支持中文双字匹配）'});
   });
   app.get('/api/memberships',async(_req,res)=>{
-    res.json((await pool.query('SELECT m.*,g.name group_name,a.username verified_by_name FROM memberships m JOIN groups g ON g.id=m.group_id JOIN admins a ON a.id=m.verified_by ORDER BY m.verified_at DESC LIMIT 500')).rows);
+    res.json((await pool.query('SELECT m.*,g.name group_name,a.username verified_by_name FROM memberships m JOIN groups g ON g.deleted_at IS NULL AND g.id=m.group_id JOIN admins a ON a.id=m.verified_by ORDER BY m.verified_at DESC LIMIT 500')).rows);
   });
   app.post('/api/memberships',async(req,res)=>{
     const body=z.object({group_id:id,user_id:text(200).min(1),display_name:text(100).min(1),evidence:text(500).min(8)}).parse(req.body);
@@ -426,7 +428,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
   app.post('/api/runtime/model-credentials',async(req,res)=>{
     const body=z.object({group_id:id,revision:z.number().int().positive()}).parse(req.body);
     const output=await transaction(async db=>{
-      const group=(await db.query('SELECT id,external_id,revision,enabled,model_routes FROM groups WHERE id=$1 FOR SHARE',[body.group_id])).rows[0];
+      const group=(await db.query('SELECT id,external_id,revision,enabled,model_routes FROM groups WHERE deleted_at IS NULL AND id=$1 FOR SHARE',[body.group_id])).rows[0];
       requireCondition(group&&(!req.runtimeGroups||req.runtimeGroups.includes(group.external_id)),403,'此适配器未授权该群');
       requireCondition(group.enabled&&group.revision===body.revision,409,'群已停用或配置版本已变化');
       const routes=await effectiveModelRoutes(group,db);
@@ -435,12 +437,12 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
   });
   app.get('/api/runtime/scenes',async(req,res)=>{
     const userId=text(200).min(1).parse(req.query.user_id);
-    res.json({scenes:(await pool.query('SELECT g.id,g.name FROM memberships m JOIN groups g ON g.id=m.group_id WHERE m.user_id=$1 AND m.revoked_at IS NULL AND g.enabled=true ORDER BY g.name',[userId])).rows});
+    res.json({scenes:(await pool.query('SELECT g.id,g.name FROM memberships m JOIN groups g ON g.deleted_at IS NULL AND g.id=m.group_id WHERE m.user_id=$1 AND m.revoked_at IS NULL AND g.enabled=true ORDER BY g.name',[userId])).rows});
   });
   app.post('/api/runtime/select-scene',async(req,res)=>{
     const body=z.object({user_id:text(200).min(1),group_id:id}).parse(req.body);
     await transaction(async db=>{
-      const member=await db.query('SELECT m.id FROM memberships m JOIN groups g ON g.id=m.group_id WHERE m.user_id=$1 AND m.group_id=$2 AND m.revoked_at IS NULL AND g.enabled=true FOR SHARE OF m,g',[body.user_id,body.group_id]);
+      const member=await db.query('SELECT m.id FROM memberships m JOIN groups g ON g.deleted_at IS NULL AND g.id=m.group_id WHERE m.user_id=$1 AND m.group_id=$2 AND m.revoked_at IS NULL AND g.enabled=true FOR SHARE OF m,g',[body.user_id,body.group_id]);
       requireCondition(member.rowCount,403,'此用户没有经过核验的群访问权限');
       await db.query("INSERT INTO dm_scenes VALUES($1,$2,now()+interval '12 hours') ON CONFLICT(user_id) DO UPDATE SET group_id=excluded.group_id,expires_at=excluded.expires_at",[body.user_id,body.group_id]);
       await audit('bot','scene.selected',body.group_id,{},db);
@@ -462,7 +464,7 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
         groupId=row.group_id;
       }else{
         requireCondition(body.group_external_id,400,'缺少可信适配器提供的群 ID');
-        const row=(await db.query('SELECT id FROM groups WHERE external_id=$1',[body.group_external_id])).rows[0];
+        const row=(await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND external_id=$1',[body.group_external_id])).rows[0];
         requireCondition(row,403,'此群未绑定');groupId=row.id;
       }
       const group=await groupDetail(groupId,db);
@@ -498,9 +500,11 @@ function registerRuntime(app:express.Express,interactions:{clock?:()=>number;ran
   });
   app.get('/api/runtime/config/:externalId',async(req,res)=>{
     if(req.runtimeGroups)requireCondition(req.runtimeGroups.includes(String(req.params.externalId)),403,'此适配器未授权该群');
-    const group=(await pool.query('SELECT id FROM groups WHERE external_id=$1',[text(200).min(1).parse(req.params.externalId)])).rows[0];
+    const group=(await pool.query('SELECT id FROM groups WHERE external_id=$1 ORDER BY deleted_at NULLS FIRST,created_at DESC LIMIT 1',[text(200).min(1).parse(req.params.externalId)])).rows[0];
     requireCondition(group,404,'群未绑定');
-    const config=await groupDetail(group.id);
+    const config=await groupDetail(group.id,pool,true);
+    if(config.deleted_at){config.removed=true;delete config.deleted_by;}
+    delete config.deleted_at;
     config.topics=effectiveTopics(config,(await pool.query('SELECT * FROM topics WHERE id=ANY($1::uuid[]) ORDER BY name',[config.topic_ids])).rows).map(({created_by_user_id,visibility,audience_user_ids,source_resource,...topic})=>topic);
     delete config.created_by_user_id;
     config.policy_contract_version=1;

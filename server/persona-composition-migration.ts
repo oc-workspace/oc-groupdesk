@@ -13,7 +13,7 @@ export async function migrateSpecialist(input:{group_id:string;expected_group_re
   const base=await resolveBindingVersion(input.base_version_id,'base',true,db);
   const source=await runtimePersona(input.source_version_id,db);requireCondition(source,404,'原专项版本不存在');
   const sourcePersona=(await db.query('SELECT * FROM personas WHERE id=$1',[source.persona_id])).rows[0];
-  const group=(await db.query('SELECT * FROM groups WHERE id=$1 FOR UPDATE',[input.group_id])).rows[0];requireCondition(group,404,'群不存在');
+  const group=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[input.group_id])).rows[0];requireCondition(group,404,'群不存在');
   const existing=(await db.query('SELECT * FROM personas WHERE skill_name=$1',[input.feature_skill_name])).rows[0];
   const oldFeatures=await featureBindings(group.id,db);
   if(existing){

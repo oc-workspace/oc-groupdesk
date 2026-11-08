@@ -14,7 +14,7 @@ export const limitsSchema=z.object({daily_requests:z.number().int().min(1).max(1
 export const emptyLimits=()=>({daily_requests:null,monthly_requests:null,daily_tokens:null,monthly_tokens:null,daily_cost:null,monthly_cost:null,concurrency:4,alert_percent:80});
 export const pricesSchema=z.record(z.string().min(1).max(200),z.object({input:z.number().min(0).max(1e6),output:z.number().min(0).max(1e6),cached:z.number().min(0).max(1e6).optional()}).strict());
 export const botId=()=>botStorage.getStore()?.id||legacyBotId;
-export async function botPrincipal(){let bot=await botRecord(botId());if(!bot?.owner_user_id){const fallback=(await controlPool.query("SELECT id FROM admins WHERE role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];requireCondition(fallback,409,'机器人尚未分配所有人');bot={...bot,owner_user_id:fallback.id};}requireCondition(bot?.owner_user_id,409,'机器人尚未分配所有人');const user=(await controlPool.query("SELECT id FROM admins WHERE id=$1 AND status='active'",[bot.owner_user_id])).rows[0];requireCondition(user,403,'机器人所有人未通过审核或已停用');return user.id as string;}
+export async function botPrincipal(){let bot=await botRecord(botId());requireCondition(bot,404,'机器人已删除或不存在');if(!bot.owner_user_id){const fallback=(await controlPool.query("SELECT id FROM admins WHERE role='super_admin' AND status='active' ORDER BY created_at,id LIMIT 1")).rows[0];requireCondition(fallback,409,'机器人尚未分配所有人');bot={...bot,owner_user_id:fallback.id};}requireCondition(bot?.owner_user_id,409,'机器人尚未分配所有人');const user=(await controlPool.query("SELECT id FROM admins WHERE id=$1 AND status='active'",[bot.owner_user_id])).rows[0];requireCondition(user,403,'机器人所有人未通过审核或已停用');return user.id as string;}
 export function publicKey(k:any,userId=currentUserId()){
  const {secret_ciphertext,key_digest,...safe}=k;return {...safe,key_hint:k.key_hint,is_owner:k.owner_user_id===userId,can_reveal:k.owner_user_id===userId};
 }
@@ -27,7 +27,7 @@ export async function ensureVaultCredential(c:any){
  });
  await pool.query("UPDATE model_credentials SET vault_key_id=$2,key_ciphertext='vault:v1',key_hint=$3 WHERE id=$1 AND vault_key_id IS NULL",[c.id,key.id,key.key_hint]);return key;
 }
-export async function initializeKeyVault(){for(const b of (await controlPool.query("SELECT id FROM managed_bots WHERE database_state IN('legacy','ready')")).rows)await withBot(b.id,async()=>{for(const c of (await pool.query('SELECT * FROM model_credentials WHERE vault_key_id IS NULL')).rows)await ensureVaultCredential(c);});}
+export async function initializeKeyVault(){for(const b of (await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN('legacy','ready')")).rows)await withBot(b.id,async()=>{for(const c of (await pool.query('SELECT * FROM model_credentials WHERE vault_key_id IS NULL')).rows)await ensureVaultCredential(c);});}
 export async function syncAliases(){
  const owner=await botPrincipal();
  const keys=(await controlPool.query("SELECT k.* FROM managed_model_keys k WHERE NOT k.archived AND (k.owner_user_id=$1 OR k.scope='site' AND EXISTS(SELECT 1 FROM managed_model_grants g WHERE g.key_id=k.id AND g.user_id=$1 AND g.enabled AND g.expires_at>now() AND (cardinality(g.bot_ids)=0 OR $2=ANY(g.bot_ids))))",[owner,botId()])).rows;
@@ -53,9 +53,9 @@ export async function authorizedKey(id:string,model:string,feature:string,groupI
  return {key:k,grant,userId};
 }
 export async function updateKeyAliases(k:any){
- for(const b of (await controlPool.query("SELECT id FROM managed_bots WHERE database_state IN('legacy','ready')")).rows)await withBot(b.id,async()=>{
+ for(const b of (await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN('legacy','ready')")).rows)await withBot(b.id,async()=>{
   const aliases=(await pool.query("UPDATE model_credentials c SET base_url=$2,client_type=$3,enabled=$4,revision=revision+1,key_hint=$5,key_digest=$6,name=CASE WHEN EXISTS(SELECT 1 FROM model_credentials n WHERE n.id<>c.id AND n.name=$7) THEN $7||' · '||left(c.vault_key_id::text,6) ELSE $7 END WHERE vault_key_id=$1 RETURNING id",[k.id,k.base_url,k.client_type,k.enabled&&!k.archived,k.key_hint,k.key_digest,k.name])).rows;
-  if(aliases.length){await syncAliases();const ids=aliases.map(a=>a.id),defaults=(await pool.query('SELECT routes FROM model_settings')).rows[0].routes;const {configuredModelRoutes}=await import('./models.js');const groups=(await pool.query('SELECT id,model_routes FROM groups')).rows;const affected=groups.filter(g=>{const routes=configuredModelRoutes(g.model_routes,defaults);return [routes.text,routes.image,...Object.values(routes.stages)].some((r:any)=>ids.includes(r.selection?.credential_id));}).map(g=>g.id);await pool.query("UPDATE groups g SET revision=revision+1 WHERE id=ANY($1::uuid[]) OR EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND b.config->'model_route'->>'credential_id'=ANY($2::text[])) OR EXISTS(SELECT 1 FROM summary_settings s WHERE s.group_id=g.id AND s.config->'model_route'->>'credential_id'=ANY($2::text[]))",[affected,ids]);}
+  if(aliases.length){await syncAliases();const ids=aliases.map(a=>a.id),defaults=(await pool.query('SELECT routes FROM model_settings')).rows[0].routes;const {configuredModelRoutes}=await import('./models.js');const groups=(await pool.query('SELECT id,model_routes FROM groups WHERE deleted_at IS NULL')).rows;const affected=groups.filter(g=>{const routes=configuredModelRoutes(g.model_routes,defaults);return [routes.text,routes.image,...Object.values(routes.stages)].some((r:any)=>ids.includes(r.selection?.credential_id));}).map(g=>g.id);await pool.query("UPDATE groups g SET revision=revision+1 WHERE id=ANY($1::uuid[]) OR EXISTS(SELECT 1 FROM group_interactions b WHERE b.group_id=g.id AND b.config->'model_route'->>'credential_id'=ANY($2::text[])) OR EXISTS(SELECT 1 FROM summary_settings s WHERE s.group_id=g.id AND s.config->'model_route'->>'credential_id'=ANY($2::text[]))",[affected,ids]);}
  });
 }
 export async function refreshVaultCatalog(id:string,fetcher=fetchCatalog){
@@ -72,7 +72,7 @@ export async function reserveUsage(id:string,model:string,scope:CallScope,inputB
  const usage=await controlTransaction(async db=>{
   const live=(await db.query('SELECT * FROM managed_model_keys WHERE id=$1 FOR UPDATE',[a.key.id])).rows[0];
   requireCondition(live?.enabled&&!live.archived&&live.revision===a.key.revision,409,'Key 已更新，请重试');
-  const principal=(await db.query("SELECT b.owner_user_id FROM managed_bots b JOIN admins u ON u.id=b.owner_user_id WHERE b.id=$1 AND u.status='active'",[botId()])).rows[0];requireCondition(principal?.owner_user_id===a.userId,403,'机器人归属或用户准入已变化');
+  const principal=(await db.query("SELECT b.owner_user_id FROM managed_bots b JOIN admins u ON u.id=b.owner_user_id AND b.deleted_at IS NULL WHERE b.id=$1 AND u.status='active' FOR SHARE OF b",[botId()])).rows[0];requireCondition(principal?.owner_user_id===a.userId,403,'机器人归属或用户准入已变化');
   let liveGrant:any=null;
   if(live.owner_user_id!==a.userId){liveGrant=(await db.query('SELECT * FROM managed_model_grants WHERE key_id=$1 AND user_id=$2 AND enabled AND expires_at>now()',[live.id,a.userId])).rows[0];requireCondition(live.scope==='site'&&liveGrant&&(!liveGrant.bot_ids.length||liveGrant.bot_ids.includes(botId()))&&(!liveGrant.group_ids.length||!!scope.groupId&&liveGrant.group_ids.includes(scope.groupId))&&liveGrant.model_ids.includes(model)&&liveGrant.features.includes(scope.feature),403,'公用 Key 授权已变化');}
   const fresh={key:live,grant:liveGrant};

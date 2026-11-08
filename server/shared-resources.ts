@@ -9,7 +9,7 @@ import {requireCondition,digest} from './security.js';
 const table=(kind:string)=>kind==='topic'?'topics':'personas';
 async function resources(user:SessionUser){
  const users=(await controlPool.query('SELECT id,username,github_login,display_name FROM admins')).rows,result:any[]=[];
- const bots=(await controlPool.query("SELECT id,name,owner_user_id FROM managed_bots WHERE database_state IN ('legacy','ready') AND state<>'archived'")).rows;
+ const bots=(await controlPool.query("SELECT id,name,owner_user_id FROM managed_bots WHERE deleted_at IS NULL AND database_state IN ('legacy','ready') AND state<>'archived'")).rows;
  for(const bot of bots)await withBot(bot.id,async()=>{
   for(const [kind,t] of [['topic','topics'],['persona','personas']]){
    const rows=(await pool.query('SELECT id,name,created_by_user_id,visibility,audience_user_ids FROM '+t+' ORDER BY name')).rows;
