@@ -67,6 +67,7 @@ export async function deleteBotRegistration(id:string,revision:number,confirmati
    await client.query('UPDATE summary_schedules SET enabled=false');
   }));
   await db.query('DELETE FROM managed_bot_adapters WHERE bot_id=$1',[id]);
+  await db.query('DELETE FROM managed_bot_installation_events WHERE bot_id=$1',[id]);await db.query('DELETE FROM managed_bot_installation_preferences WHERE bot_id=$1',[id]);
   await db.query("UPDATE managed_model_requests SET status='cancelled',review_note='机器人登记已删除',reviewed_at=now() WHERE bot_id=$1 AND status='pending'",[id]);
   await db.query("UPDATE managed_bots SET deleted_at=now(),deleted_by=$2,deletion_reason=$3,deletion_note=$4,state='archived',revision=revision+1 WHERE id=$1",[id,actor,why.reason,why.reason_note]);
   await audit(actor,'bot.registration_deleted',id,{...reasonDetails(why),target_name:b.name,wechat_id:b.wechat_id,retained_history:true,credentials_revoked:true},db);
