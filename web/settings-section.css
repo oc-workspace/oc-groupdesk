@@ -1,0 +1,26 @@
+.settings-section{margin:14px 0;border:1px solid var(--border);border-radius:10px;background:#fff;min-width:0}
+.settings-section>summary{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 16px;margin:0;list-style:none;cursor:pointer;border-radius:10px;font-size:13px;font-weight:500}
+.settings-section>summary::-webkit-details-marker{display:none}
+.settings-section>summary::marker{content:""}
+.settings-section>summary:hover{background:#faf8fe}
+.settings-section>summary:focus-visible{outline:3px solid #c8baf3;outline-offset:2px}
+.settings-section-heading{display:grid;gap:5px;min-width:0}
+.settings-section-title{font-size:13px;font-weight:650;color:var(--text,#484053);line-height:1.6}
+.settings-section-description{font-size:12px;font-weight:400;color:#82798f;line-height:1.7;overflow-wrap:anywhere}
+.settings-section-toggle{display:flex;align-items:center;gap:5px;flex-shrink:0;color:var(--purple);font-size:12px;font-weight:500}
+.settings-section-collapse,.settings-section[open]>summary .settings-section-expand{display:none}
+.settings-section[open]>summary .settings-section-collapse{display:inline}
+.settings-section[open]>summary .settings-section-toggle svg{transform:rotate(180deg)}
+.settings-section[open]>summary{border-bottom:1px solid var(--border);border-radius:10px 10px 0 0}
+.settings-section-content{padding:16px;min-width:0}
+.settings-section-issue{color:#b84454;font-size:12px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}
+.settings-section-content>.hint:first-child{margin-top:0}
+.policy-editor .settings-section>summary{margin:0;padding:15px 16px;font-size:13px}
+.settings-section.model-group-settings{padding:0;background:#faf9fc}
+.settings-section .settings-section{background:#fff}
+.settings-section-content>.identity-settings,.settings-section-content>.conversation-settings,.settings-section-content>.rule-card{margin:0;border:0;padding:0;background:transparent}
+.settings-section-content>.advanced-fields{padding:0}
+.group-editor>.save-bar{position:sticky;bottom:0;z-index:5;background:#fff;box-shadow:0 -5px 16px #3023440a}
+@media(max-width:680px){.settings-section>summary,.policy-editor .settings-section>summary{padding:13px 12px;gap:10px}.settings-section-content{padding:12px}.settings-section-description{font-size:11px}.group-editor>.save-bar{padding-bottom:max(14px,env(safe-area-inset-bottom))}}
+
+.policy-editor details.settings-section{padding:0;border-radius:10px}
