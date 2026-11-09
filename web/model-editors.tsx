@@ -1,3 +1,4 @@
+import {SettingsSection} from './settings-section';
 import React,{useEffect,useState,type FormEvent} from 'react';
 import {modelStages,type ModelStage} from '../shared/model-stages';
 export type Protocol='openai'|'openai_responses'|'gemini';
@@ -21,18 +22,26 @@ function routeLabel(data:ModelData,value:Selection|null|undefined,fallback:strin
   return value?`${data.credentials.find(c=>c.id===value.credential_id)?.name||'未找到 Key'} / ${value.model_id||'尚未选模型'}`:fallback;
 }
 function GroupStageEditor({value,onChange,data}:{value:GroupRoutes;onChange:(v:GroupRoutes)=>void;data:ModelData}){
-  return <div className="model-stages"><h4>各处理阶段</h4><p className="hint">阶段继承全局阶段设置；全局未指定时使用本群文字模型。微信取数、基础消息类型识别和发送由程序处理，不额外调用模型。不同阶段选择不同模型时，最终回答会交给回答模型。</p>{modelStages.map(stage=>{
+  return <SettingsSection title="各处理阶段" issue={Object.values(value.stages||{}).some(route=>route.mode==='custom'&&(!route.credential_id||!route.model_id))?'有处理阶段尚未选择 API Key 或模型':''} description={Object.values(value.stages||{}).filter(route=>route.mode==='custom').length+' 个阶段单独设置，其余沿用继承设置'}><div className="model-stages"><p className="hint">阶段继承全局阶段设置；全局未指定时使用本群文字模型。微信取数、基础消息类型识别和发送由程序处理，不额外调用模型。不同阶段选择不同模型时，最终回答会交给回答模型。</p>{modelStages.map(stage=>{
     const route=value.stages?.[stage.id]||{mode:'inherit'},global=data.defaults.routes.stages?.[stage.id];
     const base=value.text.mode==='custom'?value.text:value.text.mode==='inherit'?data.defaults.routes.text:null;
     return <div className="model-route" key={stage.id}><h4>{stage.name}</h4><p className="hint">{stage.description}</p><label>{stage.name}配置<select value={route.mode} onChange={e=>onChange({...value,stages:{...value.stages,[stage.id]:e.target.value==='custom'?{mode:'custom',credential_id:'',model_id:''}:{mode:'inherit'}}})}><option value="inherit">继承 · {routeLabel(data,global||base,value.text.mode==='disabled'?'本群文字已停用':'未配置，停止调用')}</option><option value="custom">本群单独选择</option></select></label>{route.mode==='custom'&&<Choice kind="text" feature={stage.id==='summary'?'summary':'chat'} prefix={stage.name} data={data} value={route.credential_id?route:null} onChange={v=>onChange({...value,stages:{...value.stages,[stage.id]:{mode:'custom',credential_id:v?.credential_id||'',model_id:v?.model_id||''}}})}/>}</div>;
-  })}{value.text.mode==='disabled'&&<p className="form-error">本群文字已停用，各文字处理阶段也将停止。</p>}</div>;
+  })}{value.text.mode==='disabled'&&<p className="form-error">本群文字已停用，各文字处理阶段也将停止。</p>}</div></SettingsSection>;
 }
 export function GroupModelEditor({value=emptyRoutes,onChange,data}:{value?:GroupRoutes;onChange:(v:GroupRoutes)=>void;data:ModelData}){
-  return <section className="model-group-settings"><h3>本群模型与 API Key</h3><p className="hint">文字作为各阶段的基础模型；下方可分别指定模型和 API Key。生图配置不等于图片内容识别。</p>{(['text','image'] as const).map(kind=>{
+  const describe=(kind:'text'|'image')=>{
+    const route=value[kind];
+    if(route.mode==='disabled')return names[kind]+'：已停用';
+    const selected=route.mode==='custom'?route:data.defaults.routes[kind];
+    return names[kind]+'：'+(route.mode==='inherit'?'继承默认':'本群单独设置')+' · '+(selected?.model_id||'未配置');
+  };
+  const customRoutes=[value.text,value.image,...Object.values(value.stages||{})];
+  const issue=customRoutes.some(route=>route.mode==='custom'&&(!route.credential_id||!route.model_id))?'有单独配置尚未选择 API Key 或模型':'';
+  return <SettingsSection title="本群模型与 API Key" className="model-group-settings" description={describe('text')+'；'+describe('image')} issue={issue}><p className="hint">文字作为各阶段的基础模型；下方可分别指定模型和 API Key。生图配置不等于图片内容识别。</p>{(['text','image'] as const).map(kind=>{
     const route=value[kind],def=data.defaults.routes[kind],defaultKey=data.credentials.find(c=>c.id===def?.credential_id);
     const defaultLabel=def?`${defaultKey?.name||'未找到 Key'} / ${def.model_id}`:kind==='text'?'未配置，停止调用':'未配置';
     return <div className="model-route" key={kind}><label>{names[kind]}配置<select value={route.mode} onChange={e=>onChange({...value,[kind]:e.target.value==='custom'?{mode:'custom',credential_id:'',model_id:''}:{mode:e.target.value}})}><option value="inherit">继承默认 · {defaultLabel}</option><option value="custom">本群单独选择</option><option value="disabled">停用{names[kind]}</option></select></label>{route.mode==='custom'&&<Choice kind={kind} feature={kind==='image'?'image':'chat'} prefix={'本群'+names[kind]} data={data} value={route.credential_id?route:null} onChange={v=>onChange({...value,[kind]:{mode:'custom',credential_id:v?.credential_id||'',model_id:v?.model_id||''}})}/>}</div>;
-  })}<GroupStageEditor value={value} onChange={onChange} data={data}/></section>;
+  })}<GroupStageEditor value={value} onChange={onChange} data={data}/></SettingsSection>;
 }
 export function Models({data,api,reload,notify,onDirty}:{data:ModelData;api:Api;reload:()=>Promise<void>;notify:(s:string,error?:boolean)=>void;onDirty?:(dirty:boolean)=>void}){
   const [defaults,setDefaults]=useState(data.defaults.routes),[busy,setBusy]=useState(false),[form,setForm]=useState<{client_type:Protocol;id?:string;name:string;base_url:string;api_key:string;revision?:number;enabled:boolean}|null>(null);
