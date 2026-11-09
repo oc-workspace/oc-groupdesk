@@ -9,7 +9,7 @@ import {botRecord,withBot} from './bot-workspaces.js';
 import {createBot} from './bot-provisioning.js';
 import {requestPause,requestActivation,archiveBot} from './bot-lifecycle.js';
 import {token,digest,requireCondition} from './security.js';
-const metadata=z.object({name:z.string().trim().min(1).max(80),wechat_id:z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.\-]+$/),host_label:z.string().trim().max(100).default('rococo-root2'),notes:z.string().max(1000).default('')}).strict();
+const metadata=z.object({name:z.string().trim().min(1).max(80),wechat_id:z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_.\-]+$/),host_label:z.string().trim().max(100).default('个人电脑（待接入）'),notes:z.string().max(1000).default('')}).strict();
 const publicFields='id,name,wechat_id,host_label,notes,state,database_state,revision,activation_generation,runtime_status,runtime_seen_at,stopped_revision,pause_requested_at,error,created_at';
 export function registerBotAdmin(app:express.Express,installationCaller?:typeof import('./model-generation.js').callTextModel){
  registerBotDeletion(app);

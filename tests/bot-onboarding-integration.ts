@@ -20,7 +20,10 @@ async function create(name:string,u:any){const r=await req('/bots','POST',{name,
 async function flow(id:string,u:any=admin){const r=await req('/bots/'+id+'/onboarding','GET',undefined,u);assert.equal(r.status,200,JSON.stringify(r.data));return r.data;}
 async function heartbeat(id:string,extra:any={}){const row=await botRecord(id);if(!instances.has(id))instances.set(id,randomUUID());return req('/runtime/bot-heartbeat','POST',{contract:1,bot_id:id,instance_id:instances.get(id),account_fingerprint:digest(id),revision:row.revision,wechat_connected:true,reader_connected:true,maibot_connected:true,sender_queue_depth:0,active_turns:0,send_inflight:false,stopped:row.state!=='active',cutover_generation:row.activation_generation,local_ready:true,...extra},undefined,tokens.get(id));}
 async function provision(id:string,u:any){
- let f=await flow(id,u);if(!f.environment_prepared)assert.equal((await req('/bots/'+id+'/onboarding/environment','PUT',{revision:f.revision,desktop_url:'https://desktop.example.com/',prepared:true})).status,200);
+ let f=await flow(id,u);if(!f.environment_prepared){
+ // Synthetic fixture of an already deployed environment, not a new hosted application.
+ await controlPool.query("UPDATE managed_bot_onboarding SET environment_prepared_at=now(),environment_prepared_by=$2,desktop_url='https://desktop.example.com/' WHERE bot_id=$1",[id,admin.id]);
+ }
  f=await flow(id,u);if(!f.account_confirmed)assert.equal((await req('/bots/'+id+'/onboarding/confirm-account','POST',{revision:f.revision,wechat_id:f.wechat_id,confirmed:true},u)).status,200);
  f=await flow(id,u);if(!f.reader_authorized)assert.equal((await req('/bots/'+id+'/onboarding/authorize-reader','POST',{revision:f.revision,wechat_id:f.wechat_id,confirmed:true},u)).status,200);
  await withBot(id,async()=>{const c=await createCredential({name:'Synthetic owned Key',base_url:'https://example.com/v1',api_key:'synthetic-key-'+id},u.id);await pool.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source,listed) VALUES($1,'synthetic-text','synthetic-text','text','manual',false)",[c]);const key=(await pool.query('SELECT vault_key_id FROM model_credentials WHERE id=$1',[c])).rows[0].vault_key_id;await controlPool.query('UPDATE managed_model_keys SET models=$2 WHERE id=$1',[key,JSON.stringify([{model_id:'synthetic-text',display_name:'synthetic-text',capability:'text',source:'manual',listed:false}])]);await pool.query('UPDATE model_settings SET routes=$1',[{text:{credential_id:c,model_id:'synthetic-text'},image:null}]);});
@@ -43,7 +46,7 @@ after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));awai
 test('ordinary users cannot set or receive host labels, but can edit their own profile',async()=>{
  assert.equal((await req('/bots','POST',{name:'Forbidden host',wechat_id:'forbidden_host',host_label:'other-host'},a)).status,403);
  const list=await req('/bots','GET',undefined,a);assert.equal(list.data.active_limit_per_user,1);assert.equal(list.data.bots.length,2);assert(list.data.bots.every((x:any)=>!('host_label' in x)&&x.onboarding));
- const row=await botRecord(a1);assert.equal(row.host_label,'rococo-root2');assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'edited',revision:row.revision},a)).status,200);assert.equal((await botRecord(a1)).host_label,'rococo-root2');
+ const row=await botRecord(a1);assert.equal(row.host_label,'个人电脑（待接入）');assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'edited',revision:row.revision},a)).status,200);assert.equal((await botRecord(a1)).host_label,'个人电脑（待接入）');
  assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'',host_label:'other',revision:row.revision},a)).status,403);
 });
 test('tasks persist, start is idempotent, and all task and admin mutations enforce ownership',async()=>{
@@ -56,6 +59,9 @@ test('tasks persist, start is idempotent, and all task and admin mutations enfor
 });
 test('login links reject secrets or unsafe schemes; environment marking cannot fake connected state',async()=>{
  const f=await flow(a1,a);for(const url of ['not a URL','javascript:alert(1)','https://name:secret@example.com/','https://example.com/?token=hidden','http://10.0.0.1:8080/'])assert.equal((await req('/bots/'+a1+'/onboarding/environment','PUT',{revision:f.revision,desktop_url:url,prepared:true})).status,400);
+ assert.equal((await req('/bots/'+a1+'/onboarding/environment','PUT',{revision:f.revision,desktop_url:'http://127.0.0.1:18180/',prepared:true})).status,409);
+ // Existing environment maintenance stays available; no new server is deployed.
+ await controlPool.query('UPDATE managed_bot_onboarding SET environment_prepared_at=now(),environment_prepared_by=$2 WHERE bot_id=$1',[a1,admin.id]);
  const p=await req('/bots/'+a1+'/onboarding/environment','PUT',{revision:f.revision,desktop_url:'http://127.0.0.1:18180/',prepared:true});assert.equal(p.status,200);assert(p.data.desktop_is_local);assert(!p.data.runtime_ready);assert(!p.data.can_activate);
  assert.equal((await req('/bots/'+a1+'/onboarding/environment','PUT',{revision:f.revision,desktop_url:'',prepared:true})).status,409);
 });
