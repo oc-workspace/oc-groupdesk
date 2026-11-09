@@ -46,7 +46,7 @@ after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));awai
 test('ordinary users cannot set or receive host labels, but can edit their own profile',async()=>{
  assert.equal((await req('/bots','POST',{name:'Forbidden host',wechat_id:'forbidden_host',host_label:'other-host'},a)).status,403);
  const list=await req('/bots','GET',undefined,a);assert.equal(list.data.active_limit_per_user,1);assert.equal(list.data.bots.length,2);assert(list.data.bots.every((x:any)=>!('host_label' in x)&&x.onboarding));
- const row=await botRecord(a1);assert.equal(row.host_label,'个人电脑（待接入）');assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'edited',revision:row.revision},a)).status,200);assert.equal((await botRecord(a1)).host_label,'个人电脑（待接入）');
+ const row=await botRecord(a1);assert.equal(row.host_label,'自部署设备（待接入）');assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'edited',revision:row.revision},a)).status,200);assert.equal((await botRecord(a1)).host_label,'自部署设备（待接入）');
  assert.equal((await req('/bots/'+a1,'PUT',{name:row.name,wechat_id:row.wechat_id,notes:'',host_label:'other',revision:row.revision},a)).status,403);
 });
 test('tasks persist, start is idempotent, and all task and admin mutations enforce ownership',async()=>{
