@@ -1,4 +1,4 @@
-import {isComputerDeployment,computerOnlyMessage} from '../shared/computer-onboarding.js';
+import {isSelfDeployment,selfDeploymentMessage} from '../shared/computer-onboarding.js';
 import {registerDeviceOnboarding} from './device-onboarding.js';
 import type express from 'express';
 import {z} from 'zod';
@@ -41,21 +41,21 @@ export async function onboardingReport(id:string,userId:string,admin:boolean){
  const groups=['legacy','ready'].includes(b.database_state)?await withBot(id,async()=>(await pool.query('SELECT count(*)::int n FROM groups WHERE deleted_at IS NULL AND external_id IS NOT NULL')).rows[0].n):0;
  const canActivate=b.state==='paused'&&prepared&&ownerConfirmed&&authorized&&models&&readyForActivation(b);
  const flags=[true,prepared,ownerConfirmed,authorized,runtime,models,!!f.completed_at||b.state==='active',groups>0];
- const names=['保存微信资料',prepared&&!isComputerDeployment(f)?'运行环境（既有记录）':'在自己的电脑上准备环境','登录并确认微信账号','授权聊天读取','检查微信与机器人连接','配置 Key 与文字模型','启用机器人','查看微信群与继续接入'];
+ const names=['保存微信资料',prepared&&!isSelfDeployment(f)?'运行环境（既有记录）':'在自己的电脑或服务器上准备环境','登录并确认微信账号','授权聊天读取','检查微信与机器人连接','配置 Key 与文字模型','启用机器人','查看微信群与继续接入'];
  const details=[
   '已保存 '+b.name+' · '+b.wechat_id,
-  prepared?'运行环境记录已保留；真实在线情况在第5步单独核对。':isComputerDeployment(f)?'本机接入方式已保存。打开自己电脑上有操作权限的 AI，复制下方提示词，先检查系统与微信版本，暂不安装。':'现仅开放部署到自己的电脑。原微信资料和任务已保存；请在下方确认本机方式后继续，不再等待站点准备新托管环境。',
+  prepared?'运行环境记录已保留；真实在线情况在第5步单独核对。':isSelfDeployment(f)?(f.device_kind==='server'?'自选服务器接入方式已保存。使用有目标服务器 SSH 操作权限的 AI，先核对目标服务器，再检查系统与微信版本，暂不安装。':'自己电脑接入方式已保存。打开有本机操作权限的 AI，先检查系统与微信版本，暂不安装。'):'现仅开放部署到自己的电脑或自己选择的服务器。原微信资料和任务已保存；请在下方确认自部署方式后继续，不再等待站点准备新托管环境。',
   ownerConfirmed?'账号所有人已确认登录账号；系统连接情况仍需第5步核验。':prepared?'打开管理员提供的专属登录入口，用此微信扫码并完成手机确认。':'环境准备好后，这里会提供登录指引。',
   authorized?'已记录当前所有人的账号专属读取授权；不代表读取器已经连接。':'允许本账号的数据库读取、必要的受控启动取钥及加密保存，供此机器人的互动和总结使用。',
-  runtime?'微信、读取器和MaiBot的当前版本上报正常。':'请由本机安装助手或原环境维护者完成首次群绑定、读取器与运行端配置，再核对真实上报；当前部署工具要求至少绑定一个群。过期或未连接不会标记通过。',
+  runtime?'微信、读取器和MaiBot的当前版本上报正常。':'请由所选设备的安装助手或原环境维护者完成首次群绑定、读取器与运行端配置，再核对真实上报；当前部署工具要求至少绑定一个群。过期或未连接不会标记通过。',
   models?'默认文字路由所需的模型已配置且 Key 权限校验通过；未消耗 token 试调用。':'请配置自己的 Key 或申请公用 Key 授权，再设置默认文字模型；可稍后在群内单独覆盖。',
   b.state==='active'?'机器人已启用。':f.completed_at?'首次接入已完成；当前状态以机器人卡片为准。':'每个用户当前最多启用一个；切换只暂停同一用户的原机器人，等待停止确认后再启用。',
-  groups?'已有绑定的微信群。':'首次群绑定由本机安装助手或原环境维护者按现有部署流程配合完成；运行端连接后，可在这里管理已有群或继续接入更多群。'];
+  groups?'已有绑定的微信群。':'首次群绑定由所选设备的安装助手或原环境维护者按现有部署流程配合完成；运行端连接后，可在这里管理已有群或继续接入更多群。'];
  const first=flags.slice(0,7).findIndex(v=>!v);
  return {bot_id:id,name:b.name,wechat_id:b.wechat_id,state:b.state,bot_revision:b.revision,revision:f.revision,created_at:f.created_at,completed_at:f.completed_at,
   deployment_mode:f.deployment_mode||'hosted',deployment_mode_confirmed:!!f.deployment_mode,device_kind:f.device_kind,device_os:f.device_os,installation_model:f.installation_model,installation_plan:f.installation_plan,installation_plan_at:f.installation_plan_at,device_paired:!!(await controlPool.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL AND instance_id=$2',[id,b.runtime_instance_id])).rowCount,can_change_deployment:b.state==='paused'&&!prepared&&!ownerConfirmed&&!authorized&&!b.runtime_instance_id&&!b.account_fingerprint,
   desktop_url:prepared?f.desktop_url:'',desktop_is_local:!!f.desktop_url&&new URL(f.desktop_url).hostname==='127.0.0.1',
-  account_confirmed:ownerConfirmed,reader_authorized:authorized,environment_prepared:prepared,computer_only:true,runtime_ready:runtime,models_ready:models,can_activate:canActivate,
+  account_confirmed:ownerConfirmed,reader_authorized:authorized,environment_prepared:prepared,computer_only:false,self_deployment_only:true,runtime_ready:runtime,models_ready:models,can_activate:canActivate,
   can_confirm:userId===b.owner_user_id,can_prepare:admin&&prepared,active_limit:1,switch_pending:!!(await controlPool.query('SELECT 1 FROM managed_bot_switch WHERE target_id=$1',[id])).rowCount,
   steps:names.map((name,i)=>({number:i+1,name,required:i<7,status:flags[i]?'complete':i===7?'optional':i===5?'available':i===first?'current':'waiting',detail:details[i]}))};
 }
@@ -84,7 +84,7 @@ export function registerBotOnboarding(app:express.Express,installationCaller?:ty
   const body=z.object({revision:z.number().int().positive(),desktop_url:z.string().max(500),prepared:z.literal(true)}).strict().parse(req.body),url=desktopUrl(body.desktop_url);
   await controlTransaction(async db=>{const b=(await db.query('SELECT state,runtime_instance_id,account_fingerprint FROM managed_bots WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[id])).rows[0];requireCondition(b&&b.state!=='archived',409,'机器人已归档');
    const existing=(await db.query('SELECT environment_prepared_at FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[id])).rows[0];
-   requireCondition(existing?.environment_prepared_at||b.runtime_instance_id&&b.account_fingerprint,409,computerOnlyMessage+' 请由所有人在本机配对后确认环境。');
+   requireCondition(existing?.environment_prepared_at||b.runtime_instance_id&&b.account_fingerprint,409,selfDeploymentMessage+' 请由所有人在所选电脑或服务器配对后确认环境。');
    const saved=await db.query('UPDATE managed_bot_onboarding SET environment_prepared_at=now(),environment_prepared_by=$3,desktop_url=$4,revision=revision+1,updated_at=now() WHERE bot_id=$1 AND revision=$2 RETURNING bot_id',[id,body.revision,req.admin!.id,url]);requireCondition(saved.rowCount,409,'接入任务已更新，请刷新');await audit(req.admin!.username,'bot.onboarding_environment_prepared',id,{},db);});
   res.json(await onboardingReport(id,req.admin!.id,true));
  });

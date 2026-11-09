@@ -10,7 +10,7 @@ import {digest,token,requireCondition} from './security.js';
 import {selection,validateSelection} from './models.js';
 import {authorizedKey} from './key-vault.js';
 import {callTextModel,generationText} from './model-generation.js';
-import {isComputerDeployment,computerOnlyMessage} from '../shared/computer-onboarding.js';
+import {isSelfDeployment,selfDeploymentMessage} from '../shared/computer-onboarding.js';
 import {installationPrompt,installationStagePrompts,installationContract} from '../shared/installation-guide.js';
 import {onboardingReport} from './bot-onboarding.js';
 const os=z.enum(['unknown','linux','windows','macos']);
@@ -31,7 +31,7 @@ export function registerDevicePairing(app:express.Express){
    const p=(await db.query('SELECT * FROM managed_bot_device_pairings WHERE code_hash=$1 FOR UPDATE',[digest(body.code)])).rows[0];
    const f=(await db.query('SELECT deployment_mode,device_kind FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[body.bot_id])).rows[0];
    const u=b?(await db.query("SELECT * FROM admins WHERE id=$1 AND deleted_at IS NULL AND status='active'",[b.owner_user_id])).rows[0]:null;
-   requireCondition(b&&u&&allowed(u,'bots.manage')&&b.state==='paused'&&b.database_state==='ready'&&!b.runtime_instance_id&&!b.account_fingerprint&&f&&isComputerDeployment(f)&&p&&p.bot_id===b.id&&p.owner_user_id===u.id&&!p.consumed_at&&new Date(p.expires_at).getTime()>Date.now(),409,'配对码无效、已过期/使用，或机器人状态已变化');
+   requireCondition(b&&u&&allowed(u,'bots.manage')&&b.state==='paused'&&b.database_state==='ready'&&!b.runtime_instance_id&&!b.account_fingerprint&&f&&isSelfDeployment(f)&&p&&p.bot_id===b.id&&p.owner_user_id===u.id&&!p.consumed_at&&new Date(p.expires_at).getTime()>Date.now(),409,'配对码无效、已过期/使用，或机器人状态已变化');
    requireCondition(!(await db.query('SELECT 1 FROM managed_bot_adapters WHERE bot_id=$1',[b.id])).rowCount,409,'已有设备接入凭据，请勿重复配对');
    await db.query("INSERT INTO managed_bot_adapters(token_hash,bot_id,name,group_external_ids) VALUES($1,$2,'self-device','[]')",[digest(value),b.id]);
    await db.query('UPDATE managed_bots SET runtime_instance_id=$2,revision=revision+1 WHERE id=$1',[b.id,body.instance_id]);
@@ -47,23 +47,23 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
  app.put('/api/bots/:id/onboarding/deployment',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);
   const body=z.object({revision,deployment_mode:z.enum(['hosted','self_hosted']),device_kind:z.enum(['computer','server'])}).strict().parse(req.body);
-  requireCondition(isComputerDeployment(body),409,computerOnlyMessage);
+  requireCondition(isSelfDeployment(body),409,selfDeploymentMessage);
   await controlTransaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511966)');
    const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0],f=(await db.query('SELECT * FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[id])).rows[0];
    requireCondition(b&&f&&(b.owner_user_id===req.admin!.id||req.admin!.role==='super_admin'),404,'机器人不存在或无权访问');requireCondition(f.revision===body.revision,409,'接入任务已变化，请刷新');
    const changed=(f.deployment_mode||'hosted')!==body.deployment_mode||f.device_kind!==body.device_kind;
-   if(changed)requireCondition(b.owner_user_id===req.admin!.id,403,'请由机器人所有人在本人账号确认本机接入方式');
+   if(changed)requireCondition(b.owner_user_id===req.admin!.id,403,'请由机器人所有人在本人账号确认自部署方式');
    const paired=(await db.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL',[id])).rowCount;
    requireCondition(!changed||b.state==='paused'&&!f.environment_prepared_at&&!f.account_confirmed_at&&!f.reader_authorized_at&&!b.runtime_instance_id&&!b.account_fingerprint&&!paired,409,'运行环境或账号已接入，不能直接更换部署方式；请联系管理员安排迁移');
-   await db.query("UPDATE managed_bot_onboarding SET deployment_mode=$3,device_kind=$4,installation_plan=CASE WHEN device_kind<>$4 THEN '' ELSE installation_plan END,installation_plan_at=CASE WHEN device_kind<>$4 THEN NULL ELSE installation_plan_at END,revision=revision+1,updated_at=now() WHERE bot_id=$1 AND revision=$2",[id,body.revision,body.deployment_mode,body.device_kind]);
+   await db.query("UPDATE managed_bot_onboarding SET deployment_mode=$3,device_kind=$4,device_os=CASE WHEN device_kind<>$4 THEN 'unknown' ELSE device_os END,revision=revision+1,updated_at=now() WHERE bot_id=$1 AND revision=$2",[id,body.revision,body.deployment_mode,body.device_kind]);
    if(changed)await db.query('DELETE FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NULL',[id]);
    await audit(req.admin!.username,'bot.deployment_selected',id,{mode:body.deployment_mode,device_kind:body.device_kind},db);
   });res.json(await onboardingReport(id,req.admin!.id,req.admin!.role==='super_admin'));
  });
  app.get('/api/bots/:id/onboarding/install-prompt',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),b=await accessibleBot(req.admin!,id),f=await task(id);
-  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind),stages:installationStagePrompts(b,f.device_os,site()),contract:2});
+  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind),contract:3});
  });
  app.get('/api/bots/:id/onboarding/device-tool',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);await task(id);
@@ -73,7 +73,7 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
  app.post('/api/bots/:id/onboarding/install-assist',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);requireCondition(allowed(req.admin!,'models.manage'),403,'没有模型与 Key 管理权限');
   const body=selection.extend({revision,question:z.string().trim().max(3000),confirmed:z.literal(true)}).strict().parse(req.body),f=await task(id);
-  requireCondition(isComputerDeployment(f)&&f.revision===body.revision,409,computerOnlyMessage);
+  requireCondition(isSelfDeployment(f)&&f.revision===body.revision,409,selfDeploymentMessage);
   requireCondition(!/(?:sk-[A-Za-z0-9_-]{12,}|(?:api[_ -]?key|token|password|密钥|密码)\s*[:=：]\s*\S{8,})/i.test(body.question),400,'请勿把 Key、密码或令牌写入需求；在 Key 管理或本地工具安全设置填写');
   const controller=new AbortController(),close=()=>{if(!res.writableEnded)controller.abort();};res.on('close',close);
   try{
@@ -81,13 +81,13 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
     await validateSelection(body,'text');await authorizedKey(body.credential_id,body.model_id,'installation');
     const c=(await pool.query('SELECT id,base_url,client_type,revision,enabled FROM model_credentials WHERE id=$1',[body.credential_id])).rows[0];
     const b=await botRecord(id);requireCondition(b&&b.owner_user_id===(await accessibleBot(req.admin!,id)).owner_user_id,409,'机器人归属已变化');
-    const response=await caller(c,body.model_id,installationContract,JSON.stringify({request:body.question||'请用非技术用户能理解的方式说明下一步',device_os:f.device_os,guide:installationPrompt(b,f.device_os,site(),f.device_kind)}),{feature:'installation',timeoutMs:95000,maxOutputTokens:4000,signal:controller.signal,lowThinking:true});
+    const response=await caller(c,body.model_id,installationContract,JSON.stringify({request:body.question||'请用非技术用户能理解的方式说明下一步',device_os:f.device_os,device_kind:f.device_kind,guide:installationPrompt(b,f.device_os,site(),f.device_kind)}),{feature:'installation',timeoutMs:95000,maxOutputTokens:4000,signal:controller.signal,lowThinking:true});
     controller.signal.throwIfAborted();await authorizedKey(body.credential_id,body.model_id,'installation');
     const text=generationText(response,c.client_type).replace(/sk-[A-Za-z0-9_-]{12,}/g,'[已隐藏疑似密钥]');requireCondition(text.length<=18000,502,'安装建议过长，请缩短需求后重试');return text;
    });
    await controlTransaction(async db=>{
     const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0];requireCondition(b&&(b.owner_user_id===req.admin!.id||req.admin!.role==='super_admin'),409,'机器人归属已变化，未保存建议');
-    const saved=await db.query("UPDATE managed_bot_onboarding SET installation_plan=$3,installation_plan_at=now(),installation_model=$4,revision=revision+1,updated_at=now() WHERE bot_id=$1 AND revision=$2 AND deployment_mode='self_hosted' AND device_kind='computer' RETURNING bot_id",[id,body.revision,result,{credential_id:body.credential_id,model_id:body.model_id}]);requireCondition(saved.rowCount,409,'生成期间接入任务已变化，未覆盖新设置，请刷新');await audit(req.admin!.username,'bot.installation_advice_generated',id,{credential_id:body.credential_id,model_id:body.model_id,question_sha256:digest(body.question)},db);
+    const saved=await db.query("UPDATE managed_bot_onboarding SET installation_plan=$3,installation_plan_at=now(),installation_model=$4,revision=revision+1,updated_at=now() WHERE bot_id=$1 AND revision=$2 AND deployment_mode='self_hosted' AND device_kind IN ('computer','server') RETURNING bot_id",[id,body.revision,result,{credential_id:body.credential_id,model_id:body.model_id}]);requireCondition(saved.rowCount,409,'生成期间接入任务已变化，未覆盖新设置，请刷新');await audit(req.admin!.username,'bot.installation_advice_generated',id,{credential_id:body.credential_id,model_id:body.model_id,question_sha256:digest(body.question)},db);
    });if(!controller.signal.aborted)res.json(await onboardingReport(id,req.admin!.id,req.admin!.role==='super_admin'));
   }catch(e){if(!controller.signal.aborted)throw e;}finally{res.off('close',close);}
  });
@@ -95,7 +95,7 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);const body=z.object({revision}).strict().parse(req.body),code=token();
   await controlTransaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511966)');const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0],f=(await db.query('SELECT * FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[id])).rows[0];
-   requireCondition(b&&b.owner_user_id===req.admin!.id,403,'只能由机器人所有人生成设备配对码');requireCondition(allowed(req.admin!,'bots.manage')&&b.state==='paused'&&!b.runtime_instance_id&&!b.account_fingerprint&&f&&isComputerDeployment(f)&&f.revision===body.revision,409,'请先保存自部署方式；已绑定设备不能重复配对');
+   requireCondition(b&&b.owner_user_id===req.admin!.id,403,'只能由机器人所有人生成设备配对码');requireCondition(allowed(req.admin!,'bots.manage')&&b.state==='paused'&&!b.runtime_instance_id&&!b.account_fingerprint&&f&&isSelfDeployment(f)&&f.revision===body.revision,409,'请先保存自部署方式；已绑定设备不能重复配对');
    requireCondition(!(await db.query('SELECT 1 FROM managed_bot_adapters WHERE bot_id=$1',[id])).rowCount,409,'已有接入凭据，请联系管理员核对，不能覆盖');
    await db.query('DELETE FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NULL',[id]);await db.query("INSERT INTO managed_bot_device_pairings(code_hash,bot_id,owner_user_id,expires_at) VALUES($1,$2,$3,now()+interval '10 minutes')",[digest(code),id,b.owner_user_id]);await audit(req.admin!.username,'bot.pair_code_created',id,{},db);
   });res.json({code,expires_in:600,display_once:true});
@@ -104,7 +104,7 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);const body=z.object({revision,desktop_url:z.string().max(500),prepared:z.literal(true)}).strict().parse(req.body),url=selfDesktop(body.desktop_url);
   await controlTransaction(async db=>{
    const b=(await db.query('SELECT * FROM managed_bots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[id])).rows[0],f=(await db.query('SELECT * FROM managed_bot_onboarding WHERE bot_id=$1 FOR UPDATE',[id])).rows[0];requireCondition(b&&b.owner_user_id===req.admin!.id,403,'只能由机器人所有人确认自己的设备');
-   requireCondition(b.state==='paused'&&f&&isComputerDeployment(f)&&f.revision===body.revision&&(await db.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL AND instance_id=$2',[id,b.runtime_instance_id])).rowCount,409,'请先完成当前设备配对，刷新后再确认');
+   requireCondition(b.state==='paused'&&f&&isSelfDeployment(f)&&f.revision===body.revision&&(await db.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL AND instance_id=$2',[id,b.runtime_instance_id])).rowCount,409,'请先完成当前设备配对，刷新后再确认');
    await db.query('UPDATE managed_bot_onboarding SET environment_prepared_at=now(),environment_prepared_by=$2,desktop_url=$3,revision=revision+1,updated_at=now() WHERE bot_id=$1',[id,req.admin!.id,url]);await audit(req.admin!.username,'bot.self_environment_declared',id,{},db);
   });res.json(await onboardingReport(id,req.admin!.id,false));
  });
