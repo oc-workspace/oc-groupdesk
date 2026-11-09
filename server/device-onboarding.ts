@@ -63,7 +63,7 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
  });
  app.get('/api/bots/:id/onboarding/install-prompt',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),b=await accessibleBot(req.admin!,id),f=await task(id);
-  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind),contract:3});
+  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind),contract:4});
  });
  app.get('/api/bots/:id/onboarding/device-tool',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);await task(id);

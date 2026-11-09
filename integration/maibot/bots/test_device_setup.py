@@ -31,4 +31,93 @@ class DeviceSetupTests(unittest.TestCase):
    opener.return_value.open.return_value.__enter__.return_value.read.return_value=b'{"bot_id":"wrong"}'
    with self.assertRaises(ValueError):d.pair('https://groupdesk.rococo.dev',str(uuid.uuid4()),Path(t)/'new')
    self.assertFalse((Path(t)/'new').exists())
+
+class ReaderPreflightTests(unittest.TestCase):
+ def wechat(self,**changes):
+  return {'detected_os':'linux','cpu_arch':'x86_64','version':'4.1.13.23','build':'','installation':'deb','fingerprint':d.LINUX_ELF,**changes}
+ def report(self,**wechat):
+  w=self.wechat(**wechat);return {'detected_os':w['detected_os'],'wechat':w,'reader_compatibility':d.reader_compatibility(w)}
+ def test_exact_linux_build_is_only_build_evidence_not_account_or_runtime(self):
+  c=d.reader_compatibility(self.wechat());self.assertEqual(c['chatlog-keeper']['status'],'project_verified_build');self.assertEqual(c['chatlog']['status'],'not_supported');self.assertFalse(c['account_read_verified']);self.assertFalse(c['groupdesk_runtime_verified'])
+ def test_same_version_wrong_binary_and_arm_are_not_verified(self):
+  for w in [self.wechat(fingerprint='wrong'),self.wechat(cpu_arch='aarch64'),self.wechat(version='4.1.13.24')]:self.assertEqual(d.reader_compatibility(w)['chatlog-keeper']['status'],'needs_verification')
+ def test_missing_wechat_cannot_be_inferred_from_installed_reader(self):
+  c=d.reader_compatibility(self.wechat(version='待检测'));self.assertEqual(c['chatlog-keeper']['status'],'wechat_not_detected')
+ def test_mac_exact_build_is_upstream_only_and_intel_is_unverified(self):
+  w=self.wechat(detected_os='macos',cpu_arch='arm64',version='4.1.13',build='269579');self.assertEqual(d.reader_compatibility(w)['chatlog-keeper']['status'],'upstream_reported')
+  for change in [{'build':'different'},{'cpu_arch':'x86_64'}]:self.assertEqual(d.reader_compatibility({**w,**change})['chatlog-keeper']['status'],'needs_verification')
+ def test_upstream_linux_version_never_claims_project_validation(self):self.assertEqual(d.reader_compatibility(self.wechat(version='4.1.13.9'))['chatlog-keeper']['status'],'upstream_reported')
+ def test_container_failure_never_uses_host_os_or_version(self):
+  with patch.object(d,'command',return_value={'ok':False,'version':''}):w=d.wechat_info('macos','arm64','my-own-wechat')
+  self.assertEqual(w['detected_os'],'unknown');self.assertEqual(w['version'],'待检测');self.assertEqual(w['cpu_arch'],'unknown')
+ def test_named_container_probes_only_fixed_paths_and_not_env_or_chats(self):
+  commands=[]
+  def cmd(args):
+   commands.append(args)
+   if args[-1]=='-s':return {'ok':True,'version':'Linux'}
+   if args[-1]=='-m':return {'ok':True,'version':'x86_64'}
+   if 'dpkg-query' in args:return {'ok':True,'version':'4.1.13.23'}
+   return {'ok':True,'version':d.LINUX_ELF+'  /opt/wechat/wechat'}
+  with patch.object(d,'command',side_effect=cmd):w=d.wechat_info('macos','arm64','own-wechat');d.reader_tools(container='own-reader')
+  self.assertEqual(d.reader_compatibility(w)['chatlog-keeper']['status'],'project_verified_build');self.assertTrue(all(c[0:2]==['docker','exec'] for c in commands));self.assertTrue(all(c[2] in ['own-wechat','own-reader'] for c in commands));self.assertFalse(any(any(x in ['env','inspect','find','cat','rm','restart','secrets','db_storage'] for x in c) for c in commands))
+ def test_container_names_reject_options_shell_and_traversal(self):
+  for name in ['--privileged','a;restart','../other','a b','*','a/b']:
+   with self.assertRaises(ValueError):d.container_name(name)
+ def test_private_installed_record_is_not_treated_as_healthy(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d.shutil,'which',return_value=None),patch.object(d.importlib.metadata,'version',side_effect=d.importlib.metadata.PackageNotFoundError):
+   root=Path(t);(root/'venv/bin').mkdir(parents=True);(root/'venv/bin/chatlog-keeper').write_text('synthetic');(root/'groupdesk-reader-install.json').write_text(json.dumps({'installed':True,'upstream_commit':d.KEEPER_COMMIT,'archive_sha256':d.KEEPER_SHA256}))
+   readers=d.reader_tools(directory=t);self.assertTrue(readers['chatlog-keeper']['detected']);self.assertFalse(readers['groupdesk-reader']['detected']);self.assertNotIn('healthy',readers['chatlog-keeper'])
+ def test_plan_has_no_side_effects_and_container_install_is_blocked(self):
+  with patch.object(d.sys,'version_info',(3,12)),patch.object(d.urllib.request,'build_opener',side_effect=AssertionError('network')):
+   p=d.reader_plan(self.report());self.assertTrue(p['can_install_keeper_component']);self.assertFalse(p['changes_made']);self.assertFalse(d.reader_plan(self.report(container='own-wechat'))['can_install_keeper_component'])
+  self.assertIn('不能pip install chatlog-keeper',str(p));self.assertFalse(p['account_read_verified'])
+ def test_installer_requires_consent_before_inspection_input_network_or_writes(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d,'inspect_device',side_effect=AssertionError('inspect')),patch.object(d.urllib.request,'build_opener',side_effect=AssertionError('network')):
+   path=Path(t)/'new'
+   with self.assertRaisesRegex(ValueError,'confirm-install'):d.install_reader(path)
+   self.assertFalse(path.exists())
+ def test_installer_refuses_existing_unknown_and_container_targets_before_network(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d.os,'geteuid',return_value=1000),patch.object(d.urllib.request,'build_opener',side_effect=AssertionError('network')):
+   with self.assertRaisesRegex(ValueError,'已存在'):d.install_reader(t,True,self.report())
+   for w in [{'fingerprint':'other'},{'container':'own-wechat'}]:
+    with self.assertRaisesRegex(ValueError,'自动准备范围'):d.install_reader(Path(t)/'new',True,self.report(**w))
+   self.assertFalse((Path(t)/'new').exists())
+ def test_installer_refuses_root_windows_and_unsupported_python(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d.os,'geteuid',return_value=0):
+   with self.assertRaisesRegex(ValueError,'root'):d.install_reader(Path(t)/'new',True,self.report())
+  with patch.object(d.os,'name','nt'):
+   with self.assertRaisesRegex(ValueError,'Windows'):d.install_reader('new',True,self.report())
+  with patch.object(d.sys,'version_info',(3,13)):self.assertFalse(d.reader_plan(self.report())['can_install_keeper_component'])
+ def test_archive_hash_and_traversal_refused_before_source_execution(self):
+  import io,tarfile,hashlib
+  with tempfile.TemporaryDirectory() as t:
+   with self.assertRaisesRegex(ValueError,'SHA256'):d.unpack_keeper(b'not-source',Path(t))
+   buffer=io.BytesIO()
+   with tarfile.open(fileobj=buffer,mode='w:gz') as archive:
+    m=tarfile.TarInfo('chatlog-keeper-'+d.KEEPER_COMMIT+'/../bad');m.size=1;archive.addfile(m,io.BytesIO(b'x'))
+   data=buffer.getvalue()
+   with patch.object(d,'KEEPER_SHA256',hashlib.sha256(data).hexdigest()):
+    with self.assertRaisesRegex(ValueError,'路径'):d.unpack_keeper(data,Path(t))
+   self.assertEqual(list(Path(t).iterdir()),[])
+ def test_installer_bad_download_hash_leaves_no_directory(self):
+  response=Mock();response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False);response.read.return_value=b'bad'
+  with tempfile.TemporaryDirectory() as t,patch.object(d.os,'geteuid',return_value=1000),patch.object(d.sys,'version_info',(3,12)),patch.object(d.urllib.request,'build_opener') as opener:
+   opener.return_value.open.return_value=response
+   with self.assertRaisesRegex(ValueError,'SHA256'):d.install_reader(Path(t)/'new',True,self.report())
+   self.assertFalse((Path(t)/'new').exists())
+ def test_installer_uses_fresh_venv_pinned_source_and_never_calls_key_export_or_server(self):
+  import io,tarfile,hashlib
+  buffer=io.BytesIO()
+  with tarfile.open(fileobj=buffer,mode='w:gz') as archive:
+   m=tarfile.TarInfo('chatlog-keeper-'+d.KEEPER_COMMIT+'/pyproject.toml');m.size=1;archive.addfile(m,io.BytesIO(b'x'))
+  data=buffer.getvalue();response=Mock();response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False);response.read.return_value=data
+  with tempfile.TemporaryDirectory() as t,patch.object(d.os,'geteuid',return_value=1000),patch.object(d.sys,'version_info',(3,12)),patch.object(d,'KEEPER_SHA256',hashlib.sha256(data).hexdigest()),patch.object(d.urllib.request,'build_opener') as opener,patch.object(d.venv,'EnvBuilder') as builder,patch.object(d.subprocess,'run') as run:
+   opener.return_value.open.return_value=response;result=d.install_reader(Path(t)/'new',True,self.report());self.assertTrue(result['installed']);self.assertFalse(result['account_read_verified']);self.assertFalse(result['groupdesk_runtime_verified']);self.assertEqual((Path(t)/'new').stat().st_mode&0o777,0o700);self.assertEqual((Path(t)/'new/groupdesk-reader-install.json').stat().st_mode&0o777,0o600)
+   self.assertEqual(builder.return_value.create.call_count,1);self.assertEqual(run.call_count,2)
+   commands=[c.args[0] for c in run.call_args_list];self.assertTrue(all('pip' in c for c in commands));self.assertIn('--only-binary=:all:',commands[0]);self.assertIn('--no-index',commands[1]);self.assertNotIn('chatlog-keeper',commands[0]);self.assertFalse(any(x in ['extract-key','decrypt','sudo','prune','server','restart'] for c in commands for x in c))
+
+ def test_maibot_and_bridge_probe_is_exact_name_status_only(self):
+  with patch.object(d,'command',return_value={'ok':True,'version':'true'}) as cmd:
+   self.assertEqual(d.selected_component('own-maibot')['status'],'running');self.assertFalse(d.selected_component('own-bridge')['healthy_verified']);self.assertEqual(d.selected_component(None)['status'],'not_checked')
+   for c in cmd.call_args_list:self.assertEqual(c.args[0][:5],['docker','inspect','--type','container','--format'])
 if __name__=='__main__':unittest.main()
