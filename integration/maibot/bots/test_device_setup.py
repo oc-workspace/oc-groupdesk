@@ -120,4 +120,58 @@ class ReaderPreflightTests(unittest.TestCase):
   with patch.object(d,'command',return_value={'ok':True,'version':'true'}) as cmd:
    self.assertEqual(d.selected_component('own-maibot')['status'],'running');self.assertFalse(d.selected_component('own-bridge')['healthy_verified']);self.assertEqual(d.selected_component(None)['status'],'not_checked')
    for c in cmd.call_args_list:self.assertEqual(c.args[0][:5],['docker','inspect','--type','container','--format'])
+
+class GuiAndDiagnosticTests(unittest.TestCase):
+ def report(self):
+  w={'detected_os':'linux','cpu_arch':'x86_64','version':'4.1.13.23','build':'','installation':'deb','fingerprint':d.LINUX_ELF};return {'detected_os':'linux','wechat':w,'reader_compatibility':d.reader_compatibility(w)}
+ def test_gui_can_be_selected_without_claiming_screen_permission_or_bridge_health(self):
+  with patch.object(d.urllib.request,'build_opener',side_effect=AssertionError('network')):
+   plan=d.reader_plan(self.report(),'gui');self.assertEqual(plan['route'],'gui_review');self.assertEqual(plan['recommended_tool'],'gui');self.assertFalse(plan['can_install_keeper_component']);self.assertTrue(plan['requires_user_confirmation']);self.assertFalse(plan['gui']['screen_access_verified']);self.assertFalse(plan['gui']['groupdesk_gui_adapter_verified']);self.assertFalse(plan['account_read_verified'])
+ def test_auto_proposes_gui_for_unverified_database_but_never_silently_falls_back(self):
+  report=self.report();report['wechat']['fingerprint']='wrong';report['reader_compatibility']=d.reader_compatibility(report['wechat']);self.assertEqual(d.reader_plan(report,'auto')['route'],'compare_database_and_gui');self.assertTrue(d.reader_plan(report,'auto')['requires_user_confirmation']);self.assertEqual(d.reader_plan(report,'database')['route'],'database_review')
+ def test_metadata_event_drops_unknown_fields_paths_tokens_and_messages(self):
+  report={**self.report(),'token':'private-token','chat':'private text','screenshot':'private bytes','path':'/private/other'};event=d.diagnostic_event(report,'plan','planned','gui','gui');text=json.dumps(event);self.assertNotIn('private',text);self.assertNotIn('token',event);self.assertEqual(event['used_method'],'unknown');self.assertEqual(event['wechat_version'],'4.1.13.23');self.assertTrue(d.validate_diagnostics({'contract':1,'events':[event]}))
+ def test_raw_log_and_secret_fields_cannot_be_uploaded(self):
+  event=d.diagnostic_event({},'plan','planned')
+  for field in ['api_key','stdout','chat','path','screenshot']:
+   with self.assertRaises(ValueError):d.validate_diagnostics({'contract':1,'events':[{**event,field:'private'}]})
+  with self.assertRaises(ValueError):d.validate_diagnostics({'contract':1,'events':[{**event,'wechat_version':'sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}]})
+ def test_selected_or_installed_gui_cannot_be_reported_as_actually_reading(self):
+  for phase in ['plan','install','connect']:
+   with self.assertRaises(ValueError):d.diagnostic_event({},phase,'success','gui','gui','gui')
+  event=d.diagnostic_event({},'verify','success','gui','gui','gui');self.assertEqual(event['used_method'],'gui')
+ def test_private_file_is_bounded_and_contains_no_raw_input(self):
+  with tempfile.TemporaryDirectory() as t:
+   directory=Path(t)/'own-bot'
+   for _ in range(55):d.write_diagnostic(directory,d.diagnostic_event({},'plan','planned','gui','gui'))
+   value=d.read_diagnostics(directory);self.assertEqual(len(value['events']),50);self.assertEqual(directory.stat().st_mode&0o777,0o700);self.assertEqual((directory/'installation-report.json').stat().st_mode&0o777,0o600);self.assertFalse(any(p.name.startswith('.report-') for p in directory.iterdir()))
+ def test_reports_refuse_symlinks_and_broad_shared_directories(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);private=root/'private';private.mkdir(mode=0o700);link=root/'link';link.symlink_to(private,target_is_directory=True)
+   with self.assertRaises(ValueError):d.write_diagnostic(link,d.diagnostic_event({},'plan','planned'))
+   private.chmod(0o755)
+   with self.assertRaises(ValueError):d.write_diagnostic(private,d.diagnostic_event({},'plan','planned'))
+ def test_report_upload_is_own_bot_scoped_minimal_and_never_prints_bearer(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);connection=root/'connection';connection.mkdir(mode=0o700);reports=root/'reports';bot=str(uuid.uuid4());instance=str(uuid.uuid4());(connection/'connection.json').write_text(json.dumps({'bot_id':bot,'runtime_instance_id':instance,'url':d.APPROVED_SITE,'token':'s'*43}));(connection/'connection.json').chmod(0o600);d.write_diagnostic(reports,d.diagnostic_event({},'verify','success','gui','gui','gui'))
+   response=Mock();response.__enter__=Mock(return_value=response);response.__exit__=Mock(return_value=False);response.read.return_value=b'{"ok":true}'
+   with patch.object(d.urllib.request,'build_opener') as opener:
+    opener.return_value.open.return_value=response;result=d.upload_diagnostics(connection,reports);request=opener.return_value.open.call_args.args[0];payload=json.loads(request.data);self.assertEqual(set(payload),{'bot_id','instance_id','report'});self.assertEqual(payload['bot_id'],bot);self.assertNotIn('s'*43,json.dumps(payload));self.assertNotIn('s'*43,str(result));self.assertEqual(request.full_url,d.APPROVED_SITE+'/api/device-onboarding/report')
+ def test_upload_refuses_wrong_site_before_network(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d.urllib.request,'build_opener',side_effect=AssertionError('network')):
+   root=Path(t);(root/'connection.json').write_text(json.dumps({'url':'https://unapproved.example','token':'a'*43}));(root/'connection.json').chmod(0o600)
+   with self.assertRaisesRegex(ValueError,'HTTPS'):d.upload_diagnostics(root,root)
+ def test_pair_success_does_not_retry_or_fail_when_diagnostic_upload_is_unavailable(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d.sys,'argv',['tool','pair','--site',d.APPROVED_SITE,'--bot',str(uuid.uuid4()),'--directory',t+'/connection','--report-directory',t+'/reports']),patch.object(d,'pair') as pair,patch.object(d,'upload_diagnostics',side_effect=ValueError('安装报告尚未上传')),contextlib.redirect_stdout(io.StringIO()) as output:
+   d.main();self.assertEqual(pair.call_count,1);self.assertIn('安装报告尚未上传',output.getvalue());events=d.read_diagnostics(t+'/reports')['events'];self.assertEqual(events[-1]['phase'],'connect');self.assertEqual(events[-1]['outcome'],'success');self.assertEqual(events[-1]['used_method'],'unknown')
+
+ def test_reports_reject_non_string_fields_boolean_contract_and_success_with_unknown_method(self):
+  event=d.diagnostic_event({},'plan','planned')
+  for extra in [{'contract':True},{'generated_at':{}},{'report_id':42},{'phase':[]}]:
+   with self.assertRaises(ValueError):d.validate_diagnostics({'contract':1,'events':[{**event,**extra}]})
+  with self.assertRaises(ValueError):d.diagnostic_event({},'verify','success')
+ def test_later_step_context_keeps_only_prior_safe_version_metadata(self):
+  with tempfile.TemporaryDirectory() as t:
+   directory=Path(t)/'reports';d.write_diagnostic(directory,d.diagnostic_event(self.report(),'inspect','info'))
+   event=d.diagnostic_event(d.diagnostic_context(directory),'verify','success','gui','gui','gui');self.assertEqual(event['wechat_version'],'4.1.13.23');self.assertEqual(event['platform'],'linux');self.assertNotIn('path',event)
 if __name__=='__main__':unittest.main()

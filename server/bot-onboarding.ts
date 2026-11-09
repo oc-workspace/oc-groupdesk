@@ -1,3 +1,4 @@
+import {installationSummary} from './installation-diagnostics.js';
 import {isSelfDeployment,selfDeploymentMessage} from '../shared/computer-onboarding.js';
 import {registerDeviceOnboarding} from './device-onboarding.js';
 import type express from 'express';
@@ -52,7 +53,7 @@ export async function onboardingReport(id:string,userId:string,admin:boolean){
   b.state==='active'?'机器人已启用。':f.completed_at?'首次接入已完成；当前状态以机器人卡片为准。':'每个用户当前最多启用一个；切换只暂停同一用户的原机器人，等待停止确认后再启用。',
   groups?'已有绑定的微信群。':'首次群绑定由所选设备的安装助手或原环境维护者按现有部署流程配合完成；运行端连接后，可在这里管理已有群或继续接入更多群。'];
  const first=flags.slice(0,7).findIndex(v=>!v);
- return {bot_id:id,name:b.name,wechat_id:b.wechat_id,state:b.state,bot_revision:b.revision,revision:f.revision,created_at:f.created_at,completed_at:f.completed_at,
+ return {installation:await installationSummary(id),bot_id:id,name:b.name,wechat_id:b.wechat_id,state:b.state,bot_revision:b.revision,revision:f.revision,created_at:f.created_at,completed_at:f.completed_at,
   deployment_mode:f.deployment_mode||'hosted',deployment_mode_confirmed:!!f.deployment_mode,device_kind:f.device_kind,device_os:f.device_os,installation_model:f.installation_model,installation_plan:f.installation_plan,installation_plan_at:f.installation_plan_at,device_paired:!!(await controlPool.query('SELECT 1 FROM managed_bot_device_pairings WHERE bot_id=$1 AND consumed_at IS NOT NULL AND instance_id=$2',[id,b.runtime_instance_id])).rowCount,can_change_deployment:b.state==='paused'&&!prepared&&!ownerConfirmed&&!authorized&&!b.runtime_instance_id&&!b.account_fingerprint,
   desktop_url:prepared?f.desktop_url:'',desktop_is_local:!!f.desktop_url&&new URL(f.desktop_url).hostname==='127.0.0.1',
   account_confirmed:ownerConfirmed,reader_authorized:authorized,environment_prepared:prepared,computer_only:false,self_deployment_only:true,runtime_ready:runtime,models_ready:models,can_activate:canActivate,
@@ -98,7 +99,8 @@ export function registerBotOnboarding(app:express.Express,installationCaller?:ty
    if(action==='authorize-reader')requireCondition(f.account_confirmed_at&&f.account_confirmed_by===req.admin!.id,409,'请先登录并确认微信账号');
    const clause=action==='confirm-account'?'account_confirmed_at=now(),account_confirmed_by=$2':'reader_authorized_at=now(),reader_authorized_by=$2';
    await db.query('UPDATE managed_bot_onboarding SET '+clause+',revision=revision+1,updated_at=now() WHERE bot_id=$1',[id,req.admin!.id]);
-   await audit(req.admin!.username,action==='confirm-account'?'bot.login_declared_by_owner':'bot.reader_authorized_by_owner',id,{wechat_id:b.wechat_id,scope:'own_account_database_only',purpose:'bot_and_summary',encrypted_persistence:action==='authorize-reader'},db);
+   const readingMode=(await db.query('SELECT reading_mode FROM managed_bot_installation_preferences WHERE bot_id=$1',[id])).rows[0]?.reading_mode||'auto';
+   await audit(req.admin!.username,action==='confirm-account'?'bot.login_declared_by_owner':'bot.reader_authorized_by_owner',id,{wechat_id:b.wechat_id,scope:'own_account_messages_only',purpose:'bot_and_summary',reading_mode:readingMode,encrypted_persistence:action==='authorize-reader'&&readingMode!=='gui'},db);
   });res.json(await onboardingReport(id,req.admin!.id,req.admin!.role==='super_admin'));
  });
 }

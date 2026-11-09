@@ -1,3 +1,4 @@
+import {registerInstallationAdmin,registerInstallationDeviceReports,installationSummary} from './installation-diagnostics.js';
 import type express from 'express';
 import {rateLimit} from 'express-rate-limit';
 import {z} from 'zod';
@@ -23,6 +24,7 @@ function selfDesktop(value:string){
  requireCondition(!u.username&&!u.password&&!u.search&&!u.hash&&(u.protocol==='https:'||u.protocol==='http:'&&u.hostname==='127.0.0.1'&&Number(u.port)>=1024&&Number(u.port)<=65535),400,'使用 HTTPS 或本设备 127.0.0.1 登录入口，不包含密码或令牌');return u.href;
 }
 export function registerDevicePairing(app:express.Express){
+ registerInstallationDeviceReports(app);
  app.post('/api/device-onboarding/pair',rateLimit({windowMs:60000,limit:8,standardHeaders:'draft-7',legacyHeaders:false}),async(req,res)=>{
   const body=z.object({code:z.string().regex(/^[A-Za-z0-9_-]{40,100}$/),bot_id:z.uuid(),instance_id:z.uuid(),detected_os:os}).strict().parse(req.body),value=token();
   const paired=await controlTransaction(async db=>{
@@ -44,6 +46,7 @@ export function registerDevicePairing(app:express.Express){
  });
 }
 export function registerDeviceOnboarding(app:express.Express,caller=callTextModel){
+ registerInstallationAdmin(app,(id,user)=>onboardingReport(id,user.id,user.role==='super_admin'));
  app.put('/api/bots/:id/onboarding/deployment',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);
   const body=z.object({revision,deployment_mode:z.enum(['hosted','self_hosted']),device_kind:z.enum(['computer','server'])}).strict().parse(req.body);
@@ -62,8 +65,8 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
   });res.json(await onboardingReport(id,req.admin!.id,req.admin!.role==='super_admin'));
  });
  app.get('/api/bots/:id/onboarding/install-prompt',async(req,res)=>{
-  const id=z.uuid().parse(req.params.id),b=await accessibleBot(req.admin!,id),f=await task(id);
-  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind),contract:4});
+  const id=z.uuid().parse(req.params.id),b=await accessibleBot(req.admin!,id),f=await task(id),mode=(await installationSummary(id)).reading_mode;
+  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind,mode),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind,mode),contract:5});
  });
  app.get('/api/bots/:id/onboarding/device-tool',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);await task(id);
@@ -81,7 +84,7 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
     await validateSelection(body,'text');await authorizedKey(body.credential_id,body.model_id,'installation');
     const c=(await pool.query('SELECT id,base_url,client_type,revision,enabled FROM model_credentials WHERE id=$1',[body.credential_id])).rows[0];
     const b=await botRecord(id);requireCondition(b&&b.owner_user_id===(await accessibleBot(req.admin!,id)).owner_user_id,409,'机器人归属已变化');
-    const response=await caller(c,body.model_id,installationContract,JSON.stringify({request:body.question||'请用非技术用户能理解的方式说明下一步',device_os:f.device_os,device_kind:f.device_kind,guide:installationPrompt(b,f.device_os,site(),f.device_kind)}),{feature:'installation',timeoutMs:95000,maxOutputTokens:4000,signal:controller.signal,lowThinking:true});
+    const response=await caller(c,body.model_id,installationContract,JSON.stringify({request:body.question||'请用非技术用户能理解的方式说明下一步',device_os:f.device_os,device_kind:f.device_kind,guide:installationPrompt(b,f.device_os,site(),f.device_kind,(await installationSummary(id)).reading_mode)}),{feature:'installation',timeoutMs:95000,maxOutputTokens:4000,signal:controller.signal,lowThinking:true});
     controller.signal.throwIfAborted();await authorizedKey(body.credential_id,body.model_id,'installation');
     const text=generationText(response,c.client_type).replace(/sk-[A-Za-z0-9_-]{12,}/g,'[已隐藏疑似密钥]');requireCondition(text.length<=18000,502,'安装建议过长，请缩短需求后重试');return text;
    });
