@@ -22,7 +22,7 @@ function routeLabel(data:ModelData,value:Selection|null|undefined,fallback:strin
   return value?`${data.credentials.find(c=>c.id===value.credential_id)?.name||'未找到 Key'} / ${value.model_id||'尚未选模型'}`:fallback;
 }
 function GroupStageEditor({value,onChange,data}:{value:GroupRoutes;onChange:(v:GroupRoutes)=>void;data:ModelData}){
-  return <SettingsSection title="各处理阶段" issue={Object.values(value.stages||{}).some(route=>route.mode==='custom'&&(!route.credential_id||!route.model_id))?'有处理阶段尚未选择 API Key 或模型':''} description={Object.values(value.stages||{}).filter(route=>route.mode==='custom').length+' 个阶段单独设置，其余沿用继承设置'}><div className="model-stages"><p className="hint">阶段继承全局阶段设置；全局未指定时使用本群文字模型。微信取数、基础消息类型识别和发送由程序处理，不额外调用模型。不同阶段选择不同模型时，最终回答会交给回答模型。</p>{modelStages.map(stage=>{
+  return <SettingsSection title="各处理阶段" issue={Object.entries(value.stages||{}).filter(([id])=>id!=='summary').map(([,route])=>route).some(route=>route.mode==='custom'&&(!route.credential_id||!route.model_id))?'有处理阶段尚未选择 API Key 或模型':''} description={Object.entries(value.stages||{}).filter(([id])=>id!=='summary').map(([,route])=>route).filter(route=>route.mode==='custom').length+' 个阶段单独设置，其余沿用继承设置'}><div className="model-stages"><p className="hint">阶段继承全局阶段设置；全局未指定时使用本群文字模型。微信取数、基础消息类型识别和发送由程序处理，不额外调用模型。不同阶段选择不同模型时，最终回答会交给回答模型。</p>{modelStages.map(stage=>{
     const route=value.stages?.[stage.id]||{mode:'inherit'},global=data.defaults.routes.stages?.[stage.id];
     const base=value.text.mode==='custom'?value.text:value.text.mode==='inherit'?data.defaults.routes.text:null;
     return <div className="model-route" key={stage.id}><h4>{stage.name}</h4><p className="hint">{stage.description}</p><label>{stage.name}配置<select value={route.mode} onChange={e=>onChange({...value,stages:{...value.stages,[stage.id]:e.target.value==='custom'?{mode:'custom',credential_id:'',model_id:''}:{mode:'inherit'}}})}><option value="inherit">继承 · {routeLabel(data,global||base,value.text.mode==='disabled'?'本群文字已停用':'未配置，停止调用')}</option><option value="custom">本群单独选择</option></select></label>{route.mode==='custom'&&<Choice kind="text" feature={stage.id==='summary'?'summary':'chat'} prefix={stage.name} data={data} value={route.credential_id?route:null} onChange={v=>onChange({...value,stages:{...value.stages,[stage.id]:{mode:'custom',credential_id:v?.credential_id||'',model_id:v?.model_id||''}}})}/>}</div>;
@@ -35,7 +35,7 @@ export function GroupModelEditor({value=emptyRoutes,onChange,data}:{value?:Group
     const selected=route.mode==='custom'?route:data.defaults.routes[kind];
     return names[kind]+'：'+(route.mode==='inherit'?'继承默认':'本群单独设置')+' · '+(selected?.model_id||'未配置');
   };
-  const customRoutes=[value.text,value.image,...Object.values(value.stages||{})];
+  const customRoutes=[value.text,value.image,...Object.entries(value.stages||{}).filter(([id])=>id!=='summary').map(([,route])=>route)];
   const issue=customRoutes.some(route=>route.mode==='custom'&&(!route.credential_id||!route.model_id))?'有单独配置尚未选择 API Key 或模型':'';
   return <SettingsSection title="本群模型与 API Key" className="model-group-settings" description={describe('text')+'；'+describe('image')} issue={issue}><p className="hint">文字作为各阶段的基础模型；下方可分别指定模型和 API Key。生图配置不等于图片内容识别。</p>{(['text','image'] as const).map(kind=>{
     const route=value[kind],def=data.defaults.routes[kind],defaultKey=data.credentials.find(c=>c.id===def?.credential_id);
@@ -52,7 +52,7 @@ export function Models({data,api,reload,notify,onDirty}:{data:ModelData;api:Api;
     const body={...form,...(!form.api_key?{api_key:undefined}:{})};
     await api('/model-credentials'+(form.id?'/'+form.id:''),form.id?'PUT':'POST',body);setForm(null);await reload();notify('API Key 已保存；密钥不会回显');
   });}
-  const valid=[defaults.onboarding,defaults.text,defaults.image,...Object.values(defaults.stages||{})].every(v=>!v||!!v.credential_id&&!!v.model_id);
+  const valid=[defaults.onboarding,defaults.text,defaults.image,...Object.entries(defaults.stages||{}).filter(([id])=>id!=='summary').map(([,route])=>route)].every(v=>!v||!!v.credential_id&&!!v.model_id);
   const dirty=JSON.stringify(defaults)!==JSON.stringify(data.defaults.routes);
   useEffect(()=>{onDirty?.(dirty||!!form||!!manual);return()=>onDirty?.(false);},[dirty,!!form,!!manual,onDirty]);
   return <><div className="page-head"><div><span className="eyebrow">MODEL CONNECTIONS</span><h1>为每种对话，选择合适的模型</h1><p>管理 API Key 和模型目录，为内容分析、回答、辅助任务和群总结分别选择服务。</p></div><span className="hint">Key 在「API Key 管理」维护</span></div>

@@ -10,19 +10,27 @@ export async function settings(groupId:string,db:Db=pool){const s=(await db.quer
 export async function group(groupId:string,db:Db=pool){const g=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;}
 export function language(g:any,c:any){const l=g.policy.language;return c.language==='group'?(l.mode==='fixed'?l.fixed:l.fallback)||'zh-CN':c.language;}
 export async function validateConfig(g:any,c:any,db:Db=pool){
+ requireCondition(!c.enabled||c.model_route.mode==='custom',400,'请先在群聊总结中选择 API Key 和模型，再启用发布');
  const l=g.policy.language,lang=language(g,c);
  requireCondition(l.mode==='follow'||(l.mode==='fixed'?lang===(l.fixed||l.fallback):l.allowed.includes(lang)),400,'总结语言需符合本群语言范围');
  requireCondition((await db.query('SELECT 1 FROM summary_templates WHERE slug=$1',[c.template])).rowCount,400,'请选择总结模板');
  if(c.model_route.mode==='custom')await validateSelection(c.model_route,'text',db);
 }
-export async function route(g:any,c:any,db:Db=pool){const routes=await effectiveModelRoutes({model_routes:c.model_route.mode==='inherit'?g.model_routes:{text:c.model_route,image:{mode:'disabled'}}},db);return c.model_route.mode==='inherit'?routes.stages.summary:routes.text;}
+export async function route(g:any,c:any,db:Db=pool){
+ // Old queued jobs retain their snapshot; resolve their legacy marker only
+ // through the summary setting frozen by migration, never group/default routes.
+ const selected=c.model_route.mode==='inherit'?(await settings(g.id,db)).config.model_route:c.model_route;
+ if(selected.mode!=='custom')return {source:'disabled',available:false};
+ const routes=await effectiveModelRoutes({model_routes:{text:selected,image:{mode:'disabled'}}},db);
+ return routes.text;
+}
 export async function valid(job:any,db:Db=pool,send=false){await requireCurrentBotActive();const g=await group(job.group_id,db),s=await settings(g.id,db);requireCondition(g.enabled&&g.external_id===job.external_id&&g.revision===job.group_revision&&s.revision===job.settings_revision,409,'群或总结配置已变化，请重新创建任务');if(send)requireCondition(s.config.enabled,409,'本群总结发布已停用');return {g,s};}
 export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolean,requestId:string,now=Date.now(),scheduleId:string|null=null,occurrence:string|null=null){
  await requireCurrentBotActive();
  await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND id=$1 FOR UPDATE',[groupId]);
  const g=await group(groupId,db),s=await settings(groupId,db),c=summaryConfig.parse(s.config);
  requireCondition(g.enabled&&g.external_id,409,'请先启用群并连接机器人');if(publish)requireCondition(c.enabled,409,'请先保存并启用本群总结发布');
- await validateConfig(g,c,db);const r=await route(g,c,db);requireCondition(r.available,409,'本群总结模型不可用，请选择API Key和模型');
+ await validateConfig(g,c,db);const r=await route(g,c,db);requireCondition(r.available,409,'请在群聊总结中为本群配置可用的 API Key 和模型');
  const prior=(await db.query('SELECT id FROM summary_jobs WHERE request_id=$1',[requestId])).rows[0];if(prior)return prior.id;
  const usage=(await db.query("SELECT count(*)::int n,count(*) FILTER(WHERE wants_publish)::int publishes FROM summary_jobs WHERE group_id=$1 AND created_at>now()-interval '24 hours'",[g.id])).rows[0];
  requireCondition(usage.n<20&&(!publish||usage.publishes<10),429,'本群24小时总结额度已用完（生成20次、发群10次）');

@@ -1,8 +1,10 @@
+import {summaryConfig} from '../shared/summaries.js';
+import {modelStages} from '../shared/model-stages.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {summaryDefaults,instant,resolveWindow,nextOccurrence} from '../shared/summaries.js';
 import {sourceStats,reportParts,completeReport,summaryMessages,validateReportTimes} from '../server/summaries/generation.js';
-test('summary defaults grant no automatic publication',()=>{assert.equal(summaryDefaults().enabled,false);assert.equal(summaryDefaults().model_route.mode,'inherit');});
+test('summary defaults grant no automatic publication',()=>{assert.equal(summaryDefaults().enabled,false);assert.equal(summaryDefaults().model_route.mode,'unconfigured');});
 test('day windows and minute windows use explicit zones and exclusive ends',()=>{
  const now=Date.parse('2026-11-02T03:00:00Z');
  assert.deepEqual(resolveWindow({kind:'previous_day'},'Asia/Shanghai',now),{start:'2026-10-31T16:00:00.000Z',end:'2026-11-01T16:00:00.000Z'});
@@ -73,3 +75,5 @@ test('published rankings prefix every member in all ranking variants and languag
  const text=reportParts(job).join('');assert(text.includes('"@aa"'));assert(text.includes('"@bb"'));assert(!text.includes('@@bb'));assert(text.includes('Synthetic group'));
  }
 });
+
+test('new summary settings do not inherit chat routes and stage editors omit summary',()=>{assert.throws(()=>summaryConfig.parse({model_route:{mode:'inherit'}}));assert(!modelStages.some(s=>s.id==='summary'));});
