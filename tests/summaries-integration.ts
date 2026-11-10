@@ -13,7 +13,7 @@ import {processSummary} from '../server/summaries/generation.js';
 import {digest} from '../server/security.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw new Error('Dedicated test database required');
 let server:Server,url='',cookie='',csrf='',a:any,b:any,summaryModel:any;
-const report='一、整体评价\n本时段讨论了一个技术问题。\n二、重点话题\n@Alice提出方案，@Bob给出了验证方式，双方保留待测试的条件。\n三、其他话题\n没有其他明确结论。';
+const report="一、整体评价\n本时段讨论了一个技术问题，方案仍需验证。\n二、重点话题总结\n**话题名**：1️⃣ 测试方法 🔥🔥\n**主要参与者**：@Alice、@Bob\n**时间段**：原始发送时间未获取\n**讨论过程**：@Alice 提出方案，@Bob 给出了验证方式，双方保留待测试的条件。\n**简短评价**：方法有待实测，不把建议写成结果。\n------------\n三、其他话题与群像彩蛋\n**其他话题**：没有其他明确结论。\n**今日高光时刻**：两位成员共同细化了验证方法。\n**散场彩蛋**：期待下次带来测试结果。";
 async function req(path:string,method='GET',body?:any,bot=false,override?:string){const r=await fetch(url+'/api'+path,{method,headers:{...(bot?{Authorization:'Bearer '+(override||process.env.BOT_API_TOKEN)}:{Cookie:cookie,'X-CSRF-Token':csrf}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
 async function save(g:any,extra:any={}){const s=await settings(g.id);const r=await req('/summaries/groups/'+g.id,'PUT',{revision:s.revision,config:{...s.config,...extra}});assert.equal(r.status,200,JSON.stringify(r.data));}
 async function create(g=a,publish=false){const r=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'previous_day'},publish,request_id:randomUUID()});assert.equal(r.status,202,JSON.stringify(r.data));return r.data.id;}
@@ -27,7 +27,7 @@ before(async()=>{
  summaryModel={mode:'custom',...(await pool.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes.text};
  server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));url='http://127.0.0.1:'+(server.address() as any).port;
  const login=await req('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD});cookie=login.response.headers.get('set-cookie')!.split(';')[0];csrf=login.data.csrf;
- [a,b]=(await req('/overview')).data.groups;for(const g of [a,b]){Object.assign(g,(await req('/groups/'+g.id,'PUT',{...g,enabled:true,external_id:'summary-'+g.id})).data);}
+ [a,b]=(await req('/overview')).data.groups;for(const g of [a,b]){Object.assign(g,(await req('/groups/'+g.id,'PUT',{...g,enabled:true,language:'auto',policy:{...g.policy,language:{mode:'follow',allowed:[],fallback:'zh-CN',allow_requested:true}},external_id:'summary-'+g.id})).data);}
 });
 after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();});
 test('fresh installs seed five templates and no enabled summary settings or plans',async()=>{const d=(await req('/summaries')).data;assert.equal(d.templates.length,5);assert(d.groups.every((g:any)=>!g.config.enabled));assert.equal(d.schedules.length,0);assert.equal((await fetch(url+'/api/summaries')).status,401);});
@@ -63,7 +63,7 @@ test('once schedules enqueue exactly once and disable themselves',async()=>{
  await pool.query("UPDATE summary_jobs SET status='cancelled' WHERE schedule_id=$1",[row.id]);
 });
 test('future summary windows cannot be scheduled before their end',async()=>{assert.equal((await req('/summaries/schedules','POST',{group_id:a.id,name:'Invalid',enabled:true,config:{kind:'daily',at:'23:00',window:{kind:'day',date:'2099-01-01'}}})).status,400);});
-test('template edits persist across migrations and queued jobs retain their snapshot',async()=>{const t=(await req('/summaries')).data.templates[0];const id=await create();assert.equal((await req('/summaries/templates/'+t.slug,'PUT',{...t,instructions:'人工修改：只根据本次数据，认真总结主要交流，不编造。'})).status,200);await migrate();const current=(await pool.query('SELECT * FROM summary_templates WHERE slug=$1',[t.slug])).rows[0];assert(current.instructions.startsWith('人工修改'));assert.notEqual((await job(id)).template.instructions,current.instructions);await req('/summaries/jobs/'+id+'/cancel','POST',{});});
+test('template edits persist across migrations and queued jobs retain their snapshot',async()=>{const t=(await req('/summaries')).data.templates[0];const id=await create();assert.equal((await req('/summaries/templates/'+t.slug,'PUT',{...t,instructions:'人工修改：只根据本次数据，认真总结主要交流，不编造。'})).status,200);await migrate();const current=(await pool.query('SELECT * FROM summary_templates WHERE slug=$1',[t.slug])).rows[0];assert(current.instructions.includes('人工修改'));assert(current.instructions.includes('[GroupDesk 完整 Skill v2:'));assert.notEqual((await job(id)).template.instructions,current.instructions);await req('/summaries/jobs/'+id+'/cancel','POST',{});});
 test('generation failure does not retry, and lost delivery confirmation is never auto requeued',async()=>{const id=await create();await source(id);let n=0;await processSummary(async()=>{n++;throw new Error('synthetic network error');});assert.equal(n,1);assert.equal((await job(id)).status,'failed');await pool.query("UPDATE summary_jobs SET status='delivering',lease_until=now()-interval '1 second' WHERE id=$1",[id]);await tick();assert.equal((await job(id)).status,'uncertain');assert.equal((await claim('delivery')).data.job,null);});
 test('model input separates original display times from capture-only rows and rejects invented clocks',async()=>{
  const id=await create();await source(id);let seen:any;
@@ -213,4 +213,54 @@ test('037 retroactively purges cancelled payloads and retired JSON entries idemp
  const cleaned=(await pool.query('SELECT model_routes,revision FROM groups WHERE id=$1',[g.id])).rows[0];assert.equal(cleaned.revision,old.rows[0].revision);assert(!('summary' in cleaned.model_routes.stages));assert.deepEqual(cleaned.model_routes.stages.replyer,summaryModel);assert.deepEqual(cleaned.model_routes.text,old.rows[0].model_routes.text);
  assert.equal((await pool.query("SELECT count(*)::int n FROM groups WHERE (model_routes->'stages') ? 'summary'")).rows[0].n,0);
  assert.equal((await pool.query("SELECT count(*)::int n FROM model_settings WHERE (routes->'stages') ? 'summary'")).rows[0].n,0);
+});
+
+test('all five versions use full writing rules and generate complete previews with exact full statistics',async()=>{
+ const g=await freshSummaryGroup();
+ for(const slug of ['comprehensive','technical','ranking','entertainment','news']){
+  await save(g,{template:slug});const id=await create(g);await source(id,'ui_archive',g);
+  let calls=0;await processSummary(async(c,m,system,input)=>{calls++;assert(system.includes('[GroupDesk 完整 Skill v2:'+slug+']'));assert(system.includes('【最终报告格式契约】'));assert(system.includes('讨论过程'));return caller(c,m,system,input);});
+  const j=await job(id);assert.equal(j.status,'preview',j.error);assert.equal(calls,1);assert.equal(j.source.stats.stats_version,2);assert.equal(j.source.stats.leastRankings.length,2);assert(j.source.stats.characterRankings.length);assert(!j.source.messages);
+  await req('/summaries/jobs/'+id+'/cancel','POST',{});
+ }
+});
+test('invalid format fails preview and direct publishing without parts or paid retries',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true,template:'news'});
+ for(const publish of [false,true]){const id=await create(g,publish);await source(id,'ui_archive',g);let calls=0;await processSummary(async()=>{calls++;return {choices:[{message:{content:'一、整体评价\n只有简短概括，没有必需的话题和高光模块。'}}]};});const j=await job(id);assert.equal(j.status,'failed');assert.match(j.error,/格式不完整/);assert.equal(j.report,null);assert.equal(calls,1);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);}
+});
+test('edited previews are revalidated; missing fields preserve the draft and model-made fourth chapter is discarded',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true,template:'entertainment'});const id=await create(g);await source(id,'ui_archive',g);await processSummary(caller);const before=await job(id);
+ const bad=await req('/summaries/jobs/'+id+'/publish','POST',{report:report.replace('**今日高光时刻**：两位成员共同细化了验证方法。','')});assert.equal(bad.status,400);assert.deepEqual(await job(id),before);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);
+ const good=await req('/summaries/jobs/'+id+'/publish','POST',{report:report+'\n四、发言最多排行\n虚构999条'});assert.equal(good.status,200,JSON.stringify(good.data));const parts=(await pool.query('SELECT body FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[id])).rows.map(r=>r.body).join('\n');assert(!parts.includes('虚构999'));assert(parts.includes('文字输出榜'));assert(parts.includes('综合存在感榜'));assert(!((await job(id)).report.includes('虚构999')));await req('/summaries/jobs/'+id+'/cancel','POST',{});
+});
+test('038 upgrades old builtins and custom templates once, preserves names and old job snapshots',async()=>{
+ const sql=await readFile(new URL('../migrations/038_summary_full_hermes_skills.sql',import.meta.url),'utf8'),legacy=JSON.parse(await readFile(new URL('../server/summaries/legacy-templates.json',import.meta.url),'utf8'));
+ const g=await freshSummaryGroup(),id=await create(g),snapshot=(await job(id)).template;
+ for(const [slug,instructions] of [['news',legacy.news],['ranking',legacy.ranking.split('【总结成员昵称格式】')[0]],['technical','后台定制：保留测试建议，不编造结论。']])await pool.query('UPDATE summary_templates SET name=$2,instructions=$3,revision=11 WHERE slug=$1',[slug,'自定义名称 '+slug,instructions]);
+ await pool.query(sql);const first=(await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows;await pool.query(sql);assert.deepEqual((await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows,first);
+ for(const row of first){assert(row.instructions.includes('[GroupDesk 完整 Skill v2:'+row.slug+']'));assert.equal(row.revision,12);assert.equal(row.name,'自定义名称 '+row.slug);if(row.slug==='technical')assert(row.instructions.includes('后台定制：保留测试建议'));else assert(!row.instructions.includes('## 保留的后台自定义要求'));}
+ assert.deepEqual((await job(id)).template,snapshot);await req('/summaries/jobs/'+id+'/cancel','POST',{});
+});
+
+test('English and Japanese full report contracts run through generation and edited-preview publication',async()=>{
+ for(const [language,heads,fields,extra] of [
+  ['en',['I. Overall assessment','II. Main topics','III. Other topics'],['Topic','Participants','Time range','Discussion','Brief assessment'],['Highlights','Closing note']],
+  ['ja',['一、全体評価','二、主な話題','三、その他の話題'],['話題名','主な参加者','時間帯','議論の経緯','短評'],['今日のハイライト','締めのひとこと']]
+ ] as const){
+  const g=await freshSummaryGroup();await save(g,{enabled:true,language,template:'news'});const id=await create(g);await source(id,'ui_archive',g);
+  const text=heads[0]+'\nSynthetic assessment.\n'+heads[1]+'\n'+fields.map(f=>'**'+f+'**: Synthetic evidence.').join('\n')+'\n'+heads[2]+'\n'+extra.map(f=>'**'+f+'**: Synthetic evidence.').join('\n');
+  await processSummary(async(_c,_m,system)=>{assert(system.includes(extra[0]));return {choices:[{message:{content:text}}]};});assert.equal((await job(id)).status,'preview',(await job(id)).error);
+  assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report:text})).status,200);const parts=(await pool.query('SELECT body FROM summary_parts WHERE job_id=$1',[id])).rows.map(r=>r.body).join('\n');assert(parts.includes(language==='en'?'IV. Activity rankings':'四、活動ランキング'));await req('/summaries/jobs/'+id+'/cancel','POST',{});
+ }
+});
+
+test('legacy queued snapshots get full rules and fresh statistics; old previews without required statistics cannot publish',async()=>{
+ // A fresh HTTP fixture isolates this final scenario from the 240/minute API limit.
+ await new Promise<void>(r=>server.close(()=>r()));server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));url='http://127.0.0.1:'+(server.address() as any).port;
+ const g=await freshSummaryGroup();await save(g,{enabled:true,template:'entertainment'});const id=await create(g);await source(id,'ui_archive',g);
+ const legacy=JSON.parse(await readFile(new URL('../server/summaries/legacy-templates.json',import.meta.url),'utf8'));
+ await pool.query("UPDATE summary_jobs SET template=jsonb_set(template,'{instructions}',$2::jsonb),source=jsonb_set(source,'{stats}','{\"count\":2,\"capture_time_count\":1,\"unknown_sender_count\":0,\"rankings\":[]}'::jsonb) WHERE id=$1",[id,JSON.stringify(legacy.entertainment)]);
+ await processSummary(async(c,m,system,input)=>{assert(system.includes('[GroupDesk 完整 Skill v2:entertainment]'));assert(system.includes('本次原始记录数为 2 条'));return caller(c,m,system,input);});
+ const j=await job(id);assert.equal(j.status,'preview',j.error);assert.equal(j.template.instructions,legacy.entertainment);assert.equal(j.source.stats.stats_version,2);assert.equal(j.source.stats.characterRankings.length,2);
+ await pool.query("UPDATE summary_jobs SET source=source#-'{stats,characterRankings}' WHERE id=$1",[id]);const before=await job(id);const r=await req('/summaries/jobs/'+id+'/publish','POST',{report});assert.equal(r.status,400);assert.match(r.data.error,/统计/);assert.deepEqual(await job(id),before);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });

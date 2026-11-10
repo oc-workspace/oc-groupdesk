@@ -1,0 +1,27 @@
+{
+  "comprehensive": {
+    "skill": "wechat-group-chat-summary",
+    "sha256": "2c381181531136055b954a816ffb1c3d8fb02b0ff858ac1a09984df2612096d5",
+    "version": "1.8.4"
+  },
+  "technical": {
+    "skill": "wechat-group-chat-summary-wu",
+    "sha256": "b70296d6011f5e3ddf7c416d505fa2d886a7ee8223716cb65ba84a69c607c802",
+    "version": "1.6.3"
+  },
+  "ranking": {
+    "skill": "wechat-group-chat-summary-ranking",
+    "sha256": "88e1dea42a92b32f6876aaa2cd1bb8d8cfdf2664c9be4463ffea155cd701fdd8",
+    "version": "1.2.2"
+  },
+  "entertainment": {
+    "skill": "wechat-group-chat-summary-entertainment",
+    "sha256": "babd8199d1c359002d8949b19896c93a3b46e2e1283a79b4610189db56f2a212",
+    "version": "1.2.0"
+  },
+  "news": {
+    "skill": "wechat-group-chat-summary-news",
+    "sha256": "7b60fc646cfd556135621e6ccaed24c9394d67675e5b09420180cd6432dc090e",
+    "version": "1.4.0"
+  }
+}

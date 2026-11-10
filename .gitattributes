@@ -1,2 +1,4 @@
 integration/maibot/maibot.patch whitespace=-blank-at-eol
 integration/maibot/*.patch whitespace=-blank-at-eol,-blank-at-eof
+# Preserve verified upstream Hermes skill bytes, including their terminal blank line.
+skills/wechat-server-summary/hermes/**/SKILL.md whitespace=-blank-at-eof
