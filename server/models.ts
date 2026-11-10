@@ -25,8 +25,17 @@ export const stageRoute=z.discriminatedUnion('mode',[
 ]);
 const stageFields=Object.fromEntries(modelStageIds.map(id=>[id,stageRoute])) as Record<ModelStage,typeof stageRoute>;
 const defaultStageFields=Object.fromEntries(modelStageIds.map(id=>[id,selection.nullable()])) as Record<ModelStage,z.ZodNullable<typeof selection>>;
-export const groupRoutes=z.object({text:groupRoute,image:groupRoute,stages:z.object(stageFields).partial().strict().optional()});
-export const defaultRoutes=z.object({onboarding:selection.nullable().optional(),text:selection.nullable(),image:selection.nullable(),stages:z.object(defaultStageFields).partial().strict().optional()});
+function withoutRetiredSummary(value:unknown){
+ if(!value||typeof value!=='object'||Array.isArray(value))return value;
+ const routes={...value as Record<string,unknown>},stages=routes.stages;
+ if(stages&&typeof stages==='object'&&!Array.isArray(stages)){
+  const active=Object.fromEntries(Object.entries(stages).filter(([stage])=>stage!=='summary'));
+  if(Object.keys(active).length)routes.stages=active;else delete routes.stages;
+ }
+ return routes;
+}
+export const groupRoutes=z.preprocess(withoutRetiredSummary,z.object({text:groupRoute,image:groupRoute,stages:z.object(stageFields).partial().strict().optional()}));
+export const defaultRoutes=z.preprocess(withoutRetiredSummary,z.object({onboarding:selection.nullable().optional(),text:selection.nullable(),image:selection.nullable(),stages:z.object(defaultStageFields).partial().strict().optional()}));
 export type Routes=z.infer<typeof groupRoutes>;
 type Db=Pick<pg.PoolClient,'query'>;
 export async function modelOverview(db:Db=pool){
@@ -61,7 +70,7 @@ export function configuredModelRoutes(routes:Routes,defaults:z.infer<typeof defa
   const text=base('text'),image=base('image');
   const stages=Object.fromEntries(modelStageIds.map(stage=>{
     const configured=routes.stages?.[stage],global=defaults.stages?.[stage];
-    return [stage,text.source==='disabled'?text:configured?.mode==='custom'?{source:'group_stage',selection:{credential_id:configured.credential_id,model_id:configured.model_id}}:global?{source:'default_stage',selection:global}:text];
+    return [stage,stage==='summary'?{source:'disabled',selection:null}:text.source==='disabled'?text:configured?.mode==='custom'?{source:'group_stage',selection:{credential_id:configured.credential_id,model_id:configured.model_id}}:global?{source:'default_stage',selection:global}:text];
   })) as Record<ModelStage,ReturnType<typeof base>>;
   return {text,image,stages};
 }

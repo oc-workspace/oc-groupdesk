@@ -19,7 +19,7 @@ async function save(g:any,extra:any={}){const s=await settings(g.id);const r=awa
 async function create(g=a,publish=false){const r=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'previous_day'},publish,request_id:randomUUID()});assert.equal(r.status,202,JSON.stringify(r.data));return r.data.id;}
 async function claim(kind='source',g=a,override?:string){return req('/runtime/summaries/claim','POST',{external_id:g.external_id,kind},true,override);}
 async function job(id:string){return (await pool.query('SELECT * FROM summary_jobs WHERE id=$1',[id])).rows[0];}
-async function source(id:string,kind="ui_archive"){const c=(await claim()).data.job;assert.equal(c.id,id);const at=new Date(new Date(c.start).getTime()+60000).toISOString();const records=[{seq:1,sender:'Alice',text:'A synthetic question about testing.',at,time_kind:'original'},{seq:2,sender:'Bob',text:'A synthetic explanation with a test.',at,time_kind:'capture'}];const r=await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,source_kind:kind,messages:records},true);assert.equal(r.status,200,JSON.stringify(r.data));return {c,records};}
+async function source(id:string,kind="ui_archive",g=a){const c=(await claim("source",g)).data.job;assert.equal(c.id,id);const at=new Date(new Date(c.start).getTime()+60000).toISOString();const records=[{seq:1,sender:'Alice',text:'A synthetic question about testing.',at,time_kind:'original'},{seq:2,sender:'Bob',text:'A synthetic explanation with a test.',at,time_kind:'capture'}];const r=await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,source_kind:kind,messages:records},true);assert.equal(r.status,200,JSON.stringify(r.data));return {c,records};}
 const caller=async(_credential:any,_model:any,system:string,input:string)=>{assert(system.includes('【总结成员昵称格式】'));const data=JSON.parse(input);if(data.senders)assert(data.senders.every((name:string|null)=>name===null||name.startsWith('@')));return {choices:[{message:{content:report}}]};};
 before(async()=>{
  await pool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await migrate();
@@ -176,4 +176,41 @@ test('migration freezes former precedence without changing settings revisions, j
   assert.deepEqual((await pool.query('SELECT model_routes FROM groups WHERE id=$1',[id])).rows[0].model_routes,model_routes);
   const legacy=await summaryRoute(g,{model_route:{mode:'inherit'}});assert.equal(legacy.available,!!c.expected);if(c.expected)assert.equal(legacy.credential_id,c.expected.credential_id);
  }
+});
+
+async function assertPayloadCleared(id:string){
+ const j=await job(id);assert.equal(j.status,'cancelled');
+ for(const key of ['report','source','source_token','delivery_token','lease_until'])assert.equal(j[key],null,key);
+ for(const key of ['config','template','progress'])assert.deepEqual(j[key],{},key);
+ for(const table of ['summary_parts','summary_source_batches'])assert.equal((await pool.query('SELECT count(*)::int n FROM '+table+' WHERE job_id=$1',[id])).rows[0].n,0);
+ assert(j.finished_at);
+}
+test('cancelling a preview destroys stored payload and publishing it is refused',async()=>{
+ const g=await freshSummaryGroup(),id=await create(g);await source(id,'ui_archive',g);await processSummary(caller);const before=await job(id);assert.equal(before.status,'preview');assert(before.report);
+ assert.equal((await req('/summaries/jobs/'+id+'/cancel','POST',{})).status,200);await assertPayloadCleared(id);
+ assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report})).status,409);assert.equal((await job(id)).request_id,before.request_id);
+ const list=(await req('/summaries')).data.jobs.find((j:any)=>j.id===id);assert.equal(list.report,null);
+});
+test('cancelling prepared delivery purges all parts and other previews remain unchanged',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true});const keep=await create(g);await source(keep,'ui_archive',g);await processSummary(caller);const kept=await job(keep);
+ const id=await create(g,true);await source(id,'ui_archive',g);await processSummary(caller);assert((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount);
+ await req('/summaries/jobs/'+id+'/cancel','POST',{});await assertPayloadCleared(id);assert.deepEqual(await job(keep),kept);
+});
+test('configuration cancellation cleans immediately without waiting for a worker tick',async()=>{
+ const g=await freshSummaryGroup(),id=await create(g);await source(id,'ui_archive',g);await processSummary(caller);await save(g,{instructions:'新的合成配置要求'});await assertPayloadCleared(id);
+});
+test('037 retroactively purges cancelled payloads and retired JSON entries idempotently',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true});const id=await create(g,true);await source(id,'ui_archive',g);await processSummary(caller);
+ await pool.query('ALTER TABLE summary_jobs DISABLE TRIGGER summary_jobs_cancelled_payload_cleanup');
+ try{await pool.query("UPDATE summary_jobs SET status='cancelled',source_token=$2,delivery_token=$3 WHERE id=$1",[id,randomUUID(),randomUUID()]);}finally{await pool.query('ALTER TABLE summary_jobs ENABLE TRIGGER summary_jobs_cancelled_payload_cleanup');}
+ const keep=await create(g);await source(keep,'ui_archive',g);await processSummary(caller);const kept=await job(keep);
+ const old=await pool.query('SELECT model_routes,revision FROM groups WHERE id=$1',[g.id]);const cfg=await settings(g.id);
+ await pool.query("UPDATE groups SET model_routes=jsonb_set(model_routes,'{stages}',COALESCE(model_routes->'stages','{}'::jsonb)||$2::jsonb) WHERE id=$1",[g.id,JSON.stringify({summary:summaryModel,replyer:summaryModel})]);
+ const defaults=(await pool.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes;
+ await pool.query('UPDATE model_settings SET routes=$1 WHERE singleton=true',[{...defaults,stages:{...defaults.stages,summary:{credential_id:summaryModel.credential_id,model_id:summaryModel.model_id}}}]);
+ const sql=await readFile(new URL('../migrations/037_summary_payload_cleanup.sql',import.meta.url),'utf8');await pool.query(sql);await pool.query(sql);
+ await assertPayloadCleared(id);assert.deepEqual(await job(keep),kept);assert.deepEqual(await settings(g.id),cfg);
+ const cleaned=(await pool.query('SELECT model_routes,revision FROM groups WHERE id=$1',[g.id])).rows[0];assert.equal(cleaned.revision,old.rows[0].revision);assert(!('summary' in cleaned.model_routes.stages));assert.deepEqual(cleaned.model_routes.stages.replyer,summaryModel);assert.deepEqual(cleaned.model_routes.text,old.rows[0].model_routes.text);
+ assert.equal((await pool.query("SELECT count(*)::int n FROM groups WHERE (model_routes->'stages') ? 'summary'")).rows[0].n,0);
+ assert.equal((await pool.query("SELECT count(*)::int n FROM model_settings WHERE (routes->'stages') ? 'summary'")).rows[0].n,0);
 });
