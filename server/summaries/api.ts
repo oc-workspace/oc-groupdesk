@@ -1,3 +1,5 @@
+import {validateSummaryReport} from './report-contract.js';
+import {fullSummaryInstructions} from './templates.js';
 import {withSummaryMemberRules} from '../../shared/summary-member-names.js';
 import type express from 'express';
 import {randomUUID} from 'node:crypto';
@@ -23,14 +25,15 @@ export function registerSummaryAdmin(app:express.Express){
    await audit(req.admin!.username,'summary.settings_saved',id,{},db);
   });res.json({ok:true});
  });
- app.put('/api/summaries/templates/:slug',async(req,res)=>{const b=z.object({revision:z.number().int().positive(),name:z.string().trim().min(1).max(100),instructions:z.string().trim().min(20).max(12000)}).parse(req.body);const r=await pool.query('UPDATE summary_templates SET name=$2,instructions=$3,revision=revision+1 WHERE slug=$1 AND revision=$4',[req.params.slug,b.name,b.instructions,b.revision]);requireCondition(r.rowCount,409,'模板已变化，请刷新');await audit(req.admin!.username,'summary.template_saved',String(req.params.slug));res.json({ok:true});});
+ app.put('/api/summaries/templates/:slug',async(req,res)=>{const b=z.object({revision:z.number().int().positive(),name:z.string().trim().min(1).max(100),instructions:z.string().trim().min(20).max(32000)}).parse(req.body);const r=await pool.query('UPDATE summary_templates SET name=$2,instructions=$3,revision=revision+1 WHERE slug=$1 AND revision=$4',[req.params.slug,b.name,fullSummaryInstructions(String(req.params.slug),b.instructions),b.revision]);requireCondition(r.rowCount,409,'模板已变化，请刷新');await audit(req.admin!.username,'summary.template_saved',String(req.params.slug));res.json({ok:true});});
  app.post('/api/summaries/jobs',async(req,res)=>{const b=z.object({group_id:z.uuid(),window:windowSchema,publish:z.boolean(),request_id:z.uuid()}).parse(req.body);const id=await transaction(db=>enqueue(db,b.group_id,b.window,b.publish,b.request_id));res.status(202).json({id});});
  app.post('/api/summaries/jobs/:id/cancel',async(req,res)=>{const id=uuid(req.params.id);await transaction(async db=>{const r=await db.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='管理员已取消并清理',finished_at=now() WHERE id=$1 AND status IN ('waiting_source','reading','queued','generating','preview','delivery_ready')",[id]);requireCondition(r.rowCount,409,'当前任务无法取消，请刷新查看状态');await audit(req.admin!.username,'summary.cancelled',id,{payload_purged:true},db);});res.json({ok:true});});
  app.post('/api/summaries/jobs/:id/publish',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({report:z.string().trim().min(20).max(10000)}).parse(req.body);
   await transaction(async db=>{const j=(await db.query('SELECT * FROM summary_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(j?.status==='preview',409,'预览已发布或失效，请刷新');const {g}=await valid(j,db,true);
    const n=(await db.query("SELECT count(*)::int n FROM summary_jobs WHERE group_id=$1 AND wants_publish AND created_at>now()-interval '24 hours'",[j.group_id])).rows[0].n;requireCondition(n<10,429,'本群24小时总结发布额度已用完');
-   await prepareParts(db,{...j,report:b.report,group_name:g.name});await db.query("UPDATE summary_jobs SET report=$2,wants_publish=true,status='delivery_ready',created_at=now(),finished_at=NULL WHERE id=$1",[id,b.report]);await audit(req.admin!.username,'summary.publish_requested',id,{},db);
+   const report=validateSummaryReport(b.report,j.template.slug,j.config.language,400);
+   await prepareParts(db,{...j,report,group_name:g.name});await db.query("UPDATE summary_jobs SET report=$2,wants_publish=true,status='delivery_ready',created_at=now(),finished_at=NULL WHERE id=$1",[id,report]);await audit(req.admin!.username,'summary.publish_requested',id,{},db);
   });res.json({ok:true});
  });
  app.post('/api/summaries/schedules',async(req,res)=>{

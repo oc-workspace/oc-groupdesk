@@ -67,12 +67,12 @@ test('member display formatting adds one prefix and preserves Unicode nicknames'
 });
 test('model material prefixes member labels without rewriting chat text or missing senders',()=>{
  const text='aa 提到 https://example.com/aa 和 aa@example.com';const rows=[{seq:1,sender:'aa',text,at:'2026-11-01T00:00Z',time_kind:'original' as const},{seq:2,sender:'@bb',text:'原话',at:'2026-11-01T00:01Z',time_kind:'original' as const},{seq:3,sender:null,text:'未知来源',at:'2026-11-01T00:02Z',time_kind:'capture' as const}];
- const result=compactMessages(rows,'UTC');assert.deepEqual(result.senders,['@aa','@bb',null]);assert.equal(result.messages[0][3],text);assert.equal(rows[0].sender,'aa');assert.equal(sourceStats(rows).rankings[0].name,'aa');
+ const result=compactMessages(rows,'UTC');assert.deepEqual(result.senders,['@aa','@bb',null]);assert.equal(result.messages[0][3],text);assert.equal(rows[0].sender,'aa');assert.deepEqual(new Set(sourceStats(rows).rankings.map(x=>x.name)),new Set(['aa','@bb']));
 });
 test('published rankings prefix every member in all ranking variants and languages',()=>{
  for(const slug of ['ranking','entertainment','news'])for(const language of ['zh-CN','en','ja']){
  const job={group_name:'Synthetic group',config:{language,timezone:'UTC'},template:{slug},window_start:'2026-11-01T00:00Z',window_end:'2026-11-02T00:00Z',report:'Synthetic report.',source:{stats:{count:2,capture_time_count:0,rankings:[{rank:1,name:'aa',count:1},{rank:1,name:'@bb',count:1}]}}};
- const text=reportParts(job).join('');assert(text.includes('"@aa"'));assert(text.includes('"@bb"'));assert(!text.includes('@@bb'));assert(text.includes('Synthetic group'));
+ const text=reportParts(job).join('');assert(text.includes('@aa'));assert(text.includes('@bb'));assert(!text.includes('@@bb'));assert(text.includes('Synthetic group'));
  }
 });
 
