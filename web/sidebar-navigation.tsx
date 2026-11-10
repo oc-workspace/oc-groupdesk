@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
-import {ChevronDown,Menu,type LucideIcon} from 'lucide-react';
+import {ChevronDown,type LucideIcon} from 'lucide-react';
 import './sidebar-navigation.css';
+import {useWorkspaceNavigation} from './workspace-navigation';
 
 type NavItem={id:string;name:string;icon:LucideIcon};
 const sections=[
@@ -21,15 +22,12 @@ export function SidebarNavigation({items,page,storageKey,groupCount,noticeCounts
     try{const value=JSON.parse(localStorage.getItem(storageKey)||'{}');if(value&&typeof value==='object'&&!Array.isArray(value))for(const section of sections)if(typeof value[section.id]==='boolean')saved[section.id]=value[section.id];}catch{}
     return {communities:true,...saved,...(activeSection?{[activeSection]:true}:{})};
   });
-  const [mobileOpen,setMobileOpen]=useState(false);
-  const current=items.find(item=>item.id===page);
-  const totalNotices=items.reduce((sum,item)=>sum+(noticeCounts[item.id]||0),0);
+  const navigation=useWorkspaceNavigation();
   const navRef=useRef<HTMLElement>(null);
   useEffect(()=>{try{localStorage.setItem(storageKey,JSON.stringify(expanded));}catch{}},[expanded,storageKey]);
   useEffect(()=>{if(activeSection)setExpanded(previous=>({...previous,[activeSection]:true}));},[activeSection]);
-  useEffect(()=>{navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({block:'nearest'});},[page,mobileOpen]);
-  return <div className={'sidebar-navigation'+(mobileOpen?' mobile-open':'')}>
-    <button type="button" className="mobile-nav-toggle" aria-expanded={mobileOpen} aria-controls="workspace-navigation" onClick={()=>{if(!mobileOpen)onCheckNotices?.();setMobileOpen(open=>!open);}}><Menu size={17}/><span>功能菜单 · {current?.name||'工作空间'}</span>{!mobileOpen&&<NoticeBadge count={totalNotices}/>}<ChevronDown size={16}/></button>
+  useEffect(()=>{if(!navigation?.mobile||navigation.open)navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({block:'nearest'});},[page,navigation?.mobile,navigation?.open]);
+  return <div className="sidebar-navigation">
     <nav id="workspace-navigation" aria-label="工作空间导航" ref={navRef}>
       {sections.map(section=>{
         const visible=section.items.map(id=>items.find(item=>item.id===id)).filter((item):item is NavItem=>!!item);
@@ -39,7 +37,7 @@ export function SidebarNavigation({items,page,storageKey,groupCount,noticeCounts
         const notices=visible.reduce((sum,item)=>sum+(noticeCounts[item.id]||0),0);
         return <section className={'nav-section'+(active?' has-active':'')} key={section.id}>
           <button type="button" className="nav-section-toggle" aria-expanded={open} aria-controls={'nav-section-'+section.id} onClick={()=>{if(!open&&section.items.includes('users'))onCheckNotices?.();setExpanded(previous=>({...previous,[section.id]:!open}));}}><span>{section.name}</span>{!open&&(notices>0?<NoticeBadge count={notices}/>:active&&<small>当前</small>)}<ChevronDown size={15}/></button>
-          <div id={'nav-section-'+section.id} hidden={!open}>{visible.map(({id,name,icon:Icon})=><button type="button" key={id} className={'nav-item '+(page===id?'active':'')} aria-current={page===id?'page':undefined} onClick={()=>{if(onNavigate(id))setMobileOpen(false);}}><Icon size={18}/><span>{name}</span><NoticeBadge count={noticeCounts[id]||0}/>{id==='groups'&&groupCount!==undefined&&<small>{groupCount}</small>}</button>)}</div>
+          <div id={'nav-section-'+section.id} hidden={!open}>{visible.map(({id,name,icon:Icon})=><button type="button" key={id} className={'nav-item '+(page===id?'active':'')} aria-current={page===id?'page':undefined} onClick={()=>{if(onNavigate(id))navigation?.close();}}><Icon size={18}/><span>{name}</span><NoticeBadge count={noticeCounts[id]||0}/>{id==='groups'&&groupCount!==undefined&&<small>{groupCount}</small>}</button>)}</div>
         </section>;
       })}
     </nav>
