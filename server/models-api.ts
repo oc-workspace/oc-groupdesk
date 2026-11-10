@@ -37,7 +37,7 @@ export function registerModelAdmin(app:express.Express){
       await validateSelection(body.routes.onboarding||null,'text',db);
       if(body.routes.stages===undefined&&old.routes.stages!==undefined)body.routes.stages=old.routes.stages;
       for(const kind of ['text','image'] as const)await validateSelection(body.routes[kind],kind,db);
-      for(const route of Object.values(body.routes.stages||{}))await validateSelection(route||null,'text',db);
+      for(const [stage,route] of Object.entries(body.routes.stages||{}))if(stage!=='summary')await validateSelection(route||null,'text',db);
       await db.query('UPDATE model_settings SET routes=$1,revision=revision+1 WHERE singleton=true',[body.routes]);
       const changed=(['text','image'] as const).filter(kind=>JSON.stringify(old.routes[kind])!==JSON.stringify(body.routes[kind]));
       const groups=(await db.query('SELECT id,model_routes FROM groups WHERE deleted_at IS NULL')).rows;

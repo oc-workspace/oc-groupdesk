@@ -1,3 +1,5 @@
+import {readFile} from 'node:fs/promises';
+import {route as summaryRoute} from '../server/summaries/core.js';
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -10,7 +12,7 @@ import {settings,tick} from '../server/summaries/core.js';
 import {processSummary} from '../server/summaries/generation.js';
 import {digest} from '../server/security.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw new Error('Dedicated test database required');
-let server:Server,url='',cookie='',csrf='',a:any,b:any;
+let server:Server,url='',cookie='',csrf='',a:any,b:any,summaryModel:any;
 const report='一、整体评价\n本时段讨论了一个技术问题。\n二、重点话题\n@Alice提出方案，@Bob给出了验证方式，双方保留待测试的条件。\n三、其他话题\n没有其他明确结论。';
 async function req(path:string,method='GET',body?:any,bot=false,override?:string){const r=await fetch(url+'/api'+path,{method,headers:{...(bot?{Authorization:'Bearer '+(override||process.env.BOT_API_TOKEN)}:{Cookie:cookie,'X-CSRF-Token':csrf}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
 async function save(g:any,extra:any={}){const s=await settings(g.id);const r=await req('/summaries/groups/'+g.id,'PUT',{revision:s.revision,config:{...s.config,...extra}});assert.equal(r.status,200,JSON.stringify(r.data));}
@@ -22,13 +24,14 @@ const caller=async(_credential:any,_model:any,system:string,input:string)=>{asse
 before(async()=>{
  await pool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await migrate();
  await importExistingCredential({name:'Synthetic summary key',base_url:'https://summary.example.invalid/v1',api_key:'synthetic-summary-key-only',model_id:'synthetic-text'});
+ summaryModel={mode:'custom',...(await pool.query('SELECT routes FROM model_settings WHERE singleton=true')).rows[0].routes.text};
  server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));url='http://127.0.0.1:'+(server.address() as any).port;
  const login=await req('/auth/login','POST',{username:'admin',password:process.env.ADMIN_PASSWORD});cookie=login.response.headers.get('set-cookie')!.split(';')[0];csrf=login.data.csrf;
  [a,b]=(await req('/overview')).data.groups;for(const g of [a,b]){Object.assign(g,(await req('/groups/'+g.id,'PUT',{...g,enabled:true,external_id:'summary-'+g.id})).data);}
 });
 after(async()=>{if(server)await new Promise<void>(r=>server.close(()=>r()));await pool.end();});
 test('fresh installs seed five templates and no enabled summary settings or plans',async()=>{const d=(await req('/summaries')).data;assert.equal(d.templates.length,5);assert(d.groups.every((g:any)=>!g.config.enabled));assert.equal(d.schedules.length,0);assert.equal((await fetch(url+'/api/summaries')).status,401);});
-test('preview works with publication disabled, while direct publication is refused',async()=>{assert.equal((await req('/summaries/jobs','POST',{group_id:a.id,window:{kind:'previous_day'},publish:true,request_id:randomUUID()})).status,409);const id=await create();await source(id);assert(await processSummary(caller));assert.equal((await job(id)).status,'preview');assert(!(await job(id)).source.messages);assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report})).status,409);});
+test('summary needs its own model before preview and publication stays disabled until enabled',async()=>{assert.equal((await req('/summaries/jobs','POST',{group_id:a.id,window:{kind:'previous_day'},publish:false,request_id:randomUUID()})).status,409);await save(a,{model_route:summaryModel});assert.equal((await req('/summaries/jobs','POST',{group_id:a.id,window:{kind:'previous_day'},publish:true,request_id:randomUUID()})).status,409);const id=await create();await source(id);assert(await processSummary(caller));assert.equal((await job(id)).status,'preview');assert(!(await job(id)).source.messages);assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report})).status,409);});
 test('saving is group-isolated and uses optimistic revisions without touching group Persona revisions',async()=>{const rev=a.revision;await save(a,{enabled:true});assert.equal((await settings(b.id)).config.enabled,false);assert.equal((await pool.query('SELECT revision FROM groups WHERE id=$1',[a.id])).rows[0].revision,rev);assert.equal((await req('/summaries/groups/'+a.id,'PUT',{revision:0,config:(await settings(a.id)).config})).status,409);});
 test('source claim is exclusive and restricted adapter cannot read another group',async()=>{
  const scoped='synthetic-summary-adapter-token-32-chars';await pool.query('INSERT INTO runtime_adapters(name,token_hash,group_external_ids) VALUES($1,$2,$3)',['summary-scope',digest(scoped),JSON.stringify([a.external_id])]);
@@ -77,7 +80,7 @@ test('database provenance survives generation and is exposed to administrators',
 });
 
 async function freshSummaryGroup(){
- const id=randomUUID();return (await pool.query("INSERT INTO groups(id,name,enabled,external_id,model_routes) SELECT $1,'Synthetic batching group',true,$2,model_routes FROM groups WHERE id=$3 RETURNING *",[id,'batch-'+id,a.id])).rows[0];
+ const id=randomUUID();const g=(await pool.query("INSERT INTO groups(id,name,enabled,external_id,model_routes) SELECT $1,'Synthetic batching group',true,$2,model_routes FROM groups WHERE id=$3 RETURNING *",[id,'batch-'+id,a.id])).rows[0];await save(g,{model_route:summaryModel});return g;
 }
 async function preflight(g:any,messages:any[]){
  const id=await create(g),c=(await claim('source',g)).data.job;
@@ -139,4 +142,38 @@ test('many intermediate notes are reduced before final synthesis and remain insi
  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:6,read_batches:6},true)).status,200);
  let reductions=0,finals=0;await processSummary(async(_c,_m,_s,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.stage==='final'){finals++;return caller(_c,_m,_s,input);}if(data.stage==='reduce')reductions++;return {choices:[{message:{content:'合成中间归纳，保留待核对的后续进展。'.repeat(200)}}]};});
  assert(reductions>0);assert.equal(finals,1);assert.equal((await job(id)).status,'preview');
+});
+
+test('migration freezes former precedence without changing settings revisions, jobs or schedules',async()=>{
+ const sql=await readFile(new URL('../migrations/036_summary_model_single_entry.sql',import.meta.url),'utf8');
+ const result=await req('/model-credentials','POST',{name:'Migration alternate',base_url:'https://migration.example.invalid/v1',api_key:'synthetic-migration-key-only'});assert.equal(result.status,201);const key=result.data.id;
+ assert.equal((await req('/model-credentials/'+key+'/models','POST',{model_id:'alternate',capability:'text'})).status,201);
+ const A={credential_id:summaryModel.credential_id,model_id:summaryModel.model_id},B={credential_id:key,model_id:'alternate'};
+ const cases=[
+  {base:{mode:'inherit'},global:B,stage:{mode:'custom',...A},expected:A},
+  {base:{mode:'custom',...A},global:B,expected:B},
+  {base:{mode:'custom',...A},global:null,expected:A},
+  {base:{mode:'inherit'},global:null,expected:A},
+  {base:{mode:'disabled'},global:B,stage:{mode:'custom',...A},expected:null},
+  {base:{mode:'disabled'},global:B,explicit:{mode:'custom',...A},expected:A},
+ ];
+ for(const [index,c] of cases.entries()){
+  await pool.query('UPDATE model_settings SET routes=$1 WHERE singleton=true',[{text:A,image:null,stages:{summary:c.global}}]);
+  const id=randomUUID(),model_routes={text:c.base,image:{mode:'disabled'},stages:c.stage?{summary:c.stage}:{}};
+  const g=(await pool.query('INSERT INTO groups(id,name,enabled,external_id,model_routes) VALUES($1,$2,true,$3,$4) RETURNING *',[id,'Synthetic migration '+index,'migration-'+id,model_routes])).rows[0];
+  const config={...(await settings(id)).config,model_route:c.explicit||{mode:'inherit'},instructions:'保留自定义总结要求'};
+  const revision=index===0?0:7;
+  if(index!==0)await pool.query('INSERT INTO summary_settings(group_id,revision,config) VALUES($1,$2,$3)',[id,revision,config]);
+  const schedule=randomUUID();await pool.query("INSERT INTO summary_schedules(id,group_id,name,enabled,config,next_run) VALUES($1,$2,$3,true,$4,now()+interval '1 day')",[schedule,id,'Synthetic plan',{kind:'daily',at:'00:10',window:{kind:'previous_day'}}]);
+  const task=randomUUID();await pool.query("INSERT INTO summary_jobs(id,group_id,external_id,group_revision,settings_revision,request_id,wants_publish,window_start,window_end,config,template,status) VALUES($1,$2,$3,$4,$5,$6,false,now()-interval '1 day',now(),$7,'{}','preview')",[task,id,g.external_id,g.revision,revision,randomUUID(),{model_route:{mode:'inherit'}}]);
+  const before=(await pool.query('SELECT to_jsonb(t) value FROM summary_jobs t WHERE id=$1',[task])).rows[0].value;
+  await pool.query(sql);await pool.query(sql);
+  const saved=await settings(id);assert.equal(saved.revision,revision);
+  assert.deepEqual(saved.config.model_route,c.expected?{mode:'custom',...c.expected}:{mode:'unconfigured'});
+  if(index!==0)assert.equal(saved.config.instructions,config.instructions);
+  assert.deepEqual((await pool.query('SELECT to_jsonb(t) value FROM summary_jobs t WHERE id=$1',[task])).rows[0].value,before);
+  assert.equal((await pool.query('SELECT enabled FROM summary_schedules WHERE id=$1',[schedule])).rows[0].enabled,true);
+  assert.deepEqual((await pool.query('SELECT model_routes FROM groups WHERE id=$1',[id])).rows[0].model_routes,model_routes);
+  const legacy=await summaryRoute(g,{model_route:{mode:'inherit'}});assert.equal(legacy.available,!!c.expected);if(c.expected)assert.equal(legacy.credential_id,c.expected.credential_id);
+ }
 });

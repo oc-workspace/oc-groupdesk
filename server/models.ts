@@ -50,7 +50,7 @@ export async function validateSelection(route:z.infer<typeof selection>|null,kin
 }
 export async function validateRoutes(routes:Routes,db:Db){
   for(const kind of ['text','image'] as const)if(routes[kind].mode==='custom')await validateSelection(routes[kind] as z.infer<typeof selection>,kind,db);
-  for(const stage of modelStageIds){const route=routes.stages?.[stage];if(route?.mode==='custom')await validateSelection(route,'text',db);}
+  for(const stage of modelStageIds.filter(id=>id!=='summary')){const route=routes.stages?.[stage];if(route?.mode==='custom')await validateSelection(route,'text',db);}
 }
 export function configuredModelRoutes(routes:Routes,defaults:z.infer<typeof defaultRoutes>){
   const base=(kind:'text'|'image')=>{

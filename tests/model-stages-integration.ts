@@ -41,9 +41,12 @@ test('stage contract requires an upgraded adapter before acknowledging applicati
  const old=await req('/runtime/ack','POST',ack,true);assert.equal(old.status,409);assert.match(old.data.error,/分阶段/);
  assert.equal((await req('/runtime/ack','POST',{...ack,model_stage_routing_version:1},true)).status,200);
 });
-test('group summary inherits the summary stage and explicit summary configuration wins',async()=>{
- const inherited=await summaryRoute(group,{model_route:{mode:'inherit'}});assert.equal(inherited.model_id,'model-2');
- const explicit=await summaryRoute(group,{model_route:{mode:'custom',credential_id:a,model_id:'model-0'}});assert.equal(explicit.model_id,'model-0');
+test('summary uses only its own selection and legacy jobs read the migrated summary setting',async()=>{
+ const empty=await summaryRoute(group,{model_route:{mode:'unconfigured'}});assert.equal(empty.available,false);
+ const selected={mode:'custom',credential_id:a,model_id:'model-0'};
+ const explicit=await summaryRoute(group,{model_route:selected});assert.equal(explicit.model_id,'model-0');
+ await pool.query('INSERT INTO summary_settings(group_id,config) VALUES($1,$2) ON CONFLICT(group_id) DO UPDATE SET config=$2',[group.id,{model_route:selected}]);
+ const legacy=await summaryRoute({...group,model_routes:{text:{mode:'disabled'},image:{mode:'disabled'}}},{model_route:{mode:'inherit'}});assert.equal(legacy.model_id,'model-0');
 });
 test('old group and default editors cannot erase stage settings they did not send',async()=>{
  const routes={...group.model_routes};delete routes.stages;

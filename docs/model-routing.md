@@ -45,7 +45,6 @@ Codex 模板中的 base_url、OPENAI_API_KEY、model、wire_api=responses 映射
 | 回答生成 | MaiBot Replyer，生成普通回复或长文；继续使用本群 Persona 和语言规则。 |
 | 快速辅助判断 | MaiBot `fast_model` 按需调用的辅助任务。 |
 | 信息提取与整理 | MaiBot `utils` 按需调用的归纳等辅助文字任务。 |
-| 群总结 | GroupDesk 总结生成；总结页面已单独选择的模型优先。 |
 
 微信消息读取、数据库查询、来源昵称/时间核对、基础消息类型识别、权限判断及发送由程序处理，不需要选择模型。此功能按已有任务分配模型，不强制每条消息依次调用五个模型，也不新增语义分类器、完整历史读取或图片识别能力。已有「生图」选择与图片内容理解不同，仍按原有说明使用。
 
@@ -72,3 +71,9 @@ Codex 模板中的 base_url、OPENAI_API_KEY、model、wire_api=responses 映射
 后台和网页实现位于 `server/models.ts`、`server/models-api.ts`、`web/model-editors.tsx`；阶段目录位于 `shared/model-stages.ts`。原生接入位于 `integration/maibot/model_routing.py`、`groupdesk_runtime.py`。对当前生产 Policy 的检查式补丁为 `install-stage-routing.py`，重复执行保持相同结果，未知派发基线拒绝修改。
 
 初次阶段功能验收记录（非当前总测试数）：覆盖网页构建、87 项后台单元测试、87 项独立 PostgreSQL 集成测试和255项断网 MaiBot 原生测试；其中包含真实原生模型选择器传递不同 Key，以及问候派发不绕过独立回答模型的回归。测试使用合成消息和 Key，未向生产群发送测试消息。
+
+## 群聊总结的单一配置入口
+
+群总结的API Key和模型只在“群聊总结 → 总结API与高级选项”选择。群管理和默认阶段编辑器不再提供群总结选项；总结不会继承或跟随群内聊天模型。新群未配置时不能生成总结，启用发布前也必须完成选择。
+
+036迁移将已有继承配置按原优先级冻结成总结自己的Key/模型：本群旧总结阶段 → 机器人旧默认总结阶段 → 本群文字 → 机器人默认文字；原群文字停用时保持总结不可用。总结页原单独选择优先保留。迁移保留现有设置版本、任务快照、计划和原始群/默认JSON；历史summary阶段字段仅兼容保存，实际总结路由不再读取。旧排队任务的inherit标记只读取迁移后的总结设置。
