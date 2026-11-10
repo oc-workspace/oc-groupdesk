@@ -23,6 +23,7 @@ before(async()=>{
  [a,b,c]=ids;
  const defaults=(await req('/models')).data.defaults;
  assert.equal((await req('/model-defaults','PUT',{revision:defaults.revision,routes:{text:{credential_id:a,model_id:'model-0'},image:null,stages:{planner:{credential_id:b,model_id:'model-1'},summary:{credential_id:c,model_id:'model-2'}}}})).status,200);
+ assert.equal((await req('/models')).data.defaults.routes.stages.summary,undefined);
  const overview=(await req('/overview')).data;[group,other]=overview.groups;
  group=(await req('/groups/'+group.id,'PUT',{...group,enabled:true,external_id:'stage-room-a',model_routes:{text:{mode:'inherit'},image:{mode:'disabled'},stages:{replyer:{mode:'custom',credential_id:c,model_id:'model-2'}}}})).data;
  other=(await req('/groups/'+other.id,'PUT',{...other,enabled:true,external_id:'stage-room-b',model_routes:{text:{mode:'custom',credential_id:a,model_id:'model-0'},image:{mode:'disabled'}}})).data;
@@ -60,8 +61,8 @@ test('rotating a stage-only key invalidates affected group revisions without exp
  const credential=(await req('/models')).data.credentials.find((v:any)=>v.id===c);
  assert.equal((await req('/model-credentials/'+c,'PUT',{...credential,api_key:'isolated-stage-rotated-key'})).status,200);
  const after=(await req('/overview')).data.groups;
- // Both groups inherit the global summary stage bound to this credential.
- for(const g of before)assert.equal(after.find((v:any)=>v.id===g.id).revision,g.revision+1);
+ // Only this group's active reply stage uses c; retired summary defaults do not create dependencies.
+ for(const g of before)assert.equal(after.find((v:any)=>v.id===g.id).revision,g.revision+(g.id===group.id?1:0));
  group=after.find((v:any)=>v.id===group.id);
  const response=(await req('/runtime/model-credentials','POST',{group_id:group.id,revision:group.revision},true)).data;
  assert.notEqual(response.stage_routes.replyer.api_key,'isolated-stage-rotated-key');assert.equal(JSON.parse((await import('../server/bot-secrets.js')).openControlSecret(response.stage_routes.replyer.api_key)).alias,c);assert(!JSON.stringify((await req('/logs')).data).includes('isolated-stage-rotated-key'));

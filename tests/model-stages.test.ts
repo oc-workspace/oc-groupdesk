@@ -14,7 +14,7 @@ test('group stage override wins over global stage which wins over group base',()
   const r=configuredModelRoutes(g,{text:null,image:null,stages:{planner:b,replyer:b,summary:b}});
   assert.equal(r.stages.planner.source,'default_stage');assert.deepEqual(r.stages.planner.selection,b);
   assert.equal(r.stages.replyer.source,'group_stage');assert.deepEqual(r.stages.replyer.selection,a);
-  assert.deepEqual(r.stages.utils.selection,a);assert.deepEqual(r.stages.summary.selection,b);
+  assert.deepEqual(r.stages.utils.selection,a);assert.deepEqual(r.stages.summary,{source:'disabled',selection:null});
 });
 test('disabling group text blocks all stage overrides',()=>{
   const g=group();g.text={mode:'disabled'};g.stages={planner:{mode:'custom',...b}};
@@ -25,4 +25,11 @@ test('stage schema rejects unknown roles and disabling individual required stage
   assert.throws(()=>groupRoutes.parse({...group(),stages:{unknown:{mode:'inherit'}}}));
   assert.throws(()=>groupRoutes.parse({...group(),stages:{replyer:{mode:'disabled'}}}));
   assert.throws(()=>defaultRoutes.parse({text:null,image:null,stages:{unknown:a}}));
+});
+
+test('stale route editors cannot reintroduce retired summary JSON keys',()=>{
+ const original={text:{mode:'custom',...a},image:{mode:'disabled'},stages:{summary:{mode:'custom',...b},replyer:{mode:'custom',...a}}};
+ const parsed=groupRoutes.parse(original);assert.equal(parsed.stages?.summary,undefined);assert.deepEqual(parsed.stages?.replyer,{mode:'custom',...a});assert(original.stages.summary);
+ const defaults=defaultRoutes.parse({text:a,image:null,stages:{summary:b}});assert.equal(defaults.stages,undefined);
+ assert.equal(groupRoutes.parse({text:{mode:'inherit'},image:{mode:'disabled'},stages:{summary:{obsolete:true}}}).stages,undefined);
 });
