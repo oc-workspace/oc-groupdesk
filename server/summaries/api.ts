@@ -1,3 +1,4 @@
+import {withSummaryMemberRules} from '../../shared/summary-member-names.js';
 import type express from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
@@ -11,7 +12,7 @@ const uuid=(v:unknown)=>z.uuid().parse(v);
 export function registerSummaryAdmin(app:express.Express){
  app.get('/api/summaries',async(_req,res)=>{
   const groups=(await pool.query('SELECT id,name FROM groups WHERE deleted_at IS NULL ORDER BY name')).rows;
-  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows,schedules:(await pool.query('SELECT * FROM summary_schedules WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=summary_schedules.group_id AND g.deleted_at IS NULL) ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
+  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows.map(t=>({...t,instructions:withSummaryMemberRules(t.instructions)})),schedules:(await pool.query('SELECT * FROM summary_schedules WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=summary_schedules.group_id AND g.deleted_at IS NULL) ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
  });
  app.put('/api/summaries/groups/:id',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({revision:z.number().int().min(0),config:summaryConfig}).parse(req.body);
