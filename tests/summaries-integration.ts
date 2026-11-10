@@ -11,14 +11,14 @@ import {processSummary} from '../server/summaries/generation.js';
 import {digest} from '../server/security.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw new Error('Dedicated test database required');
 let server:Server,url='',cookie='',csrf='',a:any,b:any;
-const report='一、整体评价\n本时段讨论了一个技术问题。\n二、重点话题\nAlice提出方案，Bob给出了验证方式，双方保留待测试的条件。\n三、其他话题\n没有其他明确结论。';
+const report='一、整体评价\n本时段讨论了一个技术问题。\n二、重点话题\n@Alice提出方案，@Bob给出了验证方式，双方保留待测试的条件。\n三、其他话题\n没有其他明确结论。';
 async function req(path:string,method='GET',body?:any,bot=false,override?:string){const r=await fetch(url+'/api'+path,{method,headers:{...(bot?{Authorization:'Bearer '+(override||process.env.BOT_API_TOKEN)}:{Cookie:cookie,'X-CSRF-Token':csrf}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),response:r};}
 async function save(g:any,extra:any={}){const s=await settings(g.id);const r=await req('/summaries/groups/'+g.id,'PUT',{revision:s.revision,config:{...s.config,...extra}});assert.equal(r.status,200,JSON.stringify(r.data));}
 async function create(g=a,publish=false){const r=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'previous_day'},publish,request_id:randomUUID()});assert.equal(r.status,202,JSON.stringify(r.data));return r.data.id;}
 async function claim(kind='source',g=a,override?:string){return req('/runtime/summaries/claim','POST',{external_id:g.external_id,kind},true,override);}
 async function job(id:string){return (await pool.query('SELECT * FROM summary_jobs WHERE id=$1',[id])).rows[0];}
 async function source(id:string,kind="ui_archive"){const c=(await claim()).data.job;assert.equal(c.id,id);const at=new Date(new Date(c.start).getTime()+60000).toISOString();const records=[{seq:1,sender:'Alice',text:'A synthetic question about testing.',at,time_kind:'original'},{seq:2,sender:'Bob',text:'A synthetic explanation with a test.',at,time_kind:'capture'}];const r=await req('/runtime/summaries/jobs/'+id+'/source','POST',{token:c.token,source_kind:kind,messages:records},true);assert.equal(r.status,200,JSON.stringify(r.data));return {c,records};}
-const caller=async()=>({choices:[{message:{content:report}}]});
+const caller=async(_credential:any,_model:any,system:string,input:string)=>{assert(system.includes('【总结成员昵称格式】'));const data=JSON.parse(input);if(data.senders)assert(data.senders.every((name:string|null)=>name===null||name.startsWith('@')));return {choices:[{message:{content:report}}]};};
 before(async()=>{
  await pool.query('DROP SCHEMA public CASCADE;CREATE SCHEMA public');await migrate();await migrate();
  await importExistingCredential({name:'Synthetic summary key',base_url:'https://summary.example.invalid/v1',api_key:'synthetic-summary-key-only',model_id:'synthetic-text'});
@@ -99,7 +99,7 @@ test('preflight, bounded batch upload, duplicates, and completion preserve full-
  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:5,read_batches:5},true)).status,200);
  assert.equal((await pool.query('SELECT count(*)::int n FROM summary_source_batches WHERE job_id=$1',[id])).rows[0].n,0);
  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:5,read_batches:5},true)).status,200);
- let calls=0;await processSummary(async(_c,_m,_s,input)=>{calls++;assert.equal(JSON.parse(input).messages.length,979);return caller();});
+ let calls=0;await processSummary(async(_c,_m,_s,input)=>{calls++;assert.equal(JSON.parse(input).messages.length,979);return caller(_c,_m,_s,input);});
  assert.equal(calls,1);assert.equal((await job(id)).status,'preview');assert.equal((await job(id)).source.stats.count,979);assert.equal((await job(id)).progress.strategy,'whole');
 });
 test('missing, overlapping, mutated or out-of-window batches cannot enqueue partial summaries',async()=>{
@@ -119,7 +119,7 @@ test('large materials use complete chronological chunks then one combined report
  const g=await freshSummaryGroup();await save(g,{input_character_budget:24000});
  async function prepare(){const x=await preflight(g,syntheticRows(250,600));for(let i=0;i<5;i++)assert.equal((await req('/runtime/summaries/jobs/'+x.id+'/source-batch','POST',{token:x.c.token,ordinal:i,read_batches:i+1,messages:x.rows.slice(i*50,(i+1)*50)},true)).status,200);assert.equal((await req('/runtime/summaries/jobs/'+x.id+'/source-complete','POST',{token:x.c.token,batches:5,read_batches:5},true)).status,200);return x;}
  const x=await prepare();let maps=0,finals=0;const observed=new Set<number>();
- await processSummary(async(_c,_m,system,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.messages){maps++;for(const m of data.messages)observed.add(m[0]);return {choices:[{message:{content:'合成中间归纳：相同主题的讨论仍在继续，后续结论需要与其他分段一起核对。'}}]};}finals++;assert.match(system,/跨上午下午/);assert(data.notes.length===maps);return caller();});
+ await processSummary(async(_c,_m,system,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.messages){maps++;for(const m of data.messages)observed.add(m[0]);return {choices:[{message:{content:'合成中间归纳：相同主题的讨论仍在继续，后续结论需要与其他分段一起核对。'}}]};}finals++;assert.match(system,/跨上午下午/);assert(data.notes.length===maps);return caller(_c,_m,system,input);});
  assert(maps>1);assert.equal(finals,1);assert.equal(observed.size,250);assert.equal((await job(x.id)).status,'preview');
  const y=await prepare();let calls=0;await processSummary(async()=>{if(++calls===2)throw Error('synthetic map failure');return {choices:[{message:{content:'合成中间归纳：讨论仍需综合后续内容判断，不应直接发布本段。'}}]};});
  assert.equal((await job(y.id)).status,'failed');assert.equal((await job(y.id)).report,null);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[y.id])).rowCount,0);
@@ -137,6 +137,6 @@ test('many intermediate notes are reduced before final synthesis and remain insi
  const g=await freshSummaryGroup();await save(g,{input_character_budget:24000});const {id,c,rows}=await preflight(g,syntheticRows(300,1000));
  for(let i=0;i<6;i++)assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',{token:c.token,ordinal:i,read_batches:i+1,messages:rows.slice(i*50,(i+1)*50)},true)).status,200);
  assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-complete','POST',{token:c.token,batches:6,read_batches:6},true)).status,200);
- let reductions=0,finals=0;await processSummary(async(_c,_m,_s,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.stage==='final'){finals++;return caller();}if(data.stage==='reduce')reductions++;return {choices:[{message:{content:'合成中间归纳，保留待核对的后续进展。'.repeat(200)}}]};});
+ let reductions=0,finals=0;await processSummary(async(_c,_m,_s,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.stage==='final'){finals++;return caller(_c,_m,_s,input);}if(data.stage==='reduce')reductions++;return {choices:[{message:{content:'合成中间归纳，保留待核对的后续进展。'.repeat(200)}}]};});
  assert(reductions>0);assert.equal(finals,1);assert.equal((await job(id)).status,'preview');
 });
