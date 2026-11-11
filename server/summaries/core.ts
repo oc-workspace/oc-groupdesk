@@ -5,11 +5,13 @@ import {requireCondition,HttpError} from '../security.js';
 import {effectivePolicy} from '../policies.js';
 import {effectiveModelRoutes,validateSelection} from '../models.js';
 import {summaryConfig,summaryDefaults,resolveWindow,nextOccurrence} from '../../shared/summaries.js';
+import {queueCachedSource,readCachedSource} from './source-cache.js';
 export type Db=Pick<typeof pool,'query'>;
 export async function settings(groupId:string,db:Db=pool){const s=(await db.query('SELECT * FROM summary_settings WHERE group_id=$1',[groupId])).rows[0];return s||{group_id:groupId,revision:0,config:summaryDefaults(),last_adapter_seen:null};}
 export async function group(groupId:string,db:Db=pool){const g=(await db.query('SELECT * FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];requireCondition(g,404,'群不存在');g.policy=effectivePolicy(g);return g;}
 export function language(g:any,c:any){const l=g.policy.language;return c.language==='group'?(l.mode==='fixed'?l.fixed:l.fallback)||'zh-CN':c.language;}
 export async function validateConfig(g:any,c:any,db:Db=pool){
+ requireCondition(!c.group_command_enabled||c.enabled,400,'请先启用本群总结发布，再开启群命令');
  requireCondition(!c.enabled||c.model_route.mode==='custom',400,'请先在群聊总结中选择 API Key 和模型，再启用发布');
  const l=g.policy.language,lang=language(g,c);
  requireCondition(l.mode==='follow'||(l.mode==='fixed'?lang===(l.fixed||l.fallback):l.allowed.includes(lang)),400,'总结语言需符合本群语言范围');
@@ -36,10 +38,13 @@ export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolea
  requireCondition(usage.n<20&&(!publish||usage.publishes<10),429,'本群24小时总结额度已用完（生成20次、发群10次）');
  let bounds;try{bounds=resolveWindow(window,c.timezone,now);}catch(e){throw new HttpError(400,(e as Error).message);}
  const template=(await db.query('SELECT * FROM summary_templates WHERE slug=$1',[c.template])).rows[0],id=randomUUID();
- await db.query('INSERT INTO summary_jobs(id,group_id,external_id,group_revision,settings_revision,request_id,schedule_id,occurrence,wants_publish,window_start,window_end,config,template) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',[id,g.id,g.external_id,g.revision,s.revision,requestId,scheduleId,occurrence,publish,bounds.start,bounds.end,{...c,language:language(g,c),resolved_route:r},template]);
- await audit('summary','summary.queued',id,{group_id:g.id,publish},db);return id;
+ await db.query('INSERT INTO summary_jobs(id,group_id,external_id,group_revision,settings_revision,request_id,schedule_id,occurrence,wants_publish,window_start,window_end,config,template,trigger_kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',[id,g.id,g.external_id,g.revision,s.revision,requestId,scheduleId,occurrence,publish,bounds.start,bounds.end,{...c,language:language(g,c),resolved_route:r},template,scheduleId?'schedule':'admin']);
+ const cached=await readCachedSource(db,{group_id:g.id,external_id:g.external_id,window_start:bounds.start,window_end:bounds.end},now);
+ if(cached)await queueCachedSource(db,id,cached);
+ await audit('summary','summary.queued',id,{group_id:g.id,publish,cache_hit:!!cached},db);return id;
 }
 export async function tick(now=Date.now()){
+ await pool.query('DELETE FROM summary_source_cache WHERE expires_at<=now()');
  await pool.query("DELETE FROM summary_source_batches b USING summary_jobs j WHERE b.job_id=j.id AND j.status<>'reading'");
  await pool.query("UPDATE summary_jobs SET status=CASE WHEN status='delivering' THEN 'uncertain' ELSE 'failed' END,error=CASE WHEN status='delivering' THEN '发送确认中断，请核实群内消息，系统不会自动重发' ELSE '任务超时或被中断，请手动重新创建' END,source=NULL,finished_at=now() WHERE (status IN ('reading','generating','delivering') AND lease_until<now()) OR (status IN ('waiting_source','queued','delivery_ready') AND created_at<now()-interval '1 hour')");
  for(let i=0;i<20;i++){

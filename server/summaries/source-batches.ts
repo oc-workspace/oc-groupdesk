@@ -5,6 +5,7 @@ import {transaction} from '../db.js';
 import {requireCondition,digest} from '../security.js';
 import {valid} from './core.js';
 import {sourceStats} from './generation.js';
+import {saveReaderSource} from './source-cache.js';
 export const sourceMessage=z.object({seq:z.number().int().positive().safe(),sender:z.string().max(1000).nullable(),text:z.string().max(40000),at:z.string().datetime({offset:true}),time_kind:z.enum(['original','capture'])});
 const planSchema=z.object({epoch:z.string().regex(/^[a-f0-9]{32}$/),through:z.number().int().min(0).safe(),count:z.number().int().min(0).max(100000000),text_chars:z.number().int().min(0).max(10000000000),max_text_chars:z.number().int().min(0).max(100000000),page_limit:z.number().int().min(1).max(200),planned_batches:z.number().int().min(0).max(100000000)});
 export const sourceErrors={source_unavailable:'Bot服务器存档暂不可读或本次读取未完整完成，请重试',too_large:'总结材料超过本次处理上限，请缩短范围',no_messages:'该时段没有服务器已采集记录',too_many_messages:'本时段超过20,000条消息，请缩短范围',too_much_text:'本时段正文超过200万字符，请缩短范围',message_too_long:'本时段存在超过2万字符的单条消息，请缩短范围'};
@@ -57,7 +58,9 @@ export function registerSourceBatches(app:express.Express,authorize:any){
    const messages=batches.flatMap(b=>b.messages) as z.infer<typeof sourceMessage>[];validateMessages(messages,job);
    requireCondition(messages.length===plan.count&&messages.reduce((n,m)=>n+characters(m.text),0)===plan.text_chars,400,'取数统计不一致，请重新创建任务');
    messages.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)||a.seq-b.seq);
-   await db.query("UPDATE summary_jobs SET source=$2,status='queued',lease_until=NULL,progress=progress||$3::jsonb WHERE id=$1",[id,JSON.stringify({messages,stats:sourceStats(messages),origin:'wechat-database-chatlog-keeper',fetched_at:new Date().toISOString()}),JSON.stringify({phase:'queued',read_count:messages.length,completed_batches:body.read_batches})]);
+   const fetchedAt=new Date().toISOString();
+   const cacheStored=await saveReaderSource(db,job,messages,fetchedAt,plan);
+   await db.query("UPDATE summary_jobs SET source=$2,status='queued',lease_until=NULL,progress=progress||$3::jsonb WHERE id=$1",[id,JSON.stringify({messages,stats:sourceStats(messages),origin:'wechat-database-chatlog-keeper',fetched_at:fetchedAt}),JSON.stringify({phase:'queued',read_count:messages.length,completed_batches:body.read_batches,cache_stored:cacheStored})]);
    await db.query('DELETE FROM summary_source_batches WHERE job_id=$1',[id]);
   });res.json({ok:true});
  });

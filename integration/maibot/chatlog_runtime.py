@@ -46,6 +46,14 @@ class ReaderAgent:
                 epoch TEXT NOT NULL,after_seq INTEGER NOT NULL,started REAL NOT NULL,text_sha256 TEXT NOT NULL,
                 ui_status TEXT,source_seq INTEGER,server_id TEXT,confirmed_at REAL,
                 UNIQUE(epoch,chat_id,server_id))''')
+            db.execute('''CREATE TABLE IF NOT EXISTS summary_command_cursors(
+                chat_id INTEGER PRIMARY KEY,epoch TEXT NOT NULL,after_seq INTEGER NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS reader_quote_checks(
+                queued_seq INTEGER PRIMARY KEY,chat_id INTEGER NOT NULL,client_id TEXT NOT NULL,
+                epoch TEXT NOT NULL,after_seq INTEGER NOT NULL,started REAL NOT NULL,
+                text_sha256 TEXT NOT NULL,target_server_id TEXT NOT NULL,
+                source_seq INTEGER,reply_server_id TEXT,confirmed_at REAL,
+                UNIQUE(epoch,chat_id,reply_server_id))''')
 
     def __getattr__(self, name):
         return getattr(self.delegate, name)
@@ -143,6 +151,153 @@ class ReaderAgent:
         if not confirmed:return receipt
         if is_dataclass(receipt):return replace(receipt,delivery_status='sent',verified=True,delivery_error=None)
         return SimpleNamespace(**{**vars(receipt),'delivery_status':'sent','verified':True,'delivery_error':None})
+
+    def confirmed_send_reference(self, receipt):
+        """Return a Reader-proven native ID for one already sent text message.
+
+        The Bowxt queue sequence is only a lookup key. A native reference is
+        available only after the event-fed archive independently identifies
+        exactly one outgoing message in the same chat after the send anchor.
+        """
+        if getattr(receipt,'delivery_status',None)!='sent':return None
+        with self.db() as db:
+            found=db.execute('SELECT * FROM reader_send_checks WHERE queued_seq=?',(getattr(receipt,'seq',None),)).fetchone()
+        if not found:return None
+        anchor=dict(found)
+        if (receipt.chat_id!=anchor['chat_id'] or receipt.client_id!=anchor['client_id']
+            or receipt.direction!='outgoing' or receipt.message_type!='text'
+            or not isinstance(receipt.content,str)
+            or hashlib.sha256(receipt.content.strip().encode()).hexdigest()!=anchor['text_sha256']):return None
+        if anchor['source_seq'] is None:
+            with self.db() as db:
+                overlap=db.execute('SELECT 1 FROM reader_send_checks WHERE queued_seq<? AND chat_id=? AND epoch=? AND text_sha256=? AND started>=? AND source_seq IS NULL LIMIT 1',
+                    (receipt.seq,anchor['chat_id'],anchor['epoch'],anchor['text_sha256'],anchor['started']-180)).fetchone()
+            if overlap:return None
+            for delay in (0,.25,.5,1,2):
+                if not 0<=self.clock()-anchor['started']<=180:break
+                if delay:self.sleeper(delay)
+                try:row=self._source_confirmation(anchor)
+                except Exception:return None
+                if row:
+                    try:
+                        with self.db() as db:
+                            db.execute('UPDATE reader_send_checks SET source_seq=?,server_id=?,confirmed_at=? WHERE queued_seq=? AND source_seq IS NULL',
+                                (row['seq'],str(row['server_id']),self.clock(),receipt.seq))
+                    except sqlite3.Error:return None
+                    break
+            with self.db() as db:
+                found=db.execute('SELECT * FROM reader_send_checks WHERE queued_seq=?',(receipt.seq,)).fetchone()
+            anchor=dict(found) if found else {}
+        if (type(anchor.get('source_seq')) is not int or anchor['source_seq']<=0
+            or not re.fullmatch(r'[1-9]\d{0,20}',str(anchor.get('server_id') or ''))
+            or anchor.get('confirmed_at') is None):return None
+        return {'epoch':anchor['epoch'],'seq':anchor['source_seq'],'server_id':anchor['server_id'],
+            'confirmed_at':datetime.fromtimestamp(anchor['confirmed_at'],timezone.utc).isoformat()}
+
+    def summary_command_page(self, chat_id):
+        """Read one bounded Reader page; the caller ACKs rows after processing."""
+        with self.db() as db:
+            cursor=db.execute('SELECT * FROM summary_command_cursors WHERE chat_id=?',(chat_id,)).fetchone()
+        if cursor is None:
+            tail=self.request('/v1/stream',{'chat':chat_id,'after':'tail','limit':1})
+            with self.db() as db:
+                db.execute('INSERT OR IGNORE INTO summary_command_cursors VALUES(?,?,?)',(chat_id,tail['epoch'],tail['watermark']))
+            return None,[]
+        page=self.request('/v1/stream',{'chat':chat_id,'after':cursor['after_seq'],'limit':100})
+        if page['epoch']!=cursor['epoch']:
+            tail=self.request('/v1/stream',{'chat':chat_id,'after':'tail','limit':1})
+            with self.db() as db:
+                db.execute('UPDATE summary_command_cursors SET epoch=?,after_seq=? WHERE chat_id=?',(tail['epoch'],tail['watermark'],chat_id))
+            return None,[]
+        previous=cursor['after_seq'];rows=[]
+        for row in page['messages']:
+            seq=row.get('seq')
+            if type(seq) is not int or not previous<seq<=page['watermark'] or row.get('chat_id')!=chat_id:
+                raise ReaderUnavailable('Invalid command stream order or group')
+            rows.append(row);previous=seq
+        return page['epoch'],rows
+
+    def ack_summary_command(self, chat_id, epoch, seq):
+        with self.db() as db:
+            changed=db.execute('UPDATE summary_command_cursors SET after_seq=? WHERE chat_id=? AND epoch=? AND after_seq<?',
+                (seq,chat_id,epoch,seq)).rowcount
+        if changed!=1:raise ReaderUnavailable('Command cursor changed before ACK')
+
+    def send_native_quote(self, chat_id, target_server_id, target_text, text, *, client_id):
+        if (type(chat_id) is not int or not re.fullmatch(r'[1-9]\d{0,20}',str(target_server_id))
+            or not isinstance(target_text,str) or not target_text.strip()
+            or not isinstance(text,str) or not text.strip()):raise ValueError('Invalid native quote target')
+        target=self.request('/v1/reference',{'chat':chat_id,'server_id':str(target_server_id)})
+        if (not isinstance(target.get('target'),dict)
+            or target['target'].get('content')!=target_text.strip()
+            or target['target'].get('unique_text') is not True
+            or target['target'].get('server_id')!=str(target_server_id)):
+            raise ReaderUnavailable('Native quote target is missing or ambiguous')
+        tail=self.request('/v1/stream',{'chat':chat_id,'after':'tail','limit':1})
+        if (type(tail['watermark']) is not int or not re.fullmatch(r'[a-f0-9]{32}',tail['epoch'])
+            or abs(self.clock()-float(tail['cutover_at']))>5):raise ReaderUnavailable('Reader quote anchor unavailable')
+        sender=getattr(self.delegate,'send_native_quote',None)
+        if not callable(sender):raise ReaderUnavailable('Native quote sender unavailable')
+        queued=sender(chat_id,str(target_server_id),target_text,text,client_id=client_id)
+        if (type(getattr(queued,'seq',None)) is int and queued.chat_id==chat_id
+            and queued.client_id==client_id and queued.delivery_status=='pending'):
+            with self.db() as db:
+                db.execute('INSERT OR IGNORE INTO reader_quote_checks(queued_seq,chat_id,client_id,epoch,after_seq,started,text_sha256,target_server_id) VALUES(?,?,?,?,?,?,?,?)',
+                    (queued.seq,chat_id,client_id,tail['epoch'],tail['watermark'],float(tail['cutover_at']),hashlib.sha256(text.strip().encode()).hexdigest(),str(target_server_id)))
+        return queued
+
+    def confirmed_native_quote(self, receipt, target_server_id):
+        if getattr(receipt,'delivery_status',None) not in ('sent','unverified'):return None
+        with self.db() as db:
+            found=db.execute('SELECT * FROM reader_quote_checks WHERE queued_seq=?',(getattr(receipt,'seq',None),)).fetchone()
+        if not found:return None
+        anchor=dict(found)
+        if (receipt.chat_id!=anchor['chat_id'] or receipt.client_id!=anchor['client_id']
+            or receipt.direction!='outgoing' or receipt.message_type!='text'
+            or anchor['target_server_id']!=str(target_server_id)
+            or not isinstance(receipt.content,str)
+            or hashlib.sha256(receipt.content.strip().encode()).hexdigest()!=anchor['text_sha256']):return None
+        if anchor['source_seq'] is not None:return {'seq':anchor['source_seq'],'server_id':anchor['reply_server_id']}
+        for delay in (0,.25,.5,1,2):
+            if not 0<=self.clock()-anchor['started']<=180:break
+            if delay:self.sleeper(delay)
+            try:
+                after=anchor['after_seq'];upper=None;matches=[]
+                for _ in range(5):
+                    page=self.request('/v1/stream',{'chat':anchor['chat_id'],'after':after,'limit':200})
+                    if page['epoch']!=anchor['epoch']:return None
+                    if upper is None:upper=page['watermark']
+                    previous=after
+                    for row in page['messages']:
+                        seq=row.get('seq')
+                        if type(seq) is not int or seq<=previous or row.get('chat_id')!=anchor['chat_id']:return None
+                        previous=seq
+                        if seq>upper:break
+                        if (row.get('is_self')==1 and row.get('msg_type')==49
+                            and isinstance(row.get('reference'),dict)
+                            and row['reference'].get('kind')=='text_reply'
+                            and str(row['reference'].get('server_id'))==anchor['target_server_id']
+                            and isinstance(row.get('content'),str)
+                            and hashlib.sha256(row['content'].strip().encode()).hexdigest()==anchor['text_sha256']
+                            and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or ''))
+                            and anchor['started']<=float(row['observed_at'])<=self.clock()+2
+                            and math.ceil(anchor['started'])<=float(row['source_at'])<=self.clock()+2):matches.append(row)
+                    next_after=page.get('next_after')
+                    if next_after is None or next_after>=upper:break
+                    if type(next_after) is not int or not after<next_after<=previous:return None
+                    after=next_after
+                else:return None
+            except Exception:return None
+            if len(matches)>1:return None
+            if len(matches)==1:
+                row=matches[0]
+                try:
+                    with self.db() as db:
+                        db.execute('UPDATE reader_quote_checks SET source_seq=?,reply_server_id=?,confirmed_at=? WHERE queued_seq=? AND source_seq IS NULL',
+                            (row['seq'],str(row['server_id']),self.clock(),receipt.seq))
+                except sqlite3.Error:return None
+                return {'seq':row['seq'],'server_id':str(row['server_id'])}
+        return None
 
     @contextmanager
     def db(self):

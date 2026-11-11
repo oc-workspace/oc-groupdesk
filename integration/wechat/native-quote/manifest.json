@@ -1,0 +1,26 @@
+{
+  "agent.py": {
+    "before": "3254b5697e05ef46e9076583002644afab7236b2e5503150e762ff2468f168af",
+    "after": "3934e188e260832167eb2ef2adf111f8d55c0c8d9f66c053cf5bf35e0919b6a3"
+  },
+  "client.py": {
+    "before": "46dcb6d569c615f72466a2d024e91d81f86d89965a7cceb590dbd05a420dbf54",
+    "after": "4bcadef93bc7f5a18b61a6a3da148005b3c2921634bc098728cd39d624f43bae"
+  },
+  "input.py": {
+    "before": "3a77663f62f95aec52dab769d58796dc00cd20262ff7fdea7e5d659900778259",
+    "after": "08fe72fd0cd7556579d768160deb23ef788f07210f13e696b0e6f751b5a08fcb"
+  },
+  "service.py": {
+    "before": "d89981ed0959d342de8fe84ed9abef669960d581b37b3bb7a0890f02a5f42fd1",
+    "after": "317f176a018ede21078cec0fae63ba80baa31fbfbd1a168147e7b6b6e4fdcfe3"
+  },
+  "web.py": {
+    "before": "4997e8228735bbb421bc677ec64052769b4952035cefe5b555245a537e825765",
+    "after": "32f38b86294d05b1eba91443a9a5754f4ea6bf0dcdcb3d03f8f229071d10d93a"
+  },
+  "quote-menu-en.png": {
+    "before": null,
+    "after": "1f1ced42b47e627a55483d7804c205deb97a90ca996a71882771a9089213c0e0"
+  }
+}

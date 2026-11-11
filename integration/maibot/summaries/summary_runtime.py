@@ -1,5 +1,5 @@
 """GroupDesk summary tasks over existing scoped connections; no Mac or Hermes dependency."""
-import asyncio,json,time
+import asyncio,json,time,re,urllib.error
 from datetime import datetime,timezone
 import groupdesk_runtime as gd
 
@@ -84,29 +84,81 @@ async def deliver(bridge,chat,job):
             if not isinstance(part['body'],str) or not 1<=len(part['body'])<=2000 or not gd.language_allowed(p,part['body']):return
             reserved=await asyncio.to_thread(gd.api,path,{'token':job['token'],'ordinal':ordinal,'action':'reserve'})
             if not reserved.get('send'):return
-            state='uncertain'
+            state='uncertain';proof=None
             try:
                 if not bridge.ledger.reserve(identifier):raise ValueError('Already reserved or uncertain')
                 queued=await asyncio.to_thread(bridge.agent.send_text,chat.id,reserved['text'],client_id='groupdesk-'+identifier)
                 receipt=await asyncio.to_thread(bridge.agent.wait_delivery,queued,timeout=60)
                 state=receipt.delivery_status if receipt.delivery_status in ['sent','failed'] else 'uncertain'
+                if state=='sent':
+                    reference=getattr(bridge.agent,'confirmed_send_reference',None)
+                    try:proof=await asyncio.to_thread(reference,receipt) if callable(reference) else None
+                    except Exception:proof=None
+                    state='sent' if proof else 'uncertain'
                 bridge.ledger.finish(identifier,state,getattr(receipt,'seq',None))
                 if state=='sent':bridge.health['verified_sends']+=1
             finally:
                 # ACK may be retried; the actual send is never replayed.
                 for attempt in range(3):
                     try:
-                        await asyncio.to_thread(gd.api,path,{'token':job['token'],'ordinal':ordinal,'action':state});break
+                        await asyncio.to_thread(gd.api,path,{'token':job['token'],'ordinal':ordinal,'action':state,**({'proof':proof} if state=='sent' else {})});break
                     except Exception:
                         if attempt==2:raise
                         await asyncio.sleep(1)
             if state!='sent':return
+
+async def commands(bridge,chat,profile):
+    page=getattr(bridge.agent,'summary_command_page',None)
+    ack=getattr(bridge.agent,'ack_summary_command',None)
+    if not callable(page) or not callable(ack):return
+    epoch,rows=await asyncio.to_thread(page,chat.id)
+    if not epoch:return
+    for row in rows:
+        seq=row['seq'];content=row.get('content')
+        valid=(row.get('is_self')==0 and row.get('msg_type')==1
+            and content in ('/generate-summary','/generate-summary 截止目前')
+            and isinstance(row.get('sender_id'),str) and bool(row['sender_id'])
+            and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or '')))
+        if not valid:
+            await asyncio.to_thread(ack,chat.id,epoch,seq);continue
+        at=float(row.get('source_at') or 0)
+        if not 0<=time.time()-at<=600:
+            await asyncio.to_thread(ack,chat.id,epoch,seq);continue
+        payload={'external_id':profile['external_id'],'epoch':epoch,'seq':seq,
+            'server_id':str(row['server_id']),'sender_id':row['sender_id'],
+            'sender_name':row.get('sender'),'source_at':datetime.fromtimestamp(at,timezone.utc).isoformat(),
+            'text':content}
+        try:result=await asyncio.to_thread(gd.api,'/summaries/command',payload)
+        except urllib.error.HTTPError as exc:
+            if 400<=exc.code<500:
+                await asyncio.to_thread(ack,chat.id,epoch,seq);continue
+            raise
+        if result.get('state')=='already_sent':
+            sender=getattr(bridge.agent,'send_native_quote',None)
+            verifier=getattr(bridge.agent,'confirmed_native_quote',None)
+            if not callable(sender) or not callable(verifier):raise RuntimeError('Native quote sender unavailable')
+            identifier='summary-command-quote-'+epoch+'-'+str(seq)
+            text='这段时间的群总结已经发过，点开引用可查看第一段。'
+            async with bridge.send_lock:
+                if not bridge.ledger.reserve(identifier):
+                    await asyncio.to_thread(ack,chat.id,epoch,seq);continue
+                state='uncertain';receipt=None
+                try:
+                    queued=await asyncio.to_thread(sender,chat.id,result['server_id'],result['anchor_text'],text,client_id='groupdesk-'+identifier)
+                    receipt=await asyncio.to_thread(bridge.agent.wait_delivery,queued,timeout=60)
+                    proof=await asyncio.to_thread(verifier,receipt,result['server_id'])
+                    if proof:state='sent'
+                finally:bridge.ledger.finish(identifier,state,getattr(receipt,'seq',None))
+        await asyncio.to_thread(ack,chat.id,epoch,seq)
 
 async def step(bridge):
     if not bridge.control()['enabled']:return
     for chat_id,chat in list(bridge.chats.items()):
         p=gd.profile(bridge.policy.cfg,str(chat_id))
         if not gd.available(p,time.time()):continue
+        if bridge.control()['send_enabled']:
+            try:await commands(bridge,chat,p)
+            except Exception as exc:bridge.health['summary_command_error']=type(exc).__name__
         result=await asyncio.to_thread(gd.api,'/summaries/claim',{'external_id':p['external_id'],'kind':'source'})
         if result.get('job'):await source(bridge,chat,result['job'])
         if bridge.control()['send_enabled']:

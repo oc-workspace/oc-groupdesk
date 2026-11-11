@@ -50,6 +50,15 @@ class Store:
         finally:
             db.close()
 
+    def quote_target(self, chat, server_id):
+        """Identify one own text and reject identical bodies in this chat."""
+        with self.connect() as db:
+            rows=db.execute('SELECT seq,content,is_self,msg_type FROM messages WHERE chat_id=? AND server_id=? LIMIT 2',(chat,server_id)).fetchall()
+            if len(rows)!=1 or rows[0]['is_self']!=1 or rows[0]['msg_type']!=1:return None
+            row=rows[0]
+            same=db.execute('SELECT count(*) FROM messages WHERE chat_id=? AND is_self=1 AND msg_type=1 AND content=?',(chat,row['content'])).fetchone()[0]
+        return {'seq':row['seq'],'server_id':server_id,'content':row['content'],'unique_text':same==1}
+
     @property
     def epoch(self):
         with self.connect() as db:

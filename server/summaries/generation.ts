@@ -1,4 +1,6 @@
-import {hermesStats,localizedRanking,requireRankingStats} from './hermes-format.js';
+import {localizedRanking,requireRankingStats} from './hermes-format.js';
+import {sourceStats} from './source-stats.js';
+export {sourceStats} from './source-stats.js';
 import {fullSummaryInstructions} from './templates.js';
 import {reportContractPrompt,validateSummaryReport} from './report-contract.js';
 import {summaryMemberRules} from '../../shared/summary-member-names.js';
@@ -12,7 +14,6 @@ export function completeReport(value:any,protocol:Parameters<typeof generationTe
  requireCondition(!['length','content_filter','MAX_TOKENS','SAFETY','RECITATION','BLOCKLIST','PROHIBITED_CONTENT','UNEXPECTED_TOOL_CALL'].includes(finish)&&!['incomplete','failed','cancelled'].includes(value?.status),502,'模型报告被截断或未正常完成，本次不发布，请调整模型或缩短范围');
  return generationText(value,protocol);
 }
-export function sourceStats(messages:any[]){return {count:messages.length,capture_time_count:messages.filter(m=>m.time_kind==='capture').length,unknown_sender_count:messages.filter(m=>!m.sender).length,...hermesStats(messages)};}
 // Source at is an archival window key, not necessarily a sent timestamp.
 // Never expose a capture-only clock as an event time to the model.
 export function summaryMessages(messages:any[],zone:string){

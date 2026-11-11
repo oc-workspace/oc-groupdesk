@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {compactMessages,materialInput,modelChunks,noteGroups,noteInput} from '../server/summaries/planning.js';
 import {summaryProgressText} from '../shared/summary-progress.js';
+import {sliceCachedMessages} from '../server/summaries/source-cache.js';
 const job={group_name:'Synthetic',window_start:'2026-11-02T16:00:00Z',window_end:'2026-11-03T16:00:00Z',config:{timezone:'Asia/Shanghai'}};
 const message=(seq:number,text='Synthetic discussion',time_kind:'original'|'capture'='original')=>({seq,sender:seq%2?'A':'B',text,at:new Date(Date.parse(job.window_start)+(seq%2000)*60000).toISOString(),time_kind});
 test('979 short posts retain all content in one compact full-day input beyond the former envelope ceiling',()=>{
@@ -34,4 +35,10 @@ test('progress explains estimates and whole-day versus hierarchical processing w
  const text=summaryProgressText({status:'generating',progress:{total_count:979,total_characters:12000,planned_batches:5,completed_batches:5,read_count:979,strategy:'whole'}});
  assert.match(text,/979\/979/);assert.match(text,/全天/);
  assert.match(summaryProgressText({status:'generating',progress:{strategy:'hierarchical',phase:'merging',model_batches:4,completed_model_batches:4}}),/跨时段/);
+ assert.match(summaryProgressText({status:'queued',progress:{cache_hit:true,cache_fetched_at:'2026-11-03T00:00:00Z'}}),/复用已保存/);
+});
+test('cached parent windows use left-closed right-open child boundaries',()=>{
+ const rows=[message(1),message(2),message(3)];
+ rows[0].at='2026-11-03T00:00:00Z';rows[1].at='2026-11-03T00:10:00Z';rows[2].at='2026-11-03T00:20:00Z';
+ assert.deepEqual(sliceCachedMessages(rows,'2026-11-03T00:10:00Z','2026-11-03T00:20:00Z').map(x=>x.seq),[2]);
 });

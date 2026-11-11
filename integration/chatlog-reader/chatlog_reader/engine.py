@@ -255,6 +255,14 @@ class Engine:
             if not status['ok']:raise RuntimeError('source_unavailable')
             return {**self.store.summary_stats(chat,start,end),'last_checked':status['last_checked'],'messages':[]}
 
+    def quote_target(self, chat, server_id):
+        with self.lock:
+            status=self.status()
+            if not status['ok']:raise RuntimeError('source_unavailable')
+            if chat not in self.store.allowed:raise KeyError('Unknown group')
+            return {'epoch':self.store.epoch,'last_checked':status['last_checked'],
+                'messages':[],'target':self.store.quote_target(chat,server_id)}
+
     def page(self, chat, after, limit, start=None, end=None, *, through=None, summary=False):
         with self.lock:
             status=self.status()
