@@ -1,0 +1,373 @@
+--- a/src/bowxt/agent.py
++++ b/src/bowxt/agent.py
+@@ -179,6 +179,18 @@
+             },
+         )
+         return _stored_message(value["message"])
++
++    def send_native_quote(
++        self, chat: StoredChat | int | str, target_server_id: str,
++        target_text: str, text: str, *, client_id: str,
++        chat_type: ChatType | str = ChatType.GROUP,
++    ) -> StoredMessage:
++        target_id = int(chat) if isinstance(chat,int) else self._resolve_chat(
++            chat,chat_type=chat_type).id
++        value=self._request('POST',f'/api/chats/{target_id}/native-quotes',{
++            'target_server_id':str(target_server_id),'target_text':target_text,
++            'text':text,'client_id':client_id})
++        return _stored_message(value['message'])
+ 
+     def get_message(self, seq: int) -> StoredMessage:
+         value = self._request("GET", f"/api/messages/{int(seq)}")
+--- a/src/bowxt/client.py
++++ b/src/bowxt/client.py
+@@ -3,11 +3,14 @@
+ import os
+ import re
+ import shutil
++import subprocess
++import tempfile
+ import threading
+ import time
+ from collections import OrderedDict, deque
+ from dataclasses import replace
+ from datetime import datetime
++from pathlib import Path
+ from typing import Callable, Iterable
+ 
+ from .accessibility import AtspiBackend, Node, read_accessible_text, walk
+@@ -585,6 +588,163 @@
+                 "image viewer did not close cleanly or the active chat changed; input locked"
+             )
+ 
++    def send_native_quote(
++        self,
++        chat: str,
++        target_text: str,
++        text: str,
++        *,
++        chat_type: ChatType | str = ChatType.GROUP,
++        probe_only: bool = False,
++        target_is_own: bool = True,
++    ) -> SendReceipt | bool:
++        """Quote one Reader-proven outgoing message through the visible UI.
++
++        The caller supplies the Reader-proven native target ID separately. The
++        UI cannot expose that ID, so this method requires an exact body match
++        and a visible quote preview before pressing Enter. Reader verifies the
++        resulting native reference ID after the send.
++        """
++        if ChatType(chat_type) is not ChatType.GROUP:
++            raise ValueError('native quote requires a group chat')
++        if not isinstance(target_text,str) or not target_text.strip() or len(target_text)>2000:
++            raise ValueError('invalid quote target text')
++        if not probe_only:self._limiter.validate_text(text)
++        started=time.monotonic()
++        with self._lock:
++            if not probe_only:self._limiter.acquire(chat)
++            self.open_chat(chat,chat_type=chat_type)
++            root=self._ensure_root()
++            controls=self._verified_controls(root,chat)
++            message_list=controls[0] if controls else find_message_list(root,self.profile)
++            editor=controls[1] if controls else find_editor(root,self.profile)
++            if message_list is None or message_list.bounds is None or editor is None or editor.bounds is None:
++                raise ControlNotFound('quote target list or editor unavailable')
++            self._assert_clean_surface(root,expected_chat=chat)
++            if read_accessible_text(editor):
++                raise ControlNotFound('chat editor contains a draft')
++            input_backend=self._ensure_input()
++            target=None
++            for _page in range(60):
++                messages=self.get_visible_messages(enrich_senders=False)
++                matches=[m for m in messages if m.bounds and m.type is MessageType.TEXT
++                    and self._normalized_content(m.content)==self._normalized_content(target_text)]
++                if len(matches)>1:raise ControlNotFound('ambiguous visible quote target')
++                if matches:
++                    target=matches[0];break
++                input_backend.scroll_up(*message_list.bounds.center,steps=6)
++                self._sleep(0.12)
++                if not self._is_chat_open(root,chat):
++                    raise ControlNotFound('chat changed during quote search')
++            if target is None:raise ControlNotFound('verified quote target is not visible in bounded history')
++            if target.bounds.width<180 or target.bounds.height<24:
++                raise ControlNotFound('quote target row is too small to identify its bubble')
++
++            # The parser bounds cover the whole row. Its centre is blank space,
++            # not the bubble. Incoming bubbles start at the left of the row;
++            # outgoing bubbles end at the right.
++            bubble_x=(target.bounds.x+target.bounds.width-90 if target_is_own
++                else target.bounds.x+90)
++            bubble_y=target.bounds.y+target.bounds.height//2
++
++            def popup_windows():
++                tree=subprocess.check_output(['xwininfo','-root','-tree'],text=True,timeout=5)
++                found={}
++                pattern=r'\s+(0x[0-9a-f]+) "wechat": \("wechat" "wechat"\)\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)'
++                for match in re.finditer(pattern,tree):
++                    ident,width,height,x,y=match.groups()
++                    width,height,x,y=map(int,(width,height,x,y))
++                    if 130<=width<=300 and 150<=height<=500:
++                        found[ident]=(x,y,width,height)
++                return found
++
++            def quote_preview():
++                current=self._ensure_root()
++                prefix=self._normalized_content(target_text)[:16]
++                nodes=[node for node,_depth in walk(current,max_depth=20)]
++                previews=[node for node in nodes if node.bounds and
++                    (node.name.startswith('Quote ') or node.name.startswith('引用')) and
++                    prefix in self._normalized_content(node.name)]
++                deletes=[node for node in nodes if node.bounds and
++                    node.name in {'Delete quote','删除引用'}]
++                return previews,deletes
++
++            before=set(popup_windows())
++            input_backend.right_click(bubble_x,bubble_y)
++            self._sleep(max(self.safety.action_delay,0.5))
++            selected=False
++            try:
++                popups=[(ident,geometry) for ident,geometry in popup_windows().items()
++                    if ident not in before and abs(geometry[0]-bubble_x)<300
++                    and abs(geometry[1]-bubble_y)<450]
++                if len(popups)!=1:
++                    raise ControlNotFound('unique native WeChat context menu unavailable')
++                ident,(popup_x,popup_y,popup_width,popup_height)=popups[0]
++                template=Path(__file__).with_name('quote-menu-en.png')
++                if not template.is_file():
++                    raise ControlNotFound('reviewed Quote menu template unavailable')
++                with tempfile.TemporaryDirectory(prefix='bowxt-quote-menu-') as temp:
++                    image=Path(temp)/'menu.png';comparison=Path(temp)/'match.png'
++                    subprocess.run(['import','-window',ident,str(image)],check=True,
++                        timeout=10,capture_output=True)
++                    result=subprocess.run(['compare','-metric','RMSE','-subimage-search',
++                        str(image),str(template),str(comparison)],capture_output=True,
++                        text=True,timeout=10)
++                    location=re.search(r'\(([0-9.]+)\) @ (\d+),(\d+)',result.stderr)
++                    if location is None or float(location[1])>0.005:
++                        raise ControlNotFound('native Quote menu image did not match')
++                    match_x,match_y=map(int,location.groups()[1:])
++                    if not (0<=match_x<=popup_width-108 and
++                        20<=popup_height-(match_y+27)<=100):
++                        raise ControlNotFound('native Quote menu item is outside its verified row')
++                input_backend.click_active_wechat(popup_x+match_x+54,popup_y+match_y+13)
++                selected=True
++                self._sleep(self.safety.action_delay)
++                previews,deletes=quote_preview()
++                if len(previews)!=1 or len(deletes)!=1:
++                    raise ControlNotFound('native quote preview did not match the target')
++                if probe_only:
++                    input_backend.click_active_wechat(*deletes[0].bounds.center)
++                    selected=False
++                    self._sleep(self.safety.action_delay)
++                    previews,_=quote_preview()
++                    if previews or read_accessible_text(find_editor(self._ensure_root(),self.profile)):
++                        self._interaction_blocked=True
++                        raise ControlNotFound('native quote preview did not close cleanly')
++                    return True
++                current_editor=find_editor(self._ensure_root(),self.profile)
++                if current_editor is None or current_editor.bounds is None:
++                    raise ControlNotFound('quote editor unavailable')
++                input_backend.click_active_wechat(*current_editor.bounds.center)
++                with self._ensure_clipboard().text(text):
++                    input_backend.shortcut_active_wechat('ctrl','v')
++                    self._sleep(self.safety.paste_settle_delay)
++                previews,_=quote_preview()
++                if len(previews)!=1:
++                    raise ControlNotFound('native quote preview disappeared before send')
++                input_backend.shortcut_active_wechat('enter')
++                selected=False
++            except Exception:
++                if selected:
++                    try:
++                        _,deletes=quote_preview()
++                        if len(deletes)!=1:raise ControlNotFound('quote close button unavailable')
++                        input_backend.click_active_wechat(*deletes[0].bounds.center)
++                        if read_accessible_text(find_editor(self._ensure_root(),self.profile)):
++                            raise ControlNotFound('quote editor still contains text')
++                    except Exception:
++                        self._interaction_blocked=True
++                else:
++                    try:
++                        input_backend.click_active_wechat(root.bounds.x+root.bounds.width//2,
++                            root.bounds.y+55)
++                    except Exception:self._interaction_blocked=True
++                raise
++            sent_at=datetime.now().astimezone()
++            self._known_outgoing.append((chat,text,time.monotonic()+120.0))
++            return SendReceipt(chat=chat,content=text,sent_at=sent_at,verified=False,
++                timings={'total_s':time.monotonic()-started})
++
+     def send_text(
+         self,
+         chat: str,
+--- a/src/bowxt/input.py
++++ b/src/bowxt/input.py
+@@ -20,6 +20,12 @@
+     def click(
+         self, x: int, y: int, *, count: int = 1, allow_wechat_window_change: bool = False
+     ) -> None: ...
++
++    def right_click(self, x: int, y: int) -> None: ...
++
++    def click_active_wechat(self, x: int, y: int) -> None: ...
++
++    def scroll_up(self, x: int, y: int, *, steps: int = 4) -> None: ...
+ 
+     def shortcut(self, *keys: str) -> None: ...
+ 
+@@ -578,6 +584,47 @@
+             self.xtst.XTestFakeKeyEvent(self.display, code, 0, 0)
+         self.x11.XFlush(self.display)
+         time.sleep(self.event_delay)
++
++    def _checked_pointer(self, x: int, y: int, *, active_only: bool = False) -> None:
++        if active_only:
++            if not self.is_active_wechat_window():
++                raise ControlNotFound('the active window is not WeChat')
++        else:
++            self.focus_wechat()
++        logical_x, logical_y = int(x), int(y)
++        event_x, event_y = self._to_x11_point(logical_x, logical_y)
++        expected_x, expected_y = self._expected_physical_point(logical_x, logical_y)
++        self.xtst.XTestFakeMotionEvent(self.display, -1, event_x, event_y, 0)
++        self.x11.XFlush(self.display)
++        time.sleep(self.event_delay)
++        pointer_x, pointer_y = self._pointer_position()
++        if abs(pointer_x-expected_x)>3 or abs(pointer_y-expected_y)>3:
++            raise ControlNotFound('pointer geometry changed; quote action cancelled')
++        if not self.is_active_wechat_window():
++            raise ControlNotFound('WeChat lost focus; quote action cancelled')
++
++    def _button(self, button: int) -> None:
++        self.xtst.XTestFakeButtonEvent(self.display, button, 1, 0)
++        self.xtst.XTestFakeButtonEvent(self.display, button, 0, 0)
++        self.x11.XFlush(self.display)
++        time.sleep(self.event_delay)
++
++    def right_click(self, x: int, y: int) -> None:
++        self._checked_pointer(x,y)
++        self._button(3)
++        if not self.is_active_wechat_window():
++            raise ControlNotFound('quote menu did not remain in WeChat')
++
++    def click_active_wechat(self, x: int, y: int) -> None:
++        self._checked_pointer(x,y,active_only=True)
++        self._button(1)
++        if not self.is_active_wechat_window():
++            raise ControlNotFound('quote action left WeChat')
++
++    def scroll_up(self, x: int, y: int, *, steps: int = 4) -> None:
++        if not 1<=steps<=8:raise ValueError('invalid scroll steps')
++        self._checked_pointer(x,y)
++        for _ in range(steps):self._button(4)
+ 
+     def press(self, key: str) -> None:
+         self.shortcut(key)
+--- a/src/bowxt/service.py
++++ b/src/bowxt/service.py
+@@ -4,6 +4,7 @@
+ import json
+ from pathlib import Path
+ import queue
++import re
+ import threading
+ import time
+ import uuid
+@@ -61,6 +62,8 @@
+     text: str
+     mentions: tuple[str, ...]
+     pending_seq: int
++    quote_target_text: str | None = None
++    quote_server_id: str | None = None
+     queued_at: float = field(default_factory=time.monotonic)
+     completed: threading.Event = field(default_factory=threading.Event)
+     result: StoredMessage | None = None
+@@ -454,6 +457,20 @@
+         )
+         return pending
+ 
++    def enqueue_native_quote(
++        self, chat_id: int, text: str, *, target_server_id: str,
++        target_text: str, client_id: str,
++    ) -> StoredMessage:
++        if not re.fullmatch(r'[1-9][0-9]{0,20}',str(target_server_id)):
++            raise ValueError('invalid native quote target ID')
++        if not isinstance(target_text,str) or not target_text.strip() or len(target_text)>2000:
++            raise ValueError('invalid native quote target text')
++        if self.store.get_chat(int(chat_id)).source == 'simulation':
++            raise ValueError('native quote requires a real WeChat chat')
++        pending,_command=self._enqueue_text(chat_id,text,client_id=client_id,
++            quote_target_text=target_text,quote_server_id=str(target_server_id))
++        return pending
++
+     def _enqueue_text(
+         self,
+         chat_id: int,
+@@ -461,6 +478,8 @@
+         *,
+         mentions: Iterable[str] = (),
+         client_id: str | None = None,
++        quote_target_text: str | None = None,
++        quote_server_id: str | None = None,
+     ) -> tuple[StoredMessage, _SendCommand | None]:
+         if self._paused.is_set():
+             raise ServicePaused("bowxt UI worker is paused")
+@@ -493,7 +512,8 @@
+         )
+         if not created:
+             return pending, None
+-        command = _SendCommand(int(chat_id), text, mention_names, pending.seq)
++        command = _SendCommand(int(chat_id), text, mention_names, pending.seq,
++            quote_target_text=quote_target_text,quote_server_id=quote_server_id)
+         try:
+             self._commands.put_nowait(command)
+         except queue.Full as exc:
+@@ -826,12 +846,18 @@
+             if self.allowed_chat_names is not None and chat.name not in self.allowed_chat_names:
+                 raise PermissionError('Send target is outside the configured allowlist')
+             self._set_status(active_chat=chat.name)
+-            receipt = client.send_text(
+-                chat.name,
+-                command.text,
+-                chat_type=chat.chat_type,
+-                mentions=command.mentions,
+-            )
++            if command.quote_target_text is not None:
++                if chat.chat_type is not ChatType.GROUP or command.mentions:
++                    raise ValueError('native quote requires a group and no mentions')
++                receipt=client.send_native_quote(chat.name,command.quote_target_text,
++                    command.text,chat_type=chat.chat_type)
++            else:
++                receipt = client.send_text(
++                    chat.name,
++                    command.text,
++                    chat_type=chat.chat_type,
++                    mentions=command.mentions,
++                )
+             timings = {
+                 "queue_wait_s": max(0.0, worker_started - command.queued_at),
+                 **{key: round(float(value), 3) for key, value in receipt.timings.items()},
+--- a/src/bowxt/web.py
++++ b/src/bowxt/web.py
+@@ -399,6 +399,21 @@
+                 )
+                 self._json(HTTPStatus.ACCEPTED, {"message": message.as_dict()})
+                 return
++            quote_match = re.fullmatch(r"/api/chats/(\d+)/native-quotes", parsed.path)
++            if quote_match:
++                self._require_chat_permission(int(quote_match.group(1)), "write")
++                if set(body)-{'text','target_server_id','target_text','client_id'}:
++                    raise ValueError('unexpected native quote fields')
++                if not isinstance(body.get('text'),str) or not isinstance(body.get('target_text'),str):
++                    raise ValueError('native quote text must be strings')
++                if not isinstance(body.get('client_id'),str) or not body['client_id']:
++                    raise ValueError('native quote requires a client ID')
++                message=self.server.service.enqueue_native_quote(
++                    int(quote_match.group(1)),body['text'],
++                    target_server_id=body.get('target_server_id'),
++                    target_text=body['target_text'],client_id=body['client_id'])
++                self._json(HTTPStatus.ACCEPTED,{'message':message.as_dict()})
++                return
+             claim_match = re.fullmatch(r"/api/agents/([^/]+)/claim", parsed.path)
+             if claim_match:
+                 chat_ids = body.get("chat_ids", [])

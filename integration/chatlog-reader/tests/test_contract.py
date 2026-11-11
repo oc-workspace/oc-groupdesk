@@ -39,6 +39,25 @@ class CursorTests(unittest.TestCase):
         agent.request=self.source.request
         return agent
     def prepare(self):self.agent.claim(chat_ids=[1])
+    def test_summary_command_cursor_starts_at_tail_and_requires_ack(self):
+        self.source.rows=[{**row(1),'content':'/generate-summary'}]
+        self.assertEqual(self.agent.summary_command_page(1),(None,[]))
+        self.source.rows.append({**row(2),'content':'/generate-summary 截止目前'})
+        epoch,rows=self.agent.summary_command_page(1)
+        self.assertEqual([r['seq'] for r in rows],[2])
+        self.assertEqual([r['seq'] for r in self.agent.summary_command_page(1)[1]],[2])
+        self.agent.ack_summary_command(1,epoch,2)
+        self.assertEqual(self.agent.summary_command_page(1),(epoch,[]))
+    def test_quote_target_requires_unique_own_text_in_same_group(self):
+        store=Store(Path(self.tmp.name)/'quotes.db','synthetic',[{'chat_id':1,'name':'A'},{'chat_id':2,'name':'B'}])
+        def make(key,chat,server,content,own=1):return {'native_key':key,'chat_id':chat,'sender_id':'bot' if own else 'member','sender':None,'content':content,'source_at':100,'observed_at':101,'is_self':own,'msg_type':1,'server_id':server,'is_summary':0}
+        store.ingest('shard',1,[make('a',1,'101','Unique summary')],1)
+        self.assertEqual(store.quote_target(1,'101')['unique_text'],True)
+        self.assertIsNone(store.quote_target(2,'101'))
+        store.ingest('shard',1,[make('b',1,'102','Unique summary')],2)
+        self.assertEqual(store.quote_target(1,'101')['unique_text'],False)
+        store.ingest('shard',1,[make('c',1,'103','Other text',0)],3)
+        self.assertIsNone(store.quote_target(1,'103'))
     def test_initial_history_is_not_replayed(self):
         self.source.rows=[row(1),row(2)]
         self.assertEqual(self.agent.claim(chat_ids=[1]),[])

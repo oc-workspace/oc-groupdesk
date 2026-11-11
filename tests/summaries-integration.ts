@@ -45,7 +45,12 @@ test('preview may be edited and published once; parts are sequential and reserve
  const c=(await claim('delivery')).data.job;assert.equal(c.id,id);assert(c.parts[0].body.includes('人工修订'));assert(/按采集时间|capture time/.test(c.parts[0].body));const body={token:c.token,ordinal:0,action:'reserve'};
  const r=await req('/runtime/summaries/jobs/'+id+'/part','POST',body,true);assert.equal(r.data.send,true);assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',body,true)).data.send,false);
  assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',{...body,token:randomUUID()},true)).status,403);
- assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',{...body,action:'sent'},true)).status,200);assert.equal((await job(id)).status,'sent');assert.equal((await claim('delivery')).data.job,null);
+ const proof={epoch:'a'.repeat(32),seq:11,server_id:'123456789',confirmed_at:new Date().toISOString()};
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',{...body,action:'sent'},true)).status,400);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',{...body,action:'sent',proof},true)).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/part','POST',{...body,action:'sent',proof:{...proof,server_id:'123456788'}},true)).status,409);
+ assert.equal((await pool.query('SELECT wechat_server_id,source_epoch,source_seq FROM summary_parts WHERE job_id=$1 AND ordinal=0',[id])).rows[0].wechat_server_id,proof.server_id);
+ assert.equal((await job(id)).status,'sent');assert.equal((await claim('delivery')).data.job,null);
 });
 test('direct generate-and-publish enters delivery queue without exposing private key',async()=>{const id=await create(a,true);await source(id);await processSummary(caller);const j=await job(id);assert.equal(j.status,'delivery_ready');const list=JSON.stringify((await req('/summaries')).data);assert(!list.includes('synthetic-summary-key-only'));assert(!list.includes('key_ciphertext'));await req('/summaries/jobs/'+id+'/cancel','POST',{});});
 test('source errors never invoke a model; cancelled generation cannot be resurrected',async()=>{
@@ -75,13 +80,46 @@ test('model input separates original display times from capture-only rows and re
 test('a group revision change blocks publication even for a prepared report',async()=>{const id=await create();await source(id);await processSummary(caller);await pool.query('UPDATE groups SET revision=revision+1 WHERE id=$1',[a.id]);assert.equal((await req('/summaries/jobs/'+id+'/publish','POST',{report})).status,409);await req('/summaries/jobs/'+id+'/cancel','POST',{});});
 
 test('database provenance survives generation and is exposed to administrators',async()=>{
- const id=await create();await source(id,'wechat_database');assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');await processSummary(caller);assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');assert(!(await job(id)).source.messages);
+ const g=await freshSummaryGroup(),id=await create(g);await source(id,'wechat_database',g);assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');await processSummary(caller);assert.equal((await job(id)).source.origin,'wechat-database-chatlog-keeper');assert(!(await job(id)).source.messages);
  const list=(await req('/summaries')).data.jobs.find((j:any)=>j.id===id);assert.equal(list.source_origin,'wechat-database-chatlog-keeper');await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });
 
 async function freshSummaryGroup(){
  const id=randomUUID();const g=(await pool.query("INSERT INTO groups(id,name,enabled,external_id,model_routes) SELECT $1,'Synthetic batching group',true,$2,model_routes FROM groups WHERE id=$3 RETURNING *",[id,'batch-'+id,a.id])).rows[0];await save(g,{model_route:summaryModel});return g;
 }
+test('complete Reader data is reused for the same window and a child window, then expires after seven days',async()=>{
+ const g=await freshSummaryGroup(),first=await create(g),c=(await claim('source',g)).data.job;
+ const start=new Date(c.start).getTime(),at=(minutes:number)=>new Date(start+minutes*60000).toISOString();
+ const messages=[1,2,12].map((minute,i)=>({seq:i+1,sender:'Synthetic member',text:'Synthetic message '+minute,at:at(minute),time_kind:'original'}));
+ const pending=await create(g);assert.equal((await job(pending)).status,'waiting_source');
+ const plan={epoch:'a'.repeat(32),through:3,count:messages.length,text_chars:messages.reduce((n,m)=>n+Array.from(m.text).length,0),max_text_chars:Math.max(...messages.map(m=>Array.from(m.text).length)),page_limit:200,planned_batches:1};
+ assert.equal((await req('/runtime/summaries/jobs/'+first+'/source-plan','POST',{token:c.token,source_kind:'wechat_database',plan},true)).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+first+'/source-batch','POST',{token:c.token,ordinal:0,read_batches:1,messages},true)).status,200);
+ assert.equal((await req('/runtime/summaries/jobs/'+first+'/source-complete','POST',{token:c.token,batches:1,read_batches:1},true)).status,200);
+ assert.equal((await pool.query('SELECT count(*)::int n FROM summary_source_cache WHERE group_id=$1',[g.id])).rows[0].n,1);
+ assert.equal((await claim('source',g)).data.job,null);assert.equal((await job(pending)).progress.cache_hit,true);
+ await req('/summaries/jobs/'+first+'/cancel','POST',{});
+ const same=await create(g);assert.equal((await job(same)).status,'queued');assert.equal((await job(same)).progress.cache_hit,true);
+ assert.deepEqual((await job(same)).source.messages.map((m:any)=>m.seq),[1,2,3]);
+ const day=new Date(start+8*3600000).toISOString().slice(0,10);
+ const childRequest=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'custom',start:day+'T00:00',end:day+'T00:10'},publish:false,request_id:randomUUID()});
+ assert.equal(childRequest.status,202,JSON.stringify(childRequest.data));const child=await job(childRequest.data.id);
+ assert.equal(child.status,'queued');assert.equal(child.progress.cache_hit,true);assert.deepEqual(child.source.messages.map((m:any)=>m.seq),[1,2]);assert.equal(child.source.stats.count,2);
+ const emptyRequest=await req('/summaries/jobs','POST',{group_id:g.id,window:{kind:'custom',start:day+'T00:30',end:day+'T00:40'},publish:false,request_id:randomUUID()});
+ assert.equal(emptyRequest.status,202);const empty=await job(emptyRequest.data.id);assert.equal(empty.status,'failed');assert.equal(empty.progress.cache_hit,true);
+ const other=await freshSummaryGroup(),otherJob=await create(other);assert.equal((await job(otherJob)).status,'waiting_source');
+ await pool.query("UPDATE summary_source_cache SET fetched_at=now()-interval '8 days',expires_at=now()-interval '1 second' WHERE group_id=$1",[g.id]);
+ const afterExpiry=await create(g);assert.equal((await job(afterExpiry)).status,'waiting_source');await tick();
+ assert.equal((await pool.query('SELECT count(*)::int n FROM summary_source_cache WHERE group_id=$1',[g.id])).rows[0].n,0);
+ for(const id of [pending,same,child.id,otherJob,afterExpiry])await req('/summaries/jobs/'+id+'/cancel','POST',{});
+});
+test('unfinished Reader batches never become reusable source data',async()=>{
+ const g=await freshSummaryGroup(),{id,c,rows}=await preflight(g,syntheticRows(2));
+ assert.equal((await req('/runtime/summaries/jobs/'+id+'/source-batch','POST',{token:c.token,ordinal:0,read_batches:1,messages:rows},true)).status,200);
+ const second=await create(g);assert.equal((await job(second)).status,'waiting_source');
+ assert.equal((await pool.query('SELECT count(*)::int n FROM summary_source_cache WHERE group_id=$1',[g.id])).rows[0].n,0);
+ await req('/summaries/jobs/'+id+'/cancel','POST',{});await req('/summaries/jobs/'+second+'/cancel','POST',{});
+});
 async function preflight(g:any,messages:any[]){
  const id=await create(g),c=(await claim('source',g)).data.job;
  const rows=messages.map(m=>({...m,at:new Date(new Date(c.start).getTime()+m.seq*1000).toISOString()}));
@@ -124,6 +162,7 @@ test('large materials use complete chronological chunks then one combined report
  const x=await prepare();let maps=0,finals=0;const observed=new Set<number>();
  await processSummary(async(_c,_m,system,input)=>{const data=JSON.parse(input);assert(input.length<=24000);if(data.messages){maps++;for(const m of data.messages)observed.add(m[0]);return {choices:[{message:{content:'合成中间归纳：相同主题的讨论仍在继续，后续结论需要与其他分段一起核对。'}}]};}finals++;assert.match(system,/跨上午下午/);assert(data.notes.length===maps);return caller(_c,_m,system,input);});
  assert(maps>1);assert.equal(finals,1);assert.equal(observed.size,250);assert.equal((await job(x.id)).status,'preview');
+ await pool.query('DELETE FROM summary_source_cache WHERE group_id=$1',[g.id]);
  const y=await prepare();let calls=0;await processSummary(async()=>{if(++calls===2)throw Error('synthetic map failure');return {choices:[{message:{content:'合成中间归纳：讨论仍需综合后续内容判断，不应直接发布本段。'}}]};});
  assert.equal((await job(y.id)).status,'failed');assert.equal((await job(y.id)).report,null);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[y.id])).rowCount,0);
 });
@@ -225,9 +264,46 @@ test('all five versions use full writing rules and generate complete previews wi
  }
 });
 test('invalid format fails preview and direct publishing without parts or paid retries',async()=>{
+ await new Promise<void>(r=>server.close(()=>r()));server=createServer(createApp());await new Promise<void>(r=>server.listen(0,'0.0.0.0',r));url='http://127.0.0.1:'+(server.address() as any).port;
  const g=await freshSummaryGroup();await save(g,{enabled:true,template:'news'});
  for(const publish of [false,true]){const id=await create(g,publish);await source(id,'ui_archive',g);let calls=0;await processSummary(async()=>{calls++;return {choices:[{message:{content:'一、整体评价\n只有简短概括，没有必需的话题和高光模块。'}}]};});const j=await job(id);assert.equal(j.status,'failed');assert.match(j.error,/格式不完整/);assert.equal(j.report,null);assert.equal(calls,1);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);}
 });
+test('group command records its member, deduplicates the window, and returns a native quote anchor',async()=>{
+ const g=await freshSummaryGroup(),at=new Date().toISOString();await save(g,{enabled:true});
+ const command={external_id:g.external_id,epoch:'b'.repeat(32),seq:100,server_id:'900100',sender_id:'wxid_synthetic_member',sender_name:'Synthetic member',source_at:at,text:'/generate-summary'};
+ assert.equal((await req('/runtime/summaries/command','POST',command,true)).status,409);
+ await save(g,{group_command_enabled:true});
+ const first=await req('/runtime/summaries/command','POST',command,true);
+ assert.equal(first.status,200,JSON.stringify(first.data));assert.equal(first.data.state,'in_progress');
+ const id=first.data.job_id,j=await job(id);
+ assert.equal(j.trigger_kind,'group_command');assert.equal(j.trigger_actor_id,command.sender_id);assert.equal(j.trigger_mode,'previous_day');
+ assert.equal((await req('/runtime/summaries/command','POST',command,true)).data.state,'already_processed');
+ assert.equal((await req('/runtime/summaries/command','POST',{...command,seq:101,server_id:'900101'},true)).data.job_id,id);
+ await source(id,'wechat_database',g);await processSummary(caller);
+ const claimed=(await claim('delivery',g)).data.job;
+ for(const part of claimed.parts){
+  const path='/runtime/summaries/jobs/'+id+'/part';
+  const body={token:claimed.token,ordinal:part.ordinal};
+  assert.equal((await req(path,'POST',{...body,action:'reserve'},true)).status,200);
+  assert.equal((await req(path,'POST',{...body,action:'sent',proof:{epoch:'c'.repeat(32),seq:part.ordinal+1,server_id:String(900200+part.ordinal),confirmed_at:new Date().toISOString()}},true)).status,200);
+ }
+ const again=await req('/runtime/summaries/command','POST',{...command,seq:102,server_id:'900102'},true);
+ assert.equal(again.data.state,'already_sent');assert.equal(again.data.server_id,'900200');assert.equal(again.data.anchor_text,claimed.parts[0].body);
+ const listed=(await req('/summaries')).data.jobs.find((row:any)=>row.id===id);
+ assert.equal(listed.trigger_actor_name,'Synthetic member');assert.equal(listed.trigger_kind,'group_command');
+});
+
+test('today command freezes its first cutoff and later commands reuse it',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true,group_command_enabled:true});
+ const command={external_id:g.external_id,epoch:'d'.repeat(32),seq:201,server_id:'901201',sender_id:'wxid_today',sender_name:'Today member',source_at:new Date(Date.now()-120000).toISOString(),text:'/generate-summary 截止目前'};
+ const first=await req('/runtime/summaries/command','POST',command,true);
+ assert.equal(first.status,200);const cutoff=first.data.window_end;
+ const next=await req('/runtime/summaries/command','POST',{...command,seq:202,server_id:'901202',source_at:new Date().toISOString()},true);
+ assert.equal(next.data.job_id,first.data.job_id);assert.equal(next.data.window_end,cutoff);
+ assert.equal((await job(first.data.job_id)).trigger_mode,'today');
+ await req('/summaries/jobs/'+first.data.job_id+'/cancel','POST',{});
+});
+
 test('edited previews are revalidated; missing fields preserve the draft and model-made fourth chapter is discarded',async()=>{
  const g=await freshSummaryGroup();await save(g,{enabled:true,template:'entertainment'});const id=await create(g);await source(id,'ui_archive',g);await processSummary(caller);const before=await job(id);
  const bad=await req('/summaries/jobs/'+id+'/publish','POST',{report:report.replace('**今日高光时刻**：两位成员共同细化了验证方法。','')});assert.equal(bad.status,400);assert.deepEqual(await job(id),before);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);

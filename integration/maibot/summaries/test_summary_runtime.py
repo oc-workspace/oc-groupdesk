@@ -28,7 +28,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
  def setUp(self):
   self.calls=[];self.sent=[];self.reserved=set();self.p={'enabled':True,'valid_until':time.time()+75,'external_id':'synthetic','revision':7,'policy':{'language':{'mode':'follow','allowed':[]}}}
   self.chat=N(id=1);self.bridge=N(control=lambda:{'enabled':True,'send_enabled':True},chats={1:self.chat},policy=N(cfg={'managed_groups':{'1':self.p}}),health={'verified_sends':0},send_lock=asyncio.Lock())
-  self.bridge.agent=N(get_history=lambda *a,**kw:[message()],send_text=self.send,wait_delivery=lambda *a,**kw:N(seq=10,delivery_status='sent'))
+  self.proof={'epoch':'a'*32,'seq':10,'server_id':'123','confirmed_at':datetime.now(timezone.utc).isoformat()}
+  self.bridge.agent=N(get_history=lambda *a,**kw:[message()],send_text=self.send,wait_delivery=lambda *a,**kw:N(seq=10,delivery_status='sent'),confirmed_send_reference=lambda *a:self.proof)
   self.bridge.ledger=N(reserve=self.reserve,finish=lambda *a:None)
   self.job={'id':'synthetic-job','token':'synthetic-token','external_id':'synthetic','group_revision':7,'start':START.isoformat(),'end':END.isoformat(),'parts':[{'ordinal':0,'body':'A short synthetic summary.'}]}
  def reserve(self,key):
@@ -75,7 +76,11 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
   self.assertFalse(any(path.endswith('/source-complete') for path,_ in self.calls));self.assertEqual(self.calls[-1][1]['error'],'source_unavailable');self.assertFalse(self.sent)
  async def test_valid_explicit_delivery_is_reserved_and_confirmed_once(self):
   with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):await s.deliver(self.bridge,self.chat,self.job)
-  self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'sent');self.assertTrue(self.sent[0][1]['client_id'].startswith('groupdesk-summary-'))
+  self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'sent');self.assertEqual(self.calls[-1][1]['proof'],self.proof);self.assertTrue(self.sent[0][1]['client_id'].startswith('groupdesk-summary-'))
+ async def test_ui_sent_without_native_id_remains_uncertain_and_is_not_retried(self):
+  self.bridge.agent.confirmed_send_reference=lambda *a:None
+  with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):await s.deliver(self.bridge,self.chat,self.job)
+  self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'uncertain')
  async def test_duplicate_or_uncertain_local_reservation_never_replays_send(self):
   self.reserve('summary-synthetic-job-0')
   with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):
@@ -101,4 +106,26 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
    return self.api(path,body)
   with patch.object(s.gd,'api',side_effect=api),patch.object(s.gd,'check_remote_revision',return_value=True),patch.object(s.asyncio,'sleep',return_value=None):await s.deliver(self.bridge,self.chat,self.job)
   self.assertEqual(len(self.sent),1);self.assertEqual(failures,1)
+ async def test_exact_member_command_is_forwarded_once_and_quoted_reply_is_verified(self):
+  at=time.time();rows=[{'seq':1,'chat_id':1,'is_self':0,'msg_type':49,'sender_id':'member','server_id':'11','content':'/generate-summary','source_at':at},
+   {'seq':2,'chat_id':1,'is_self':0,'msg_type':1,'sender_id':'member','sender':'Alice','server_id':'12','content':'/generate-summary','source_at':at}]
+  acked=[];quotes=[]
+  self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
+  self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
+  self.bridge.agent.send_native_quote=lambda *a,**k:quotes.append((a,k)) or N(seq=50)
+  self.bridge.agent.wait_delivery=lambda *a,**k:N(seq=50,delivery_status='unverified')
+  self.bridge.agent.confirmed_native_quote=lambda receipt,target:{'seq':51,'server_id':'52'}
+  with patch.object(s.gd,'api',return_value={'state':'already_sent','server_id':'123','anchor_text':'Summary part one'}):
+   await s.commands(self.bridge,self.chat,self.p)
+  self.assertEqual(acked,[1,2]);self.assertEqual(len(quotes),1)
+  self.assertEqual(quotes[0][0][1],'123')
+  self.assertEqual(quotes[0][1]['client_id'],'groupdesk-summary-command-quote-'+'a'*32+'-2')
+ async def test_embedded_and_self_commands_do_not_execute(self):
+  at=time.time();rows=[{'seq':1,'is_self':1,'msg_type':1,'sender_id':'bot','server_id':'11','content':'/generate-summary','source_at':at},
+   {'seq':2,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'12','content':'Please run /generate-summary','source_at':at}]
+  acked=[];self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
+  self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
+  with patch.object(s.gd,'api',side_effect=AssertionError('must not call GroupDesk')):
+   await s.commands(self.bridge,self.chat,self.p)
+  self.assertEqual(acked,[1,2])
 if __name__=='__main__':unittest.main()

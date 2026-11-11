@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
+import re
 from pathlib import Path
 import signal
 import threading
@@ -37,6 +38,14 @@ class Handler(BaseHTTPRequestHandler):
             if target.path == '/v1/status':
                 if getattr(self.server,'monitor',None):status['monitor']=self.server.monitor.snapshot()
                 self.reply(200 if status['ok'] else 503,status);return
+            if target.path == '/v1/reference':
+                query=parse_qs(target.query,strict_parsing=True)
+                if set(query)!={'chat','server_id'} or any(len(v)!=1 for v in query.values()):raise ValueError('Invalid reference query')
+                chat=int(query['chat'][0]);server_id=query['server_id'][0]
+                if not re.fullmatch(r'[1-9][0-9]{0,20}',server_id):raise ValueError('Invalid reference ID')
+                if chat not in self.server.engine.store.allowed:
+                    self.reply(404,{'error':'not_found'});return
+                self.reply(200,self.server.engine.quote_target(chat,server_id));return
             history=target.path in {'/v1/history','/v1/history/stats'}
             if target.path not in {'/v1/stream','/v1/history','/v1/history/stats'}:
                 self.reply(404, {'error':'not_found'});return

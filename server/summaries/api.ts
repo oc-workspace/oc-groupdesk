@@ -10,11 +10,13 @@ import {summaryConfig,scheduleSchema,windowSchema,nextOccurrence,resolveWindow} 
 import {settings,group,validateConfig,enqueue,valid} from './core.js';
 import {prepareParts,sourceStats} from './generation.js';
 import {registerSourceBatches,sourceErrors} from './source-batches.js';
+import {queueCachedSource,readCachedSource,saveReaderSource} from './source-cache.js';
+import {registerSummaryCommands} from './commands.js';
 const uuid=(v:unknown)=>z.uuid().parse(v);
 export function registerSummaryAdmin(app:express.Express){
  app.get('/api/summaries',async(_req,res)=>{
   const groups=(await pool.query('SELECT id,name FROM groups WHERE deleted_at IS NULL ORDER BY name')).rows;
-  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows.map(t=>({...t,instructions:withSummaryMemberRules(t.instructions)})),schedules:(await pool.query('SELECT * FROM summary_schedules WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=summary_schedules.group_id AND g.deleted_at IS NULL) ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,g.name group_name FROM summary_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
+  res.json({groups:await Promise.all(groups.map(async g=>({...g,...await settings(g.id)}))),templates:(await pool.query('SELECT * FROM summary_templates ORDER BY slug')).rows.map(t=>({...t,instructions:withSummaryMemberRules(t.instructions)})),schedules:(await pool.query('SELECT * FROM summary_schedules WHERE EXISTS(SELECT 1 FROM groups g WHERE g.id=summary_schedules.group_id AND g.deleted_at IS NULL) ORDER BY created_at')).rows,jobs:(await pool.query('SELECT j.id,j.group_id,j.status,j.wants_publish,j.window_start,j.window_end,j.report,j.source->\'stats\' stats,COALESCE(j.source->>\'origin\',j.progress->>\'source_origin\') source_origin,j.progress,j.error,j.created_at,j.trigger_kind,j.trigger_mode,j.trigger_actor_id,j.trigger_actor_name,g.name group_name FROM summary_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id ORDER BY j.created_at DESC LIMIT 80')).rows});
  });
  app.put('/api/summaries/groups/:id',async(req,res)=>{
   const id=uuid(req.params.id),b=z.object({revision:z.number().int().min(0),config:summaryConfig}).parse(req.body);
@@ -46,6 +48,7 @@ export function registerSummaryAdmin(app:express.Express){
 async function authorized(req:express.Request,id:string,db:any){const g=await group(id,db);requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(g.external_id),403,'此适配器未授权该群');return g;}
 export function registerSummaryRuntime(app:express.Express){
  registerSourceBatches(app,authorized);
+ registerSummaryCommands(app);
  app.post('/api/runtime/summaries/claim',async(req,res)=>{
   const b=z.object({external_id:z.string().min(1).max(200),kind:z.enum(['source','delivery'])}).parse(req.body);
   const result=await transaction(async db=>{
@@ -53,6 +56,10 @@ export function registerSummaryRuntime(app:express.Express){
    await db.query('UPDATE summary_settings SET last_adapter_seen=now() WHERE group_id=$1',[g.id]);
    const status=b.kind==='source'?'waiting_source':'delivery_ready',j=(await db.query('SELECT * FROM summary_jobs WHERE group_id=$1 AND status=$2 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1',[g.id,status])).rows[0];if(!j)return null;
    try{await valid(j,db,b.kind==='delivery');}catch{await db.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='群或总结配置已变化' WHERE id=$1",[j.id]);return null;}
+   if(b.kind==='source'){
+    const cached=await readCachedSource(db,j);
+    if(cached){await queueCachedSource(db,j.id,cached);await audit('summary','summary.cache_reused',j.id,{cache_id:cached.progress.cache_id},db);return null;}
+   }
    const token=randomUUID();await db.query('UPDATE summary_jobs SET status=$2,lease_until=now()+interval \'2 minutes\',source_token=CASE WHEN $3 THEN $4 ELSE source_token END,delivery_token=CASE WHEN $3 THEN delivery_token ELSE $4 END WHERE id=$1',[j.id,b.kind==='source'?'reading':'delivering',b.kind==='source',token]);
    return {id:j.id,token,external_id:j.external_id,group_revision:j.group_revision,start:j.window_start,end:j.window_end,...(b.kind==='delivery'?{parts:(await db.query('SELECT ordinal,body FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[j.id])).rows}:{})};
   });res.json({job:result});
@@ -63,11 +70,18 @@ export function registerSummaryRuntime(app:express.Express){
    if(b.error){await db.query('DELETE FROM summary_source_batches WHERE job_id=$1',[id]);await db.query("UPDATE summary_jobs SET status='failed',source=NULL,error=$2,finished_at=now() WHERE id=$1",[id,sourceErrors[b.error]]);return;}
    const messages=b.messages||[];requireCondition(messages.length&&new Set(messages.map(m=>m.seq)).size===messages.length,400,'记录为空或包含重复来源ID');requireCondition(messages.every(m=>Date.parse(m.at)>=new Date(j.window_start).getTime()&&Date.parse(m.at)<new Date(j.window_end).getTime()),400,'消息时间超出总结范围');
    requireCondition(JSON.stringify(messages).length<=115000,400,'本时段文字过多，请缩短范围');
-   await db.query("UPDATE summary_jobs SET status='queued',source=$2,lease_until=NULL WHERE id=$1",[id,{messages,stats:sourceStats(messages),origin:b.source_kind==='wechat_database'?'wechat-database-chatlog-keeper':'bot-server-captured',fetched_at:new Date().toISOString()}]);
+   const fetchedAt=new Date().toISOString();
+   if(b.source_kind==='wechat_database')await saveReaderSource(db,j,messages,fetchedAt);
+   await db.query("UPDATE summary_jobs SET status='queued',source=$2,lease_until=NULL WHERE id=$1",[id,{messages,stats:sourceStats(messages),origin:b.source_kind==='wechat_database'?'wechat-database-chatlog-keeper':'bot-server-captured',fetched_at:fetchedAt}]);
   });res.json({ok:true});
  });
  app.post('/api/runtime/summaries/jobs/:id/part',async(req,res)=>{
-  const id=uuid(req.params.id),b=z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.enum(['reserve','sent','failed','uncertain'])}).parse(req.body);
+  const proof=z.object({epoch:z.string().regex(/^[a-f0-9]{32}$/),seq:z.number().int().safe().positive(),server_id:z.string().regex(/^[1-9][0-9]{0,20}$/),confirmed_at:z.string().datetime({offset:true})});
+  const id=uuid(req.params.id),b=z.discriminatedUnion('action',[
+   z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.literal('reserve')}),
+   z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.literal('sent'),proof}),
+   z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.enum(['failed','uncertain'])})
+  ]).parse(req.body);
   const result=await transaction(async db=>{
    const j=(await db.query('SELECT * FROM summary_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(j,404,'任务不存在');await authorized(req,j.group_id,db);requireCondition(j.delivery_token===b.token,403,'发布令牌不符');
    const part=(await db.query('SELECT * FROM summary_parts WHERE job_id=$1 AND ordinal=$2',[id,b.ordinal])).rows[0];requireCondition(part,404,'总结分段不存在');
@@ -77,8 +91,17 @@ export function registerSummaryRuntime(app:express.Express){
     requireCondition(!(await db.query("SELECT 1 FROM summary_parts WHERE job_id=$1 AND ordinal<$2 AND status<>'sent'",[id,b.ordinal])).rowCount,409,'前一段尚未确认');
     await db.query("UPDATE summary_parts SET status='reserved' WHERE job_id=$1 AND ordinal=$2",[id,b.ordinal]);await db.query("UPDATE summary_jobs SET lease_until=now()+interval '2 minutes' WHERE id=$1",[id]);return {send:true,text:part.body};
    }
-   if(part.status===b.action)return {ok:true};requireCondition(part.status==='reserved'&&j.status==='delivering',409,'该分段未预留或已结束');
-   await db.query('UPDATE summary_parts SET status=$3 WHERE job_id=$1 AND ordinal=$2',[id,b.ordinal,b.action]);
+   if(part.status===b.action){
+    if(b.action==='sent')requireCondition(part.source_epoch===b.proof.epoch&&Number(part.source_seq)===b.proof.seq&&part.wechat_server_id===b.proof.server_id,409,'发送确认与已存微信消息不一致');
+    return {ok:true};
+   }
+   requireCondition(part.status==='reserved'&&j.status==='delivering',409,'该分段未预留或已结束');
+   if(b.action==='sent'){
+    requireCondition(Date.parse(b.proof.confirmed_at)>=new Date(j.created_at).getTime()-60000&&Date.parse(b.proof.confirmed_at)<=Date.now()+30000,400,'微信消息确认时间无效');
+    const duplicate=(await db.query('SELECT 1 FROM summary_parts p JOIN summary_jobs sj ON sj.id=p.job_id WHERE sj.group_id=$1 AND p.wechat_server_id=$2 LIMIT 1',[j.group_id,b.proof.server_id])).rowCount;
+    requireCondition(!duplicate,409,'微信消息已关联其他总结分段');
+    await db.query("UPDATE summary_parts SET status='sent',source_epoch=$3,source_seq=$4,wechat_server_id=$5,source_confirmed_at=$6 WHERE job_id=$1 AND ordinal=$2",[id,b.ordinal,b.proof.epoch,b.proof.seq,b.proof.server_id,b.proof.confirmed_at]);
+   }else await db.query('UPDATE summary_parts SET status=$3 WHERE job_id=$1 AND ordinal=$2',[id,b.ordinal,b.action]);
    const remaining=(await db.query("SELECT 1 FROM summary_parts WHERE job_id=$1 AND status<>'sent'",[id])).rowCount;
    if(b.action!=='sent'||!remaining)await db.query('UPDATE summary_jobs SET status=$2,error=$3,finished_at=now() WHERE id=$1',[id,b.action==='sent'?'sent':b.action,b.action==='sent'?null:'发送未能确认，已停止后续分段；请先核实群内记录']);
    return {ok:true};

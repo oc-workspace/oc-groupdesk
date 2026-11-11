@@ -25,6 +25,8 @@ class Sender:
     def send_text(self,chat,text,**kwargs):
         q=Receipt(len(self.sent)+100,chat,text,kwargs['client_id'],datetime.fromtimestamp(self.clock(),timezone.utc).isoformat())
         self.sent.append(q);return q
+    def send_native_quote(self,chat,target_server_id,target_text,text,**kwargs):
+        return self.send_text(chat,text,**kwargs)
     def wait_delivery(self,message,**kwargs):
         if self.error:raise self.error
         return replace(message,**{'delivery_status':self.status,**self.overrides})
@@ -57,6 +59,37 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual((proof['ui_status'],proof['source_seq'],proof['server_id']),('unverified',1,'1'))
         self.assertNotIn('Synthetic reply',str(proof))
         self.assertTrue(all(path=='/v1/stream' for path,_ in self.source.calls))
+    def test_verified_ui_send_needs_independent_reader_id_before_it_can_be_quoted(self):
+        self.sender.status='sent';q=self.send();receipt=self.agent.wait_delivery(q)
+        self.assertIsNone(self.agent.confirmed_send_reference(receipt))
+        self.source.rows=[self.confirmed()];self.now+=3
+        proof=self.agent.confirmed_send_reference(receipt)
+        self.assertEqual((proof['epoch'],proof['seq'],proof['server_id']),(EPOCH,1,'1'))
+        self.assertEqual(self.agent.confirmed_send_reference(receipt),proof)
+    def test_ambiguous_reader_rows_never_yield_a_quote_reference(self):
+        self.sender.status='sent';q=self.send();self.source.rows=[self.confirmed(1),self.confirmed(2)];self.now+=3
+        self.assertIsNone(self.agent.confirmed_send_reference(self.agent.wait_delivery(q)))
+    def test_native_quote_requires_reader_reference_to_exact_target(self):
+        original=self.agent.request
+        self.agent.request=lambda path,query:{'target':{'content':'Original summary','server_id':'103','unique_text':True}} if path=='/v1/reference' else original(path,query)
+        q=self.agent.send_native_quote(1,'103','Original summary','Already summarized',client_id='synthetic-quote')
+        receipt=self.sender.wait_delivery(q)
+        quoted={**self.confirmed(content='Already summarized',msg_type=49),
+            'reference':{'kind':'text_reply','server_id':'103'}}
+        self.source.rows=[quoted];self.now+=3
+        self.assertIsNone(self.agent.confirmed_native_quote(receipt,'104'))
+        self.assertEqual(self.agent.confirmed_native_quote(receipt,'103'),{'seq':1,'server_id':'1'})
+    def test_native_quote_does_not_confirm_a_plain_text_send(self):
+        original=self.agent.request
+        self.agent.request=lambda path,query:{'target':{'content':'Original summary','server_id':'103','unique_text':True}} if path=='/v1/reference' else original(path,query)
+        q=self.agent.send_native_quote(1,'103','Original summary','Already summarized',client_id='synthetic-quote')
+        self.source.rows=[self.confirmed(content='Already summarized')];self.now+=3
+        self.assertIsNone(self.agent.confirmed_native_quote(self.sender.wait_delivery(q),'103'))
+    def test_ambiguous_quote_target_is_rejected_before_ui_send(self):
+        self.agent.request=lambda path,query:{'target':{'content':'Original summary','server_id':'103','unique_text':False}}
+        with self.assertRaises(ReaderUnavailable):
+            self.agent.send_native_quote(1,'103','Original summary','Already summarized',client_id='synthetic-quote')
+        self.assertEqual(self.sender.sent,[])
     def test_missing_pending_server_ack_and_wrong_source_rows_remain_unverified(self):
         cases=[{'is_self':0},{'msg_type':3},{'server_id':None},{'content':'Other reply'},
                {'source_at':NOW-50},{'source_at':NOW+10000},{'observed_at':NOW-50},{'source_at':float('nan')}]

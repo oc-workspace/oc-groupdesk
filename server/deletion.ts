@@ -64,6 +64,7 @@ export async function deleteBotRegistration(id:string,revision:number,confirmati
    await client.query("UPDATE interaction_templates SET status='failed',error='机器人登记已删除',updated_at=now() WHERE status='pending'");
    await client.query("UPDATE group_onboarding_jobs SET status='cancelled',stage='cancelled',error_code='registration_deleted',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE status='queued'");
    await client.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='机器人登记已删除',finished_at=now() WHERE status IN ('waiting_source','queued','preview','delivery_ready')");
+   await client.query('DELETE FROM summary_source_cache');
    await client.query('UPDATE summary_schedules SET enabled=false');
   }));
   await db.query('DELETE FROM managed_bot_adapters WHERE bot_id=$1',[id]);
@@ -86,7 +87,7 @@ export async function groupDeletionPreview(botId:string,id:string){
  const reasons=await groupReasons(g,b);if(Object.values(await workCounts(id)).some(Boolean))reasons.push('本群仍有接入或总结任务正在处理，请完成后再删除。');
  const counts={schedules:(await pool.query('SELECT count(*)::int n FROM summary_schedules WHERE group_id=$1',[id])).rows[0].n,members:(await pool.query('SELECT count(*)::int n FROM memberships WHERE group_id=$1 AND revoked_at IS NULL',[id])).rows[0].n};
  return {kind:'group',id,revision:g.revision,name:g.name,confirmation:g.name,scope:'机器人：'+b.name+' · 微信号：'+b.wechat_id+(g.external_id?' · 群标识：'+g.external_id:''),can_delete:!reasons.length,reasons,counts,
-  effects:['从群管理、群人设配置及总结/互动等正常选择入口移除此群，界面不提供恢复。','停止此群的计划与未开始任务，解除话题、知识库、人设和成员授权的群绑定。','独立话题、知识库、人设、素材、历史积分账目及 API 用量保留，不删除其他群。','不会退出或解散真实微信群，也不会删除微信本地聊天记录。']};
+  effects:['从群管理、群人设配置及总结/互动等正常选择入口移除此群，界面不提供恢复。','停止此群的计划与未开始任务，清理总结来源缓存，解除话题、知识库、人设和成员授权的群绑定。','独立话题、知识库、人设、素材、历史积分账目及 API 用量保留，不删除其他群。','不会退出或解散真实微信群，也不会删除微信本地聊天记录。']};
 }
 export async function deleteGroupConfiguration(botId:string,id:string,revision:number,confirmation:string,actor:string,why:DeletionReason){
  why=deletionReason.parse(why);
@@ -103,6 +104,7 @@ export async function deleteGroupConfiguration(botId:string,id:string,revision:n
    await db.query('DELETE FROM group_onboarding_bindings WHERE group_id=$1',[id]);
    await db.query('UPDATE summary_schedules SET enabled=false WHERE group_id=$1',[id]);
    await db.query("UPDATE summary_jobs SET status='cancelled',source=NULL,error='群聊配置已删除',finished_at=now() WHERE group_id=$1 AND status IN ('waiting_source','queued','preview','delivery_ready')",[id]);
+   await db.query('DELETE FROM summary_source_cache WHERE group_id=$1',[id]);
    await db.query("UPDATE group_interactions SET config=jsonb_set(config,'{enabled}','false') WHERE group_id=$1",[id]);
    await db.query("UPDATE interaction_templates SET status='failed',error='群聊配置已删除',updated_at=now() WHERE group_id=$1 AND status='pending'",[id]);
    await db.query('UPDATE memberships SET revoked_at=COALESCE(revoked_at,now()) WHERE group_id=$1',[id]);
