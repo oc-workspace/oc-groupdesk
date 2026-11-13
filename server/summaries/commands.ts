@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {transaction,audit} from '../db.js';
 import {requireCondition} from '../security.js';
 import {resolveWindow} from '../../shared/summaries.js';
+import {summaryCommandMode,summaryCommandTexts,summaryWindowKind,focusedSummary} from '../../shared/summary-commands.js';
 import {enqueue,group,settings} from './core.js';
 
 const command=z.object({
@@ -14,7 +15,7 @@ const command=z.object({
  sender_id:z.string().trim().min(1).max(200),
  sender_name:z.string().trim().min(1).max(500).nullable(),
  source_at:z.string().datetime({offset:true}),
- text:z.enum(['/generate-summary','/generate-summary 截止目前'])
+ text:z.enum(summaryCommandTexts)
 });
 
 export function registerSummaryCommands(app:express.Express){
@@ -27,18 +28,19 @@ export function registerSummaryCommands(app:express.Express){
    const g=await group(found.id,db);
    requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(g.external_id),403,'此适配器未授权该群');
    const s=await settings(g.id,db);requireCondition(g.enabled&&s.config.enabled&&s.config.group_command_enabled===true,409,'本群未启用群命令总结');
-   const mode=b.text==='/generate-summary'?'previous_day':'today';
-   const bounds=resolveWindow({kind:mode},s.config.timezone,at);
+   const mode=summaryCommandMode(b.text),kind=summaryWindowKind(mode),focus=focusedSummary(mode);
+   const bounds=resolveWindow({kind},s.config.timezone,at);
    const source=(await db.query("SELECT id FROM summary_jobs WHERE group_id=$1 AND trigger_kind='group_command' AND trigger_source_epoch=$2 AND trigger_source_seq=$3",[g.id,b.epoch,b.seq])).rows[0];
    const candidate=source?.id?(await db.query('SELECT * FROM summary_jobs WHERE id=$1',[source.id])).rows[0]:
     (await db.query(`SELECT * FROM summary_jobs WHERE group_id=$1 AND wants_publish AND window_start=$2
       AND ($3='today' OR window_end=$4) AND window_end<=$4
+      AND (CASE WHEN trigger_kind='group_command' THEN (trigger_mode IN ('previous_day_focus','today_focus'))=$5 ELSE NOT $5 END)
       AND status IN ('waiting_source','reading','queued','generating','delivery_ready','delivering','sent','uncertain')
       ORDER BY CASE WHEN status='sent' THEN 0 WHEN status='uncertain' THEN 2 ELSE 1 END,created_at DESC LIMIT 1`,
-      [g.id,bounds.start,mode,bounds.end])).rows[0];
+      [g.id,bounds.start,kind,bounds.end,focus])).rows[0];
    let j=candidate;
    if(!j){
-    const id=await enqueue(db,g.id,{kind:mode},true,randomUUID(),at);
+    const id=await enqueue(db,g.id,{kind},true,randomUUID(),at);
     await db.query("UPDATE summary_jobs SET trigger_kind='group_command',trigger_mode=$2,trigger_actor_id=$3,trigger_actor_name=$4,trigger_source_epoch=$5,trigger_source_seq=$6,trigger_source_server_id=$7 WHERE id=$1",[id,mode,b.sender_id,b.sender_name,b.epoch,b.seq,b.server_id]);
     await audit('group_command','summary.command_queued',id,{group_id:g.id,sender_id:b.sender_id,mode,source_seq:b.seq},db);
     j={id,status:'waiting_source',window_end:bounds.end};

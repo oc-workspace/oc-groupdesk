@@ -42,7 +42,7 @@ class CursorTests(unittest.TestCase):
     def test_summary_command_cursor_starts_at_tail_and_requires_ack(self):
         self.source.rows=[{**row(1),'content':'/generate-summary'}]
         self.assertEqual(self.agent.summary_command_page(1),(None,[]))
-        self.source.rows.append({**row(2),'content':'/generate-summary 截止目前'})
+        self.source.rows.append({**row(2),'content':'/generate-summary today focus'})
         epoch,rows=self.agent.summary_command_page(1)
         self.assertEqual([r['seq'] for r in rows],[2])
         self.assertEqual([r['seq'] for r in self.agent.summary_command_page(1)[1]],[2])

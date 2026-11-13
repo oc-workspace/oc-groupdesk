@@ -116,7 +116,7 @@ async def commands(bridge,chat,profile):
     for row in rows:
         seq=row['seq'];content=row.get('content')
         valid=(row.get('is_self')==0 and row.get('msg_type')==1
-            and content in ('/generate-summary','/generate-summary 截止目前')
+            and content in ('/generate-summary','/generate-summary focus','/generate-summary today','/generate-summary today focus')
             and isinstance(row.get('sender_id'),str) and bool(row['sender_id'])
             and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or '')))
         if not valid:
