@@ -131,10 +131,21 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(acked,[1,2])
  async def test_embedded_and_self_commands_do_not_execute(self):
   at=time.time();rows=[{'seq':1,'is_self':1,'msg_type':1,'sender_id':'bot','server_id':'11','content':'/generate-summary','source_at':at},
-   {'seq':2,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'12','content':'Please run /generate-summary','source_at':at}]
+   {'seq':2,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'12','content':'Please run /generate-summary','source_at':at},
+   {'seq':3,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'13','content':'/generate-summary 截止目前','source_at':at}]
   acked=[];self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
   self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
   with patch.object(s.gd,'api',side_effect=AssertionError('must not call GroupDesk')):
    await s.commands(self.bridge,self.chat,self.p)
-  self.assertEqual(acked,[1,2])
+  self.assertEqual(acked,[1,2,3])
+ async def test_all_four_exact_commands_are_forwarded(self):
+  at=time.time();forms=['/generate-summary','/generate-summary focus','/generate-summary today','/generate-summary today focus']
+  rows=[{'seq':i,'is_self':0,'msg_type':1,'sender_id':'member','server_id':str(i),'content':form,'source_at':at,'observed_at':at}
+   for i,form in enumerate(forms,1)]
+  acked=[];self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
+  self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
+  with patch.object(s.gd,'api',return_value={'state':'in_progress'}) as api:
+   await s.commands(self.bridge,self.chat,self.p)
+  self.assertEqual([call.args[1]['text'] for call in api.call_args_list],forms)
+  self.assertEqual(acked,[1,2,3,4])
 if __name__=='__main__':unittest.main()
