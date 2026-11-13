@@ -59,6 +59,10 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual((proof['ui_status'],proof['source_seq'],proof['server_id']),('unverified',1,'1'))
         self.assertNotIn('Synthetic reply',str(proof))
         self.assertTrue(all(path=='/v1/stream' for path,_ in self.source.calls))
+    def test_reader_confirmation_accepts_bounded_wechat_clock_skew(self):
+        q=self.send();self.source.rows=[self.confirmed(source_at=NOW+86,observed_at=NOW+2)];self.now+=3
+        self.assertEqual(self.agent.wait_delivery(q).delivery_status,'sent')
+        self.assertEqual(self.agent.confirmed_send_reference(self.agent.wait_delivery(q))['server_id'],'1')
     def test_verified_ui_send_needs_independent_reader_id_before_it_can_be_quoted(self):
         self.sender.status='sent';q=self.send();receipt=self.agent.wait_delivery(q)
         self.assertIsNone(self.agent.confirmed_send_reference(receipt))
@@ -79,6 +83,14 @@ class DeliveryTests(unittest.TestCase):
         self.source.rows=[quoted];self.now+=3
         self.assertIsNone(self.agent.confirmed_native_quote(receipt,'104'))
         self.assertEqual(self.agent.confirmed_native_quote(receipt,'103'),{'seq':1,'server_id':'1'})
+    def test_native_quote_accepts_bounded_wechat_clock_skew(self):
+        original=self.agent.request
+        self.agent.request=lambda path,query:{'target':{'content':'Original summary','server_id':'103','unique_text':True}} if path=='/v1/reference' else original(path,query)
+        q=self.agent.send_native_quote(1,'103','Original summary','Already summarized',client_id='synthetic-quote-skew')
+        quoted={**self.confirmed(content='Already summarized',msg_type=49,source_at=NOW+86,observed_at=NOW+2),
+            'reference':{'kind':'text_reply','server_id':'103'}}
+        self.source.rows=[quoted];self.now+=3
+        self.assertEqual(self.agent.confirmed_native_quote(self.sender.wait_delivery(q),'103'),{'seq':1,'server_id':'1'})
     def test_native_quote_does_not_confirm_a_plain_text_send(self):
         original=self.agent.request
         self.agent.request=lambda path,query:{'target':{'content':'Original summary','server_id':'103','unique_text':True}} if path=='/v1/reference' else original(path,query)

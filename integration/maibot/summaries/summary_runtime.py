@@ -122,7 +122,10 @@ async def commands(bridge,chat,profile):
         if not valid:
             await asyncio.to_thread(ack,chat.id,epoch,seq);continue
         at=float(row.get('source_at') or 0)
-        if not 0<=time.time()-at<=600:
+        observed=float(row.get('observed_at') or 0)
+        # Reader arrival uses this host's clock; WeChat's native timestamp may
+        # be ahead of it. Keep the native time for the summary window.
+        if not 0<=time.time()-observed<=600 or not 0<=at or abs(at-observed)>180:
             await asyncio.to_thread(ack,chat.id,epoch,seq);continue
         payload={'external_id':profile['external_id'],'epoch':epoch,'seq':seq,
             'server_id':str(row['server_id']),'sender_id':row['sender_id'],

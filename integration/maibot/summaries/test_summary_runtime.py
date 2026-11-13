@@ -107,19 +107,28 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
   with patch.object(s.gd,'api',side_effect=api),patch.object(s.gd,'check_remote_revision',return_value=True),patch.object(s.asyncio,'sleep',return_value=None):await s.deliver(self.bridge,self.chat,self.job)
   self.assertEqual(len(self.sent),1);self.assertEqual(failures,1)
  async def test_exact_member_command_is_forwarded_once_and_quoted_reply_is_verified(self):
-  at=time.time();rows=[{'seq':1,'chat_id':1,'is_self':0,'msg_type':49,'sender_id':'member','server_id':'11','content':'/generate-summary','source_at':at},
-   {'seq':2,'chat_id':1,'is_self':0,'msg_type':1,'sender_id':'member','sender':'Alice','server_id':'12','content':'/generate-summary','source_at':at}]
+  at=time.time();rows=[{'seq':1,'chat_id':1,'is_self':0,'msg_type':49,'sender_id':'member','server_id':'11','content':'/generate-summary','source_at':at,'observed_at':at},
+   {'seq':2,'chat_id':1,'is_self':0,'msg_type':1,'sender_id':'member','sender':'Alice','server_id':'12','content':'/generate-summary','source_at':at+86,'observed_at':at}]
   acked=[];quotes=[]
   self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
   self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
   self.bridge.agent.send_native_quote=lambda *a,**k:quotes.append((a,k)) or N(seq=50)
   self.bridge.agent.wait_delivery=lambda *a,**k:N(seq=50,delivery_status='unverified')
   self.bridge.agent.confirmed_native_quote=lambda receipt,target:{'seq':51,'server_id':'52'}
-  with patch.object(s.gd,'api',return_value={'state':'already_sent','server_id':'123','anchor_text':'Summary part one'}):
+  with patch.object(s.gd,'api',return_value={'state':'already_sent','server_id':'123','anchor_text':'Summary part one'}) as api:
    await s.commands(self.bridge,self.chat,self.p)
   self.assertEqual(acked,[1,2]);self.assertEqual(len(quotes),1)
+  self.assertEqual(api.call_args.args[1]['source_at'],datetime.fromtimestamp(at+86,timezone.utc).isoformat())
   self.assertEqual(quotes[0][0][1],'123')
   self.assertEqual(quotes[0][1]['client_id'],'groupdesk-summary-command-quote-'+'a'*32+'-2')
+ async def test_stale_or_mismatched_reader_arrival_does_not_trigger(self):
+  at=time.time();rows=[{'seq':1,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'11','content':'/generate-summary','source_at':at-700,'observed_at':at-700},
+   {'seq':2,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'12','content':'/generate-summary','source_at':at-700,'observed_at':at}]
+  acked=[];self.bridge.agent.summary_command_page=lambda chat:('a'*32,rows)
+  self.bridge.agent.ack_summary_command=lambda chat,epoch,seq:acked.append(seq)
+  with patch.object(s.gd,'api',side_effect=AssertionError('must not call GroupDesk')):
+   await s.commands(self.bridge,self.chat,self.p)
+  self.assertEqual(acked,[1,2])
  async def test_embedded_and_self_commands_do_not_execute(self):
   at=time.time();rows=[{'seq':1,'is_self':1,'msg_type':1,'sender_id':'bot','server_id':'11','content':'/generate-summary','source_at':at},
    {'seq':2,'is_self':0,'msg_type':1,'sender_id':'member','server_id':'12','content':'Please run /generate-summary','source_at':at}]
