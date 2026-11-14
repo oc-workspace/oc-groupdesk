@@ -100,8 +100,9 @@ class ReaderAgent:
                 if not math.isfinite(at) or not math.isfinite(observed):return None
                 if (type(row.get('is_self')) is int and row['is_self']==1 and row.get('msg_type')==1
                     and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or ''))
-                    and math.ceil(anchor['started'])<=at<=min(self.clock()+2,anchor['started']+180)
+                    and math.ceil(anchor['started'])<=at<=anchor['started']+180
                     and anchor['started']<=observed<=self.clock()+2
+                    and abs(at-observed)<=180
                     and isinstance(row.get('content'),str)
                     and hashlib.sha256(row['content'].strip().encode()).hexdigest()==anchor['text_sha256']):
                     matches.append(row)
@@ -281,7 +282,8 @@ class ReaderAgent:
                             and hashlib.sha256(row['content'].strip().encode()).hexdigest()==anchor['text_sha256']
                             and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or ''))
                             and anchor['started']<=float(row['observed_at'])<=self.clock()+2
-                            and math.ceil(anchor['started'])<=float(row['source_at'])<=self.clock()+2):matches.append(row)
+                            and math.ceil(anchor['started'])<=float(row['source_at'])<=anchor['started']+180
+                            and abs(float(row['source_at'])-float(row['observed_at']))<=180):matches.append(row)
                     next_after=page.get('next_after')
                     if next_after is None or next_after>=upper:break
                     if type(next_after) is not int or not after<next_after<=previous:return None

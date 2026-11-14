@@ -295,13 +295,38 @@ test('group command records its member, deduplicates the window, and returns a n
 
 test('today command freezes its first cutoff and later commands reuse it',async()=>{
  const g=await freshSummaryGroup();await save(g,{enabled:true,group_command_enabled:true});
- const command={external_id:g.external_id,epoch:'d'.repeat(32),seq:201,server_id:'901201',sender_id:'wxid_today',sender_name:'Today member',source_at:new Date(Date.now()-120000).toISOString(),text:'/generate-summary 截止目前'};
+ const command={external_id:g.external_id,epoch:'d'.repeat(32),seq:201,server_id:'901201',sender_id:'wxid_today',sender_name:'Today member',source_at:new Date(Date.now()-120000).toISOString(),text:'/generate-summary today'};
  const first=await req('/runtime/summaries/command','POST',command,true);
  assert.equal(first.status,200);const cutoff=first.data.window_end;
  const next=await req('/runtime/summaries/command','POST',{...command,seq:202,server_id:'901202',source_at:new Date().toISOString()},true);
  assert.equal(next.data.job_id,first.data.job_id);assert.equal(next.data.window_end,cutoff);
- assert.equal((await job(first.data.job_id)).trigger_mode,'legacy_today');
+ assert.equal((await job(first.data.job_id)).trigger_mode,'today');
  await req('/summaries/jobs/'+first.data.job_id+'/cancel','POST',{});
+});
+
+test('focus commands keep their own cutoff, prompt, and published version',async()=>{
+ const g=await freshSummaryGroup();await save(g,{enabled:true,group_command_enabled:true,template:'news'});
+ const base={external_id:g.external_id,epoch:'e'.repeat(32),seq:301,server_id:'902301',sender_id:'wxid_focus',sender_name:'Focus member',source_at:new Date(Date.now()-120000).toISOString()};
+ const focus=await req('/runtime/summaries/command','POST',{...base,text:'/generate-summary today focus'},true);
+ assert.equal(focus.status,200,JSON.stringify(focus.data));
+ const later=await req('/runtime/summaries/command','POST',{...base,seq:302,server_id:'902302',source_at:new Date().toISOString(),text:'/generate-summary today focus'},true);
+ assert.equal(later.data.job_id,focus.data.job_id);assert.equal(later.data.window_end,focus.data.window_end);
+ const normal=await req('/runtime/summaries/command','POST',{...base,seq:303,server_id:'902303',text:'/generate-summary today'},true);
+ assert.notEqual(normal.data.job_id,focus.data.job_id);
+ assert.equal((await job(focus.data.job_id)).trigger_mode,'today_focus');
+ assert.equal((await job(normal.data.job_id)).trigger_mode,'today');
+ await source(focus.data.job_id,'ui_archive',g);
+ await processSummary(async(c,m,system,input)=>{assert(system.includes('【群命令重点版选题】'));assert(system.includes('图形学'));return caller(c,m,system,input);});
+ const parts=(await pool.query('SELECT body FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[focus.data.job_id])).rows.map(x=>x.body).join('\n');
+ assert(parts.includes('重点信息'));assert(!parts.includes('发言排行'));
+ const previous=await req('/runtime/summaries/command','POST',{...base,seq:304,server_id:'902304',text:'/generate-summary focus'},true);
+ const previousNormal=await req('/runtime/summaries/command','POST',{...base,seq:305,server_id:'902305',text:'/generate-summary'},true);
+ assert.equal((await job(previous.data.job_id)).trigger_mode,'previous_day_focus');
+ assert.notEqual(previous.data.job_id,previousNormal.data.job_id);
+ const legacy=await req('/runtime/summaries/command','POST',{...base,seq:306,server_id:'902306',text:'/generate-summary 截止目前'},true);
+ assert.equal(legacy.status,200);
+ assert.equal(legacy.data.job_id,normal.data.job_id);
+ for(const id of [focus.data.job_id,normal.data.job_id,previous.data.job_id,previousNormal.data.job_id])await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });
 
 test('edited previews are revalidated; missing fields preserve the draft and model-made fourth chapter is discarded',async()=>{
