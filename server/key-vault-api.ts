@@ -9,10 +9,14 @@ import {allowed} from '../shared/user-permissions.js';
 import {superAdmin} from './user-access.js';
 import {withBot} from './bot-workspaces.js';
 import {parseCatalog} from './model-catalog.js';
-import {publicKey,limitsSchema,emptyLimits,pricesSchema,features,updateKeyAliases} from './key-vault.js';
+import {publicKey,limitsSchema,emptyLimits,pricesSchema,features,updateKeyAliases,syncAliases} from './key-vault.js';
+import {generationRequest,generationText} from './model-generation.js';
+import {modelTransport,type ModelTransport} from './model-transport.js';
+import {executeKeyCall} from './model-proxy.js';
 const uuid=z.uuid();
 const create=z.object({name:z.string().trim().min(1).max(80),scope:z.enum(['private','site']).default('private'),owner_user_id:uuid.optional(),base_url:z.string().max(300),client_type:z.enum(['openai','openai_responses','gemini']),api_key:z.string().regex(/^[!-~]{8,500}$/)}).strict();
-export function registerKeyVault(app:express.Express){
+const probeInput=z.object({targets:z.array(z.object({key_id:uuid,model_id:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,199}$/)}).strict()).min(1).max(20)}).strict();
+export function registerKeyVault(app:express.Express,transport:ModelTransport=modelTransport){
  app.get('/api/keys',async(req,res)=>{
   const u=req.admin!,admin=u.role==='super_admin';
   const keys=(await controlPool.query("SELECT k.*,a.display_name,a.username,a.deleted_at AS owner_deleted_at FROM managed_model_keys k JOIN admins a ON a.id=k.owner_user_id WHERE ($1 OR k.owner_user_id=$2 OR k.scope='site' AND NOT k.archived) ORDER BY k.created_at",[admin,u.id])).rows.map(k=>({...publicKey(k,u.id),owner_name:(k.display_name||k.username)+(k.owner_deleted_at?'（已删除账号）':'')}));
@@ -43,6 +47,34 @@ export function registerKeyVault(app:express.Express){
  });
  app.post('/api/keys/:id/models',async(req,res)=>{const id=uuid.parse(req.params.id),b=z.object({model_id:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,199}$/),capability:z.enum(['text','image'])}).strict().parse(req.body);await controlTransaction(async db=>{const k=(await db.query('SELECT * FROM managed_model_keys WHERE id=$1 FOR UPDATE',[id])).rows[0];requireCondition(k&&(k.owner_user_id===req.admin!.id&&allowed(req.admin!,'models.manage')||req.admin!.role==='super_admin'),403,'无权维护该 Key');const models=k.models.filter((m:any)=>m.model_id!==b.model_id);models.push({...b,display_name:b.model_id,source:'manual',listed:false});await db.query('UPDATE managed_model_keys SET models=$2 WHERE id=$1',[id,JSON.stringify(models)]);});res.json({ok:true});});
  app.post('/api/keys/:id/catalog',async(req,res)=>{const id=uuid.parse(req.params.id),k=(await controlPool.query('SELECT * FROM managed_model_keys WHERE id=$1',[id])).rows[0];requireCondition(k&&(k.owner_user_id===req.admin!.id&&allowed(req.admin!,'models.manage')||req.admin!.role==='super_admin'),403,'无权查询目录');const parsed=parseCatalog(await fetchCatalog(k.base_url,openControlSecret(k.secret_ciphertext),k.client_type),k.client_type).map(m=>({model_id:m.id,display_name:m.name,capability:m.capability,source:'catalog',listed:true}));const retained=k.models.filter((m:any)=>!parsed.some(n=>n.model_id===m.model_id));requireCondition((await controlPool.query('UPDATE managed_model_keys SET models=$2,catalog_synced_at=now(),catalog_error=NULL WHERE id=$1 AND revision=$3',[id,JSON.stringify([...parsed,...retained]),k.revision])).rowCount,409,'Key 已更新，请重试');res.json({count:parsed.length});});
+ app.post('/api/keys/probe',async(req,res)=>{
+  requireCondition(allowed(req.admin!,'models.manage'),403,'没有检测模型的权限');
+  const {targets}=probeInput.parse(req.body),unique=new Set(targets.map(t=>t.key_id+'\0'+t.model_id));
+  requireCondition(unique.size===targets.length,400,'请勿重复选择模型');
+  const keys=(await controlPool.query('SELECT * FROM managed_model_keys WHERE id=ANY($1::uuid[])',[[...new Set(targets.map(t=>t.key_id))]])).rows;
+  const byId=new Map<string,any>(keys.map(k=>[k.id,k]));
+  for(const t of targets){const k=byId.get(t.key_id);requireCondition(k?.owner_user_id===req.admin!.id,403,'只能检测自己的 Key');requireCondition(k.enabled&&!k.archived&&!k.secret_purged_at,409,'Key 已停用或归档');requireCondition(k.models.some((m:any)=>m.model_id===t.model_id&&m.capability==='text'),400,'请选择已登记的文字模型');}
+  const bot=(await controlPool.query("SELECT id FROM managed_bots WHERE owner_user_id=$1 AND deleted_at IS NULL AND database_state IN('legacy','ready') ORDER BY created_at,id LIMIT 1",[req.admin!.id])).rows[0];
+  requireCondition(bot,409,'请先创建自己的机器人，再检测模型');
+  await withBot(bot.id,async()=>{await syncAliases();});
+  async function probe(t:(typeof targets)[number]){
+   const k=byId.get(t.key_id),started=Date.now();
+   try{
+    const reply=await withBot(bot.id,async()=>{
+     const alias=(await pool.query('SELECT id FROM model_credentials WHERE vault_key_id=$1 AND enabled',[k.id])).rows[0];
+     requireCondition(alias,409,'此 Key 尚未同步到机器人，请刷新后重试');
+     const {body}=generationRequest(k,t.model_id,'请简短回答。','请回复 OK。',{maxOutputTokens:128});
+     return executeKeyCall(alias.id,t.model_id,{feature:'probe'},body,20000,undefined,transport);
+    });
+    generationText(JSON.parse(reply.text),k.client_type);
+    return {...t,reachable:true,latency_ms:Date.now()-started};
+   }catch(e){const message=e instanceof Error?e.message:'';const safe=/^模型请求失败（HTTP [1-5][0-9]{2}）$|^模型(?:未返回可用内容|连接中断|连接失败或超时|服务地址不可用)$/.test(message);return {...t,reachable:false,latency_ms:Date.now()-started,error:safe?message:'检测失败，请检查模型、Key 额度或接口配置'};}
+  }
+  const results:Awaited<ReturnType<typeof probe>>[]=[];
+  for(let i=0;i<targets.length;i+=3)results.push(...await Promise.all(targets.slice(i,i+3).map(probe)));
+  await audit(req.admin!.username,'key.models_probed',null,{targets:targets.map(t=>({key_id:t.key_id,model_id:t.model_id})),results:results.map(r=>({key_id:r.key_id,model_id:r.model_id,reachable:r.reachable}))},controlPool);
+  res.json({results,checked_at:new Date().toISOString()});
+ });
  app.post('/api/keys/:id/request',async(req,res)=>{
   const id=uuid.parse(req.params.id),u=req.admin!;requireCondition(allowed(u,'models.manage'),403,'没有管理 Key 的权限');const b=z.object({bot_id:uuid,reason:z.string().trim().min(2).max(1000),model_ids:z.array(z.string().max(200)).min(1).max(100),features:z.array(z.enum(features as [string,...string[]])).min(1),requested_limits:limitsSchema}).strict().parse(req.body);
   requireCondition((await controlPool.query("SELECT 1 FROM managed_model_keys WHERE id=$1 AND scope='site' AND enabled AND NOT archived",[id])).rowCount,404,'公用 Key 不可申请');requireCondition((await controlPool.query('SELECT 1 FROM managed_bots WHERE deleted_at IS NULL AND id=$1 AND owner_user_id=$2',[b.bot_id,u.id])).rowCount,403,'请选择自己的机器人');

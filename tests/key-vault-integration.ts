@@ -15,7 +15,7 @@ import {openControlSecret} from '../server/bot-secrets.js';
 import type {ModelTransport} from '../server/model-transport.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw Error('Dedicated test database required');
 let server:Server,base='',admin:any,a:any,b:any,botA='',botB='',privateId='',siteId='',privateAlias='',siteAlias='',group='',grantId='';const bots:string[]=[],secret='synthetic-private-key-123456',siteSecret='synthetic-site-key-654321';let wireCalls=0;
-const transport:ModelTransport=async(url,key,protocol,body,timeout,signal,dispatched)=>{wireCalls++;assert.equal(key,siteSecret);await dispatched?.();return {text:JSON.stringify({choices:[{message:{content:'Synthetic answer'}}],usage:{prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20}}}),contentType:'application/json'};};
+const transport:ModelTransport=async(url,key,protocol,body,timeout,signal,dispatched)=>{wireCalls++;if(body.messages?.[1]?.content==='请回复 OK。'){await dispatched?.();if(key==='synthetic-probe-failure-key')throw Error('模型请求失败（HTTP 503）');assert.equal(key,'synthetic-probe-success-key');return {text:JSON.stringify({choices:[{message:{content:'OK'}}],usage:{prompt_tokens:8,completion_tokens:1}}),contentType:'application/json'};}if(body.input==='请回复 OK。'){await dispatched?.();assert.equal(key,'synthetic-probe-responses-key');return {text:JSON.stringify({output:[{type:'message',content:[{type:'output_text',text:'OK'}]}],usage:{input_tokens:8,output_tokens:1}}),contentType:'application/json'};}assert.equal(key,siteSecret);await dispatched?.();return {text:JSON.stringify({choices:[{message:{content:'Synthetic answer'}}],usage:{prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20}}}),contentType:'application/json'};};
 async function req(path:string,method='GET',body?:any,u=admin,bot?:string){const response=await fetch(base+'/api'+path,{method,headers:{...(u?{Cookie:u.cookie,'X-CSRF-Token':u.csrf}:{}),...(bot?{'X-GroupDesk-Bot':bot}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json().catch(()=>null),response};}
 async function user(name:string){const id=randomUUID(),session=token(),csrf=token();await controlPool.query("INSERT INTO admins(id,username,password_hash,role,permissions) VALUES($1,$2,'!test-only','user',$3)",[id,name,{'models.manage':true,'groups.manage':true}]);await controlPool.query("INSERT INTO sessions VALUES($1,$2,$3,now()+interval '12 hours')",[digest(session),id,csrf]);return {id,cookie:'groupdesk_session='+session,csrf};}
 const limits=()=>({daily_requests:20,monthly_requests:100,daily_tokens:200000,monthly_tokens:1e6,daily_cost:10,monthly_cost:100,concurrency:2});
@@ -55,6 +55,25 @@ test('site key application, admin approval and assigned model choice are separat
  assert.equal((await req('/key-grants','PUT',{...grantBody(),request_id:request.data.id},admin)).status,200);
  const data=(await req('/keys','GET',undefined,a)).data;assert.equal(data.requests.find((x:any)=>x.id===request.data.id).status,'approved');grantId=data.grants.find((g:any)=>g.key_id===siteId).id;
  const overview=await req('/models','GET',undefined,a,botA);assert.equal(overview.status,200);siteAlias=overview.data.credentials.find((c:any)=>c.vault_key_id===siteId).id;assert(siteAlias);assert(!JSON.stringify(overview.data).includes(siteSecret));
+});
+test('owner can probe selected models across keys and see individual failures without exposing secrets',async()=>{
+ const success=await req('/keys','POST',{name:'Chat probe key',base_url:'https://first.example.com/v1',client_type:'openai',api_key:'synthetic-probe-success-key'},a);assert.equal(success.status,201);
+ await req('/keys/'+success.data.id+'/models','POST',{model_id:'synthetic-model',capability:'text'},a);
+ const created=await req('/keys','POST',{name:'Responses probe key',base_url:'https://second.example.com/v1',client_type:'openai_responses',api_key:'synthetic-probe-responses-key'},a);assert.equal(created.status,201);
+ await req('/keys/'+created.data.id+'/models','POST',{model_id:'synthetic-model',capability:'text'},a);
+ const failed=await req('/keys','POST',{name:'Failed probe key',base_url:'https://third.example.com/v1',client_type:'openai',api_key:'synthetic-probe-failure-key'},a);assert.equal(failed.status,201);
+ await req('/keys/'+failed.data.id+'/models','POST',{model_id:'synthetic-model',capability:'text'},a);
+ const targets=[{key_id:success.data.id,model_id:'synthetic-model'},{key_id:created.data.id,model_id:'synthetic-model'},{key_id:failed.data.id,model_id:'synthetic-model'}];
+ assert.equal((await req('/keys/probe','POST',{targets},b)).status,403);
+ assert.equal((await req('/keys/probe','POST',{targets},admin)).status,403);
+ assert.equal((await req('/keys/probe','POST',{targets:[targets[0],targets[0]]},a)).status,400);
+ assert.equal((await req('/keys/probe','POST',{targets:[{key_id:success.data.id,model_id:'missing'}]},a)).status,400);
+ const own=await req('/keys/probe','POST',{targets},a);assert.equal(own.status,200,JSON.stringify(own.data));assert.deepEqual(own.data.results.map((r:any)=>r.reachable),[true,true,false]);assert.match(own.data.results[2].error,/HTTP 503/);
+ const usage=(await req('/key-usage','GET',undefined,a)).data.rows.filter((u:any)=>u.feature==='probe');assert.equal(usage.length,3);assert.deepEqual(usage.map((u:any)=>u.status).sort(),['completed','completed','unknown']);assert(usage.every((u:any)=>u.dispatched));
+ const key=(await req('/keys','GET',undefined,a)).data.keys.find((k:any)=>k.id===success.data.id);
+ assert.equal((await req('/keys/'+key.id,'PUT',{revision:key.revision,name:key.name,enabled:true,archived:false,scope:'private',base_url:key.base_url,client_type:key.client_type,currency:key.currency,prices:{},limits:{...limits(),daily_requests:1,daily_cost:null,monthly_cost:null}},a)).status,200);
+ const before=wireCalls,limited=await req('/keys/probe','POST',{targets:[targets[0]]},a);assert.equal(limited.status,200);assert.equal(limited.data.results[0].reachable,false);assert.equal(wireCalls,before);assert.equal((await req('/key-usage','GET',undefined,a)).data.rows.filter((u:any)=>u.feature==='probe').length,3);
+ assert(!JSON.stringify(own.data).includes(secret));assert(!JSON.stringify(own.data).includes('synthetic-probe-responses-key'));
 });
 test('all paid feature requests create usage; cached tokens and estimates settle without double counting',async()=>{
  await withBot(botA,async()=>{for(const feature of ['chat','summary','persona','topic','onboarding','analysis','interaction'])await executeKeyCall(siteAlias,'synthetic-model',{feature,groupId:group},{model:'synthetic-model',messages:[{role:'user',content:'Synthetic'}],max_tokens:100},1000,undefined,transport);});

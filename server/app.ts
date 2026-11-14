@@ -165,7 +165,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   });
   registerUserAdmin(app);
   registerRuntimeMaintenanceAdmin(app);
-  registerKeyVault(app);
+  registerKeyVault(app,options.modelTransport);
   registerSharedResources(app);
   registerBotPurge(app);
   registerBotAdmin(app,options.installationCaller);

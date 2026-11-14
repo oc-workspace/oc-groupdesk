@@ -1,13 +1,13 @@
 # GroupDesk 项目总览与规划
 
-更新于2026-11-08（Asia/Singapore）。本页统一维护当前能力、模块入口及后续规划；每日过程和部署证据保留在progress/，不将历史进行中记录当作当前状态。
+更新于2026-11-14（Asia/Singapore）。本页统一维护当前能力、模块入口及后续规划；每日过程和部署证据保留在progress/，不将历史进行中记录当作当前状态。
 
 | 功能 | 当前说明 |
 |---|---|
 | 群接入、群标识与配置确认 | [站点新群接入向导](group-onboarding-wizard.md)、[微信群接入](group-onboarding-wizard.md)、[运行接口](runtime-api.md) |
 | 话题库、群话题、AI Prompt助填、讨论深度与回复长度 | [话题策略](topic-policy-guide.md) |
 | 语言、群内称呼、自称、点名与AI披露 | [称呼与身份](bot-group-identity.md)、[话题策略](topic-policy-guide.md) |
-| API Key、私有/公用授权、费用与按群模型选择 | [模型路由](model-routing.md)、[Key治理](api-key-governance.md) |
+| API Key、模型可达性检测、私有/公用授权、费用与按群模型选择 | [模型路由](model-routing.md)、[Key治理](api-key-governance.md) |
 | 用户、GitHub登录、管理员审核、账号删除/原因/独占清理、归属和资源共享 | [用户与权限](users-and-permissions.md) |
 | Persona素材、增量归档、按人提取与人工发布 | [Persona工作室](persona-studio.md) |
 | 公共人设资源浏览、选择导入、来源存档与草稿适配 | [人设资源库](persona-resources.md) |
