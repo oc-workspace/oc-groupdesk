@@ -26,7 +26,7 @@ export async function botPurgePreview(id:string){
  else if(id===legacyBotId){business=await legacyDataPlan(b.owner_user_id);const database=(await controlPool.query('SELECT current_database() name')).rows[0].name;if(b.database_state!=='legacy'||b.db_name!==database||b.db_role!=='gdr_'+legacyBotId.replaceAll('-','')){business.eligible=false;business.blockers.push('旧共用库绑定异常，保留待核对');}}
  else{let message=await botEligible({...b,deleted_at:b.deleted_at||new Date()},b.owner_user_id);if(!message&&await businessConnectionHasRawKey(b.db_name))message='API凭据尚未迁移到独立Key管理，业务资料保留';business={kind:'independent',eligible:!message,blockers:message?[message]:[],binding:{database:b.db_name,role:b.db_role,namespace:b.data_namespace},bytes:null,file_bytes:null};}
  let runtime:any=null,runtime_error='';
- try{const p=await runtimePreview(id,'rococo-root2');const independentBlockers=p.blockers.filter((s:string)=>!s.includes('仅已删除登记'));const selections=[...new Set(p.inventory.resources.filter((r:any)=>r.present&&!r.blocked.length).map((r:any)=>r.kind))] as string[];
+ try{const p=await runtimePreview(id,b.runtime_host_id);const independentBlockers=p.blockers.filter((s:string)=>!s.includes('仅已删除登记'));const selections=[...new Set(p.inventory.resources.filter((r:any)=>r.present&&!r.blocked.length).map((r:any)=>r.kind))] as string[];
   if(selections.includes('deployment')&&!selections.includes('containers'))selections.splice(selections.indexOf('deployment'),1);
   runtime={plan_hash:p.plan_hash,eligible:!independentBlockers.length&&!p.inventory.quarantine&&selections.length>0,blockers:independentBlockers,selection:selections,inventory:p.inventory};if(p.inventory.quarantine)runtime.blockers.push('存在此前暂存，请先在运行环境与备份中完成还原或清理');
  }catch(e){runtime_error=(e as Error).message;}

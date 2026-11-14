@@ -16,7 +16,7 @@ LEGACY='00000000-0000-4000-8000-000000000001'
 SERVICES={'wechat','reader','maibot','wechat-bridge','group-onboarding-agent'}
 CATEGORIES={'wechat':['wechat'],'reader':['reader'],'maibot':['maibot'],'bridge':['bridge','limits'],'identity':['groupdesk','persona','secrets']}
 UNIT_PREFIXES=['groupdesk-bot-wechat-egress','groupdesk-bot-runtime-egress','groupdesk-onboarding-control','groupdesk-onboarding-egress']
-HOST_ROOTS={'rococo-root':[('/opt/docker/backups/groupdesk','backup'),('/opt/persist/groupdesk/backups','backup')], 'rococo-root2':[('/opt/persist/maibot-wechat','legacy'),('/opt/persist/chatlog-reader','legacy'),('/opt/docker/oc-projects/maibot-wechat','legacy')]}
+HOST_ROOTS={'rococo-root':[('/opt/docker/backups/groupdesk','backup'),('/opt/persist/groupdesk/backups','backup')], 'rococo-root2':[('/opt/persist/maibot-wechat','legacy'),('/opt/persist/chatlog-reader','legacy'),('/opt/docker/oc-projects/maibot-wechat','legacy')], 'rpi-groupdesk-01':[('/opt/persist/maibot-wechat','legacy'),('/opt/persist/chatlog-reader','legacy'),('/opt/docker/oc-projects/maibot-wechat','legacy')]}
 
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def digest(v):return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(',',':')).encode()).hexdigest()
@@ -187,7 +187,7 @@ def target(bot_id,all_containers=None):
 
 def inventory(host):
     all_containers=containers();bots=[];legacy=[];warnings=[]
-    if host=='rococo-root2':
+    if host in {'rococo-root2','rpi-groupdesk-01'}:
         ids=set()
         for c in all_containers:
             project=(c.get('labels') or {}).get('com.docker.compose.project','')
@@ -231,7 +231,7 @@ def validate_permit(envelope,job,config,current):
     for k,v in {'job_id':job['id'],'host':config['host'],'action':job['action'],'bot_id':job['bot_id'],'lease_token':job['lease_token'],'fingerprint':current}.items():
         if payload.get(k)!=v:raise ValueError('执行许可与当前任务不匹配')
     if not time.time()<payload['expires']<=time.time()+190:raise ValueError('执行许可已过期')
-    if config['host']!='rococo-root2' or payload['action'] not in {'quarantine','purge','restore'}:raise ValueError('当前服务器只允许盘点')
+    if config['host'] not in {'rococo-root2','rpi-groupdesk-01'} or payload['action'] not in {'quarantine','purge','restore'}:raise ValueError('当前服务器只允许盘点')
     return payload
 
 def stop_stack(context):

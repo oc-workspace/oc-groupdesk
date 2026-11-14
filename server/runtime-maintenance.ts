@@ -8,7 +8,7 @@ import {openControlSecret} from './bot-secrets.js';
 import {legacyBotId} from './bot-context.js';
 import {runtimeInventory,selectionSchema} from '../shared/runtime-maintenance.js';
 import {reasonFields,reasonDetails} from '../shared/deletion.js';
-const host=z.enum(['rococo-root','rococo-root2']);
+const host=z.enum(['rococo-root','rococo-root2','rpi-groupdesk-01']);
 const json=(v:unknown)=>JSON.stringify(v);
 async function freshAdmin(id:string,db:Pick<typeof controlPool,'query'>=controlPool){const u=(await db.query("SELECT username FROM admins WHERE id=$1 AND deleted_at IS NULL AND role='super_admin' AND status='active' FOR SHARE",[id])).rows[0];requireCondition(u,403,'总管理员权限已变化');return u;}
 async function latest(id:string){return (await controlPool.query('SELECT id,report,created_at FROM managed_runtime_snapshots WHERE host_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[id])).rows[0];}
@@ -56,10 +56,13 @@ export function registerRuntimeMaintenanceAgent(app:express.Express){
 // Called only by an already confirmed, persistent bot-purge task. No caller paths.
 export async function queuePurgeRuntime(botId:string,action:'quarantine'|'purge',selection:string[],actorId:string,why:{reason:string;reason_note:string},approvedPlan?:string,parentId?:string,purgeJobId?:string){
  return controlTransaction(async db=>{
-  await db.query('SELECT pg_advisory_xact_lock(78511966)');const actor=await freshAdmin(actorId,db),p=await runtimePreview(botId,'rococo-root2',purgeJobId);requireCondition(p.can_cleanup,409,p.blockers.join(' '));
+  await db.query('SELECT pg_advisory_xact_lock(78511966)');const actor=await freshAdmin(actorId,db);
+  const runtimeHost=(await db.query('SELECT runtime_host_id FROM managed_bots WHERE id=$1',[botId])).rows[0]?.runtime_host_id;
+  requireCondition(runtimeHost,409,'机器人尚未绑定运行主机');
+  const p=await runtimePreview(botId,runtimeHost,purgeJobId);requireCondition(p.can_cleanup,409,p.blockers.join(' '));
   selectionSchema.parse(selection);if(approvedPlan)requireCondition(p.plan_hash===approvedPlan,409,'运行环境已变化，请重新预览');
   if(action==='quarantine'){requireCondition(!p.inventory.quarantine,409,'存在未处理暂存');for(const k of selection){const rows=p.inventory.resources.filter((r:any)=>r.kind===k);requireCondition(rows.length&&rows.every((r:any)=>!r.blocked.length),409,'运行资源须保留');}}
   else{requireCondition(p.inventory.quarantine?.job_id===parentId&&JSON.stringify([...p.parent_selection].sort())===JSON.stringify([...selection].sort()),409,'原暂存范围不匹配');}
-  const id=randomUUID();await db.query("INSERT INTO managed_runtime_jobs(id,host_id,bot_id,action,status,actor_user_id,reason,reason_note,expected_revision,expected_owner,plan_hash,selection,retention_days,parent_job_id) VALUES($1,'rococo-root2',$2,$3,'queued',$4,$5,$6,$7,$8,$9,$10,0,$11)",[id,botId,action,actorId,why.reason,why.reason_note,p.revision,p.owner,p.plan_hash,selection,parentId||null]);if(purgeJobId)requireCondition((await db.query('UPDATE managed_bot_purges SET '+(action==='quarantine'?'runtime_quarantine_id':'runtime_purge_id')+'=$2 WHERE id=$1 AND bot_id=$3',[purgeJobId,id,botId])).rowCount,409,'彻底清理任务不匹配');await audit(actor.username,'bot.purge_runtime_queued',botId,{job_id:id,action,selection},db);return id;
+  const id=randomUUID();await db.query("INSERT INTO managed_runtime_jobs(id,host_id,bot_id,action,status,actor_user_id,reason,reason_note,expected_revision,expected_owner,plan_hash,selection,retention_days,parent_job_id) VALUES($1,$2,$3,$4,'queued',$5,$6,$7,$8,$9,$10,$11,0,$12)",[id,runtimeHost,botId,action,actorId,why.reason,why.reason_note,p.revision,p.owner,p.plan_hash,selection,parentId||null]);if(purgeJobId)requireCondition((await db.query('UPDATE managed_bot_purges SET '+(action==='quarantine'?'runtime_quarantine_id':'runtime_purge_id')+'=$2 WHERE id=$1 AND bot_id=$3',[purgeJobId,id,botId])).rowCount,409,'彻底清理任务不匹配');await audit(actor.username,'bot.purge_runtime_queued',botId,{job_id:id,action,selection,host:runtimeHost},db);return id;
  });
 }
