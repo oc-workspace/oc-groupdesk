@@ -1,0 +1,8 @@
+[Unit]
+Description=Keep Groupdesk control API on the Raspberry Pi direct route
+After=network-online.target sing-box.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/groupdesk-control-route

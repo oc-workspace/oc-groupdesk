@@ -27,7 +27,9 @@ export async function requestPause(id:string,revision:number,actor:string,princi
  await cancelBotTasks(id);
 }
 export function readyForActivation(row:any){return row&&['legacy','ready'].includes(row.database_state)&&row.runtime_instance_id&&row.account_fingerprint&&row.runtime_status?.contract===1&&row.runtime_status?.revision===row.revision&&row.runtime_status?.cutover_generation===row.activation_generation&&row.runtime_status?.wechat_connected===true&&row.runtime_status?.reader_connected===true&&row.runtime_status?.maibot_connected===true&&row.runtime_status?.local_ready===true&&row.runtime_status?.stopped===true&&row.runtime_status?.sender_queue_depth===0&&row.runtime_status?.active_turns===0&&row.runtime_status?.send_inflight===false&&Date.now()-new Date(row.runtime_seen_at).getTime()<90000;}
-export async function requestActivation(id:string,revision:number,actor:string,principal:Pick<SessionUser,'id'|'role'>){
+export async function requestActivation(id:string,revision:number,actor:string,principal:Pick<SessionUser,'id'|'role'>,greetingGroupIds?:string[]){
+ const {checkedGreetingGroups,createMigrationLaunch}=await import('./migration-launch.js');
+ const selection=await checkedGreetingGroups(id,greetingGroupIds);
  const target=await botRecord(id);requireCondition(target?.revision===revision&&target.state==='paused',409,'机器人状态已变化，请刷新');requireCondition(readyForActivation(target),409,'请先完成独立微信接入，确认微信、读取器和MaiBot在线');
  let previous:string|null=null;
  await controlTransaction(async db=>{
@@ -43,6 +45,7 @@ export async function requestActivation(id:string,revision:number,actor:string,p
   const current=(await db.query("SELECT * FROM managed_bots WHERE deleted_at IS NULL AND owner_user_id=$1 AND activation_slot=$2 AND state IN ('active','pausing') FOR UPDATE",[locked.owner_user_id,locked.activation_slot])).rows[0];
   requireCondition(!current||current.state==='active',409,'此用户已有机器人正在暂停，请等待确认后再切换');
   await db.query('INSERT INTO managed_bot_switch(owner_user_id,activation_slot,target_id) VALUES($1,$2,$3)',[locked.owner_user_id,locked.activation_slot,id]);
+  await createMigrationLaunch(db,locked,selection,actor);
   if(current){previous=current.id;await db.query("UPDATE managed_bots SET state='pausing',revision=revision+1,pause_requested_at=now(),stopped_revision=NULL WHERE id=$1",[current.id]);}
   await audit(actor,'bot.activation_requested',id,{previous_bot_id:previous,owner_user_id:locked.owner_user_id},db);
  });
@@ -60,6 +63,7 @@ async function finishOneActivation(owner:string,slot:number){
   try{await (await import('./bot-onboarding.js')).requireOnboardingReady(target.id);}catch{return false;}
   await advanceSchedules(target.id);
   await db.query("UPDATE managed_bots SET state='active',revision=revision+1,activation_generation=activation_generation+1,error=NULL WHERE id=$1",[target.id]);
+  await db.query("UPDATE managed_bot_migration_launches SET state='running',activation_generation=$2,catchup_through=CASE WHEN state='requested' THEN now() ELSE catchup_through END,updated_at=now() WHERE bot_id=$1 AND state IN ('requested','running','attention')",[target.id,target.activation_generation+1]);
   await db.query('DELETE FROM managed_bot_switch WHERE owner_user_id=$1 AND activation_slot=$2',[owner,slot]);
   await db.query('UPDATE managed_bot_onboarding SET completed_at=COALESCE(completed_at,now()),updated_at=now() WHERE bot_id=$1',[target.id]);
   await audit('runtime','bot.activated',target.id,{owner_user_id:owner},db);return true;

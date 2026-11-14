@@ -1,0 +1,20 @@
+[Unit]
+Description=Groupdesk control HTTPS IPv6 relay for Tatsumi bridge
+After=network-online.target groupdesk-control-route.service docker.service
+Wants=network-online.target groupdesk-control-route.service
+
+[Service]
+Type=simple
+User=nobody
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ExecStart=/usr/bin/python3 /usr/local/sbin/groupdesk-control-relay.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

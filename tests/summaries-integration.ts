@@ -300,7 +300,7 @@ test('today command freezes its first cutoff and later commands reuse it',async(
  assert.equal(first.status,200);const cutoff=first.data.window_end;
  const next=await req('/runtime/summaries/command','POST',{...command,seq:202,server_id:'901202',source_at:new Date().toISOString()},true);
  assert.equal(next.data.job_id,first.data.job_id);assert.equal(next.data.window_end,cutoff);
- assert.equal((await job(first.data.job_id)).trigger_mode,'today');
+ assert.equal((await job(first.data.job_id)).trigger_mode,'legacy_today');
  await req('/summaries/jobs/'+first.data.job_id+'/cancel','POST',{});
 });
 

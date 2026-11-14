@@ -116,13 +116,16 @@ async def commands(bridge,chat,profile):
     for row in rows:
         seq=row['seq'];content=row.get('content')
         valid=(row.get('is_self')==0 and row.get('msg_type')==1
-            and content in ('/generate-summary','/generate-summary 截止目前')
+            and content in ('/generate-summary','/generate-summary focus','/generate-summary today','/generate-summary today focus')
             and isinstance(row.get('sender_id'),str) and bool(row['sender_id'])
             and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or '')))
         if not valid:
             await asyncio.to_thread(ack,chat.id,epoch,seq);continue
         at=float(row.get('source_at') or 0)
-        if not 0<=time.time()-at<=600:
+        observed=float(row.get('observed_at') or 0)
+        # Reader arrival uses this host's clock; WeChat's native timestamp may
+        # be ahead of it. Keep the native time for the summary window.
+        if not 0<=time.time()-observed<=600 or not 0<=at or abs(at-observed)>180:
             await asyncio.to_thread(ack,chat.id,epoch,seq);continue
         payload={'external_id':profile['external_id'],'epoch':epoch,'seq':seq,
             'server_id':str(row['server_id']),'sender_id':row['sender_id'],

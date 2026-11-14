@@ -25,16 +25,17 @@ export async function executeKeyCall(alias:string,model:string,scope:CallScope,b
   await settleUsage(reservation,responseUsage(result.text),true);return result;
  }catch(e){await settleUsage(reservation,null,dispatched,'request_failed');throw e;}
 }
+const MODEL_PROXY_PERMIT_MS=300000;
 export async function proxyRoute(route:any,groupId:string,stage='chat'){
  await authorizedKey(route.credential_id,route.model_id,'chat',groupId);const g=(await pool.query('SELECT revision FROM groups WHERE deleted_at IS NULL AND id=$1',[groupId])).rows[0];
- const key=await keyForAlias(route.credential_id),permit=sealControlSecret(JSON.stringify({bot:botId(),group:groupId,revision:g.revision,alias:route.credential_id,key:key.id,key_revision:key.revision,model:route.model_id,stage,expires:Date.now()+75000}));
+ const key=await keyForAlias(route.credential_id),permit=sealControlSecret(JSON.stringify({bot:botId(),group:groupId,revision:g.revision,alias:route.credential_id,key:key.id,key_revision:key.revision,model:route.model_id,stage,expires:Date.now()+MODEL_PROXY_PERMIT_MS}));
  const origin=new URL(process.env.PUBLIC_ORIGIN||'http://localhost:3110').origin;
  return {...route,base_url:origin+'/api/model-proxy'+(key.client_type==='gemini'?'':'/v1'),api_key:permit,client_type:key.client_type};
 }
 export function registerModelProxy(app:express.Express,transport:ModelTransport=modelTransport){
  app.post('/api/model-proxy/*path',async(req,res)=>{
   let p:any;try{const auth=(req.headers['x-goog-api-key']||String(req.headers.authorization||'').replace(/^Bearer /,'')).toString();requireCondition(auth.length<5000,401,'模型调用凭据无效');p=JSON.parse(openControlSecret(auth));}catch{requireCondition(false,401,'模型调用凭据无效');}
-  const s=z.object({bot:z.uuid(),group:z.uuid(),revision:z.number(),alias:z.uuid(),key:z.uuid(),key_revision:z.number(),model:z.string(),stage:z.string(),expires:z.number()}).strict().parse(p);requireCondition(s.expires>Date.now()&&s.expires<Date.now()+80000,401,'模型调用租约已过期');
+  const s=z.object({bot:z.uuid(),group:z.uuid(),revision:z.number(),alias:z.uuid(),key:z.uuid(),key_revision:z.number(),model:z.string(),stage:z.string(),expires:z.number()}).strict().parse(p);requireCondition(s.expires>Date.now()&&s.expires<Date.now()+MODEL_PROXY_PERMIT_MS+5000,401,'模型调用租约已过期');
   const b=await botRecord(s.bot);requireCondition(b?.state==='active',403,'机器人已暂停');
   await botStorage.run(await botScope(s.bot),async()=>{
    const g=(await pool.query('SELECT revision,enabled FROM groups WHERE deleted_at IS NULL AND id=$1',[s.group])).rows[0];requireCondition(g?.enabled&&g.revision===s.revision,409,'群配置已变化');

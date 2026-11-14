@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Groupdesk control API route
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+Persistent=true
+Unit=groupdesk-control-route.service
+
+[Install]
+WantedBy=timers.target
