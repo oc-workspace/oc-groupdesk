@@ -222,6 +222,10 @@
       "default": false,
       "type": "boolean"
     },
+    "relogin_recovery": {
+      "default": false,
+      "type": "boolean"
+    },
     "topic_overrides": {
       "default": {},
       "type": "object",
@@ -301,6 +305,7 @@
     "conversation",
     "base_questions",
     "base_social",
+    "relogin_recovery",
     "topic_overrides",
     "language"
   ],

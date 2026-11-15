@@ -29,6 +29,7 @@ export const groupPolicySchema=z.object({
   timeouts:timeoutPolicySchema.default(timeoutDefaults),
   conversation:conversationPolicySchema,
   base_questions:z.boolean().default(false),base_social:z.boolean().default(false),
+  relogin_recovery:z.boolean().default(false),
   topic_overrides:z.record(z.uuid(),z.object({reply_depth:z.enum(['default','brief','detailed'])})).default({}),
   language:z.object({mode:z.enum(['follow','restricted','fixed']),allowed:z.array(languageCode).max(30),fallback:languageCode,fixed:languageCode.optional(),allow_requested:z.boolean()})
 });
