@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
-from chatlog_reader.engine import Engine
+from chatlog_reader.engine import Engine, join_notice, JOIN_PREFIX
 
 class EngineTests(unittest.TestCase):
     def setUp(self):
@@ -47,6 +47,27 @@ class EngineTests(unittest.TestCase):
         connection=sqlite3.connect(self.message)
         connection.execute('INSERT INTO '+self.table(group)+' VALUES(1,?,?,?,?,NULL)',(int(time.time())-10,sender,text,server))
         connection.commit();connection.close()
+    def test_native_join_identifies_invitee_not_inviter(self):
+        raw = '''17446360316@chatroom:
+<sysmsg type="sysmsgtemplate"><sysmsgtemplate><content_template>
+<template><![CDATA["$username$"邀请"$names$"加入了群聊]]></template>
+<link_list>
+<link name="username"><memberlist><member><username>inviter-id</username><nickname>Inviter</nickname></member></memberlist></link>
+<link name="names"><memberlist><member><username>new-id</username><nickname>Newcomer</nickname></member></memberlist></link>
+</link_list></content_template></sysmsgtemplate></sysmsg>'''
+        value=join_notice(raw)
+        self.assertTrue(value.startswith(JOIN_PREFIX))
+        self.assertEqual(json.loads(value[len(JOIN_PREFIX):]),{'inviter':'Inviter','newcomers':['Newcomer']})
+        self.assertIsNone(join_notice(raw.replace('加入了群聊','退出了群聊')))
+        self.assertIsNone(join_notice(raw.replace('<nickname>Newcomer</nickname>','<nickname></nickname>')))
+        self.add('native-a@chatroom',2,raw,106)
+        with sqlite3.connect(self.message) as db:
+            db.execute('UPDATE '+self.table('native-a@chatroom')+' SET local_type=10000 WHERE server_id=106')
+        self.engine.sync()
+        row=self.engine.store.page(1,0,200)['messages'][-1]
+        self.assertEqual(row['msg_type'],10000)
+        self.assertEqual(json.loads(row['content'][len(JOIN_PREFIX):])['newcomers'],['Newcomer'])
+
     def test_tail_is_memory_only_and_preserves_the_live_archive(self):
         from unittest.mock import patch
         self.engine.sync()
