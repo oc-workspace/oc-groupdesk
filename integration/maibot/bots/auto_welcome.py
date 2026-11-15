@@ -13,7 +13,9 @@ import time
 import groupdesk_runtime as gd
 
 PREFIX = '[GT_GROUP_JOIN_V1]'
-MAX_AGE = 10 * 60
+MAX_AGE = 24 * 3600
+MIN_DELAY = 15
+DELAY_SPAN = 26
 MESSAGES = {
     'zh': '欢迎加入群聊！很高兴认识你～',
     'en': 'Welcome to the group! Glad to meet you!',
@@ -58,7 +60,8 @@ class Journal:
         with self.db() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS cursors(
-                    chat_id INTEGER PRIMARY KEY,epoch TEXT NOT NULL,seq INTEGER NOT NULL);
+                    chat_id INTEGER PRIMARY KEY,epoch TEXT NOT NULL,seq INTEGER NOT NULL,
+                    activated_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS jobs(
                     id TEXT PRIMARY KEY,chat_id INTEGER NOT NULL,source_seq INTEGER NOT NULL,
                     source_at REAL NOT NULL,names TEXT NOT NULL,status TEXT NOT NULL,
@@ -84,19 +87,19 @@ def enabled(profile, now):
 
 def scan_group(bridge, journal, chat, profile, now):
     with journal.db() as db:
-        cursor = db.execute('SELECT epoch,seq FROM cursors WHERE chat_id=?', (chat,)).fetchone()
+        cursor = db.execute('SELECT epoch,seq,activated_at FROM cursors WHERE chat_id=?', (chat,)).fetchone()
     if cursor is None:
         tail = bridge.agent.request('/v1/stream', {'chat': chat, 'after': 'tail', 'limit': 1})
         with journal.db() as db:
-            db.execute('INSERT OR IGNORE INTO cursors VALUES(?,?,?)',
-                       (chat, tail['epoch'], tail['watermark']))
+            db.execute('INSERT OR IGNORE INTO cursors VALUES(?,?,?,?)',
+                       (chat, tail['epoch'], tail['watermark'], now))
         return
     page = bridge.agent.request('/v1/stream', {'chat': chat, 'after': cursor['seq'], 'limit': 200})
     if page['epoch'] != cursor['epoch']:
         tail = bridge.agent.request('/v1/stream', {'chat': chat, 'after': 'tail', 'limit': 1})
         with journal.db() as db:
-            db.execute('UPDATE cursors SET epoch=?,seq=? WHERE chat_id=?',
-                       (tail['epoch'], tail['watermark'], chat))
+            db.execute('UPDATE cursors SET epoch=?,seq=?,activated_at=? WHERE chat_id=?',
+                       (tail['epoch'], tail['watermark'], now, chat))
             db.execute('UPDATE jobs SET status="attention",error="reader_epoch_changed" WHERE chat_id=? AND status="queued"', (chat,))
         return
     rows = page['messages']
@@ -111,7 +114,7 @@ def scan_group(bridge, journal, chat, profile, now):
             if names is None:
                 continue
             source_at = row.get('source_at')
-            if type(source_at) not in (int, float) or not now - MAX_AGE <= source_at <= now + 15:
+            if type(source_at) not in (int, float) or not max(now - MAX_AGE, cursor['activated_at']) <= source_at <= now + 15:
                 continue
             job_id = f'welcome:{chat}:{page["epoch"]}:{seq}'
             db.execute('INSERT OR IGNORE INTO jobs(id,chat_id,source_seq,source_at,names,status) VALUES(?,?,?,?,?,"queued")',
@@ -164,10 +167,25 @@ def step(bridge, conf, status, active, reader, now=None):
         job = db.execute('SELECT * FROM jobs WHERE status="queued" ORDER BY source_at,id LIMIT 1').fetchone()
         if job is None:
             return
+        due = job['source_at'] + MIN_DELAY + int(hashlib.sha256(job['id'].encode()).hexdigest()[:4], 16) % DELAY_SPAN
+        if now < due:
+            return
         profile = gd.profile(bridge.policy.cfg, str(job['chat_id']))
         if not enabled(profile, now) or now - job['source_at'] > MAX_AGE:
             db.execute('UPDATE jobs SET status="attention",error="welcome_expired_or_disabled" WHERE id=?', (job['id'],))
             return
+    recent = bridge.agent.request('/v1/stream', {'chat': job['chat_id'], 'after': job['source_seq'], 'limit': 200})
+    with journal.db() as db:
+        cursor = db.execute('SELECT epoch FROM cursors WHERE chat_id=?', (job['chat_id'],)).fetchone()
+    if not cursor or recent['epoch'] != cursor['epoch'] or recent.get('next_after') is not None:
+        with journal.db() as db:
+            db.execute('UPDATE jobs SET status="attention",error="reader_window_uncertain" WHERE id=? AND status="queued"', (job['id'],))
+        return
+    if any(row.get('is_self') == 1 and row.get('source_at', 0) >= job['source_at'] for row in recent['messages']):
+        with journal.db() as db:
+            db.execute('UPDATE jobs SET status="attention",error="bot_already_replied_after_join" WHERE id=? AND status="queued"', (job['id'],))
+        return
+    with journal.db() as db:
         db.execute('UPDATE jobs SET status="reserved",reserved_at=? WHERE id=? AND status="queued"', (now, job['id']))
     try:
         client_id = 'auto-welcome-' + hashlib.sha256(job['id'].encode()).hexdigest()[:32]

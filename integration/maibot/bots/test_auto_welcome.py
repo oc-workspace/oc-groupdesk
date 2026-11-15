@@ -79,7 +79,11 @@ class AutoWelcomeTests(unittest.TestCase):
         self.agent.rows = [self.join(1)]
         self.step()
         self.assertEqual(self.agent.sent, [])
+        self.now += 5
         self.agent.rows.append(self.join(2))
+        self.step()
+        self.assertEqual(self.agent.sent, [])
+        self.now += 45
         self.step()
         self.assertEqual(len(self.agent.sent), 1)
         self.assertEqual(self.agent.sent[0][2], ['Newcomer'])
@@ -102,16 +106,19 @@ class AutoWelcomeTests(unittest.TestCase):
 
     def test_ui_block_keeps_queued_job_without_submitting(self):
         self.step()
+        self.now += 5
         self.agent.rows = [self.join()]
         self.status['ui_input_blocked'] = True
         self.step()
         self.assertEqual(self.agent.sent, [])
         self.status['ui_input_blocked'] = False
+        self.now += 45
         self.step()
         self.assertEqual(len(self.agent.sent), 1)
 
     def test_stale_reservation_requires_review_instead_of_resending(self):
         self.step()
+        self.now += 5
         self.agent.rows = [self.join()]
         self.status['ui_input_blocked'] = True
         self.step()
@@ -122,6 +129,30 @@ class AutoWelcomeTests(unittest.TestCase):
         self.assertEqual(self.agent.sent, [])
         with w.Journal().db() as db:
             self.assertEqual(db.execute('SELECT status FROM jobs').fetchone()['status'], 'attention')
+
+    def test_delayed_old_notice_does_not_become_new_after_enable(self):
+        self.step()
+        self.now += 5
+        old = self.join()
+        old['source_at'] = self.now - 3600
+        self.agent.rows = [old]
+        self.step()
+        self.assertEqual(self.agent.sent, [])
+        with w.Journal().db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0], 0)
+
+    def test_existing_bot_reply_after_join_suppresses_welcome(self):
+        self.step()
+        self.now += 5
+        self.agent.rows = [self.join()]
+        self.step()
+        self.now += 45
+        self.agent.rows.append({'seq': 2, 'chat_id': 1, 'msg_type': 1,
+                                'is_self': 1, 'source_at': self.now - 1, 'content': 'Already welcomed'})
+        self.step()
+        self.assertEqual(self.agent.sent, [])
+        with w.Journal().db() as db:
+            self.assertEqual(db.execute('SELECT error FROM jobs').fetchone()['error'], 'bot_already_replied_after_join')
 
 
 if __name__ == '__main__':
