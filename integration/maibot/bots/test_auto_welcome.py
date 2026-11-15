@@ -11,10 +11,15 @@ gd = types.ModuleType('groupdesk_runtime')
 gd.SNAPSHOT = Path('/tmp/auto-welcome-test/snapshot.json')
 gd.available = lambda profile, now: profile.get('enabled', False)
 gd.profile = lambda cfg, chat: cfg['managed_groups'][chat]
+previous_gd = sys.modules.get('groupdesk_runtime')
 sys.modules['groupdesk_runtime'] = gd
 spec = importlib.util.spec_from_file_location('auto_welcome_tested', SOURCE)
 w = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(w)
+if previous_gd is None:
+    del sys.modules['groupdesk_runtime']
+else:
+    sys.modules['groupdesk_runtime'] = previous_gd
 
 
 class Agent:
