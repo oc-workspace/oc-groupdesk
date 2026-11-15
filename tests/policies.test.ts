@@ -10,6 +10,15 @@ test('catalog has all eleven topic packs, food details and no group bindings',as
 test('legacy single-language and override behavior is preserved',()=>{
   const p=effectivePolicy({language:'en',allow_language_override:true,policy:{}});
   assert.equal(replyLanguage(p),'en');assert.equal(replyLanguage(p,'ja'),'ja');assert.equal(p.topic_scope,'all');
+  assert.equal(p.relogin_recovery,false);
+});
+test('relogin recovery is an independent per-group opt-in',()=>{
+  const language={mode:'follow',allowed:[],fallback:'zh-CN',allow_requested:false};
+  const enabled=parseGroupPolicy({language,relogin_recovery:true});
+  const disabled=parseGroupPolicy({language,relogin_recovery:false});
+  assert.equal(enabled.relogin_recovery,true);
+  assert.equal(disabled.relogin_recovery,false);
+  assert.throws(()=>parseGroupPolicy({language,relogin_recovery:'true'}));
 });
 test('restricted output languages do not allow a user request to escape the set',()=>{
   const p=parseGroupPolicy({language:{mode:'restricted',allowed:['zh-CN','en'],fallback:'en',allow_requested:true}});

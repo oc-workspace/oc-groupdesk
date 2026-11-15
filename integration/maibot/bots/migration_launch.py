@@ -242,7 +242,7 @@ def settle(bridge,journal,job):
     else:journal.change(job['id'],'attention',error='reply_not_sent')
 
 
-def enqueue(bridge,plan,journal,job):
+def enqueue(bridge,plan,journal,job,source='migration'):
     if not active(bridge,plan):return
     if not remote_active(plan):return
     sender=member_name(job['sender'])
@@ -256,7 +256,8 @@ def enqueue(bridge,plan,journal,job):
     seed=int.from_bytes(hashlib.sha256(job['id'].encode()).digest()[:8],'big')%(1<<60)
     seq=(1<<62)+seed
     original=datetime.fromtimestamp(job['source_at'],timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    text='[迁移暂停期间未回复的点名；原消息时间 '+original+'；请回应原问题，不要声称它刚发出]\n'+job['text']
+    label='微信掉线期间未回复的点名' if source=='relogin' else '迁移暂停期间未回复的点名'
+    text='['+label+'；原消息时间 '+original+'；请回应原问题，不要声称它刚发出]\n'+job['text']
     journal.change(job['id'],'submitting')
     result=bridge.policy.ingest(seq,sender,text,time.time(),True,chat_id=str(job['chat_id']))
     if result!='queued':

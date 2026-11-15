@@ -100,6 +100,12 @@ def sync(bridge):
         'cutover_generation':state['activation_generation'],'local_ready':local_ready})
     bridge.health['robot']={k:state[k] for k in ('bot_id','state','revision','activation_generation')}
     try:
+        import relogin_recovery
+        relogin_recovery.step(bridge,conf,status,state.get('enabled') and local_ready,reader)
+        bridge.health.pop('relogin_recovery_error',None)
+    except Exception as exc:
+        bridge.health['relogin_recovery_error']=type(exc).__name__
+    try:
         import bot_health
         bot_health.report(bridge,conf,status,reader,state.get('enabled') and local_ready)
     except Exception:
