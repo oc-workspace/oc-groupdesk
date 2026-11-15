@@ -102,5 +102,30 @@ class ReloginRecoveryTests(unittest.TestCase):
         self.assertEqual(result,{'attention':1})
         self.assertIsNone(journal.one('incident','catchup','queued'))
 
+    def test_short_reconnect_keeps_one_outage_and_one_job_identity(self):
+        disconnected={'running':True,'wechat_connected':False}
+        connected={'running':True,'wechat_connected':True}
+        self.recovery.step(self.bridge,self.conf,disconnected,True,True,self.now)
+        self.recovery.step(self.bridge,self.conf,connected,True,True,self.now+5)
+        journal=self.launch.Journal()
+        with journal.db() as db:
+            original=db.execute('SELECT id FROM relogin_outages').fetchone()['id']
+            db.execute('INSERT INTO relogin_outages(id,started,state,activation_generation) VALUES(?,?,"offline",2)',
+                       ('duplicate',self.now+10))
+        self.recovery.step(self.bridge,self.conf,disconnected,True,True,self.now+20)
+        with journal.db() as db:
+            active=db.execute('SELECT id,recovered,state FROM relogin_outages WHERE state IN ("offline","scanning","settling")').fetchall()
+            self.assertEqual(len(active),1)
+            self.assertEqual(active[0]['id'],original)
+            self.assertIsNone(active[0]['recovered'])
+        self.rows=[self.row(1,self.now+25)]
+        self.recovery.step(self.bridge,self.conf,connected,True,True,self.now+30)
+        with patch.object(self.launch,'enqueue') as enqueue:
+            self.recovery.step(self.bridge,self.conf,connected,True,True,self.now+151)
+        self.assertEqual(enqueue.call_count,1)
+        with journal.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs WHERE launch_id=?',(original,)).fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT state FROM relogin_outages WHERE id="duplicate"').fetchone()[0],'review')
+
 
 if __name__=='__main__':unittest.main()
