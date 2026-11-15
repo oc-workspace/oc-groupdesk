@@ -86,6 +86,12 @@ root2机器人与Reader用独立Compose和外置持久化；维护时同时指�
 初始密码仅在数据库初始化时使用。之后网页改密或从 stdin 调用 npm run admin:reset。
 改密后全部会话失效，初始登录文件不会自动更新，应在首次改密后删除该文件。
 
+Tatsumi 树莓派的 `groupdesk-control-relay.service` 使用仓库中的
+`integration/maibot/bots/groupdesk_control_relay.py` 作为部署源。转发器仅在现有 Docker
+网关监听，将 `groupdesk.rococo.dev:443` 经系统 DNS 和专用 IPv4 直连规则转发；TLS
+仍由桥接容器和站点端到端建立。修改上游前应从桥接容器验证 `/health` 返回 200，
+并保留宿主旧脚本备份。
+
 ### 验证命令
 
 开发机：npm run build && npm test。
