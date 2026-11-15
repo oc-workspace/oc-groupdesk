@@ -93,7 +93,7 @@ def step(bridge,conf,status,enabled,reader,now=None):
     with journal.db() as db:
         init(db)
         if not enabled:
-            db.execute('UPDATE relogin_outages SET state="review" WHERE state IN ("offline","scanning")')
+            db.execute('UPDATE relogin_outages SET state="review" WHERE state IN ("offline","scanning","settling")')
             return
         generation=bridge.health.get('robot',{}).get('activation_generation')
         if type(generation) is not int:return
