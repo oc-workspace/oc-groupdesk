@@ -98,12 +98,19 @@ def step(bridge,conf,status,enabled,reader,now=None):
         generation=bridge.health.get('robot',{}).get('activation_generation')
         if type(generation) is not int:return
         if not connected:
-            existing=db.execute('SELECT id FROM relogin_outages WHERE state="offline" AND activation_generation=?',(generation,)).fetchone()
-            if not existing:
+            active=db.execute('SELECT id FROM relogin_outages WHERE state IN ("offline","scanning","settling") AND activation_generation=? ORDER BY started,id',(generation,)).fetchall()
+            if active:
+                # A brief login followed by another disconnect is one outage.
+                # Keep its original ID so a second recovery cannot replay jobs.
+                db.execute('UPDATE relogin_outages SET recovered=NULL,last_scan=0,state="offline" WHERE id=?',(active[0]['id'],))
+                for duplicate in active[1:]:
+                    db.execute('UPDATE jobs SET status="attention",error="superseded_after_connection_flap" WHERE launch_id=? AND status="queued"',(duplicate['id'],))
+                    db.execute('UPDATE relogin_outages SET state="review" WHERE id=?',(duplicate['id'],))
+            else:
                 db.execute('INSERT INTO relogin_outages(id,started,state,activation_generation) VALUES(?,?,"offline",?)',
                            (uuid.uuid4().hex,known_offline_start(bridge,now) or now,generation))
             return
-        db.execute('UPDATE relogin_outages SET state="review" WHERE state IN ("offline","scanning") AND activation_generation!=?',(generation,))
+        db.execute('UPDATE relogin_outages SET state="review" WHERE state IN ("offline","scanning","settling") AND activation_generation!=?',(generation,))
         if not db.execute('SELECT 1 FROM relogin_outages LIMIT 1').fetchone():
             observed=known_offline_start(bridge,now)
             if observed is not None:
