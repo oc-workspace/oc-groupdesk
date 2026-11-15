@@ -148,6 +148,7 @@ RyuBuddy的数据库迁移有一个兼容安排：保留原库中的现有业务
 
 1. 用实际新账号ID在后台建空间，再生成部署清单与空目录。先准备本账号的`secrets/desktop.env`（CUSTOM_USER、PASSWORD），仅启动`compose.desktop.json`中的微信；由本人扫码/手机确认。
 2. 基于已审核版本准备本账号的`runtime/bridge`、`runtime/limits`、`runtime/bowxt`和`runtime/patched`，每个部署文件列入`runtime/SHA256SUMS`；不能复制原账号的策略、Persona或密钥。准备独立MaiBot配置、厂商协议确认、群白名单与基础人设。
+   从已合并的生产提交制作每个新机器人的运行包，并逐文件核对清单摘要。若要使用逐群“掉线补回复”或“入群自动迎新”，还须在该机器人自己的运行包中安装对应的 Reader/桥接模块、策略 ACK 和发送端修复，并验证健康与能力确认；群开关默认关闭。`install_auto_welcome.py`、`install_relogin_recovery.py` 和 `install_wechat_ui_block_recovery.py` 是针对已审查基线的单实例安装工具，不会由 `render_stack.py` 或 `start_stack.py` 自动运行；基线摘要不同须先审查适配，不能把 Tatsumi 的私有运行目录直接复制给新账号。安装后重新生成准确的 `runtime/SHA256SUMS`，把备份文件放到清单校验目录之外，再执行完整启动校验。
 3. 在本账号登录目录定位db_storage，配置自己的Reader、加密取钥及独立API Token。此操作在账号提供后另行执行，不能以旧账号密钥代替。`.env`只含`READER_ACCOUNT`与`WECHAT_ACCOUNT_DATABASES`，后者必须在本机器人的wechat目录内。
 4. 私有`groupdesk/connection.json`除url、token、groups外，加上bot_id、wechat_id、生成的runtime_instance_id，以及Reader账号目录名SHA256作为account_fingerprint。该指纹用于绑定所配置的数据库来源，不等于通过微信协议验证公开微信号；实际账号由本人登录与运维核对。后台Token和各群白名单必须与本空间一致。
 5. `start_stack.py <部署目录> --desktop-only`用于首次桌面登录；完整运行使用`start_stack.py <部署目录>`，会先校验固定目录、代码摘要、私有配置、Reader与连接的账号/群绑定及只读原库挂载。缺项时停止启动。不会自动启用后台机器人。
