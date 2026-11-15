@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 import tempfile
+import xml.etree.ElementTree as ET
 import threading
 import time
 from chatlog_keeper import wechat_db as native
@@ -16,6 +17,41 @@ from .vault import unwrap
 from .references import text_reference
 
 logging.getLogger('chatlog_keeper').setLevel(logging.CRITICAL)
+JOIN_PREFIX = '[GT_GROUP_JOIN_V1]'
+
+def join_notice(raw):
+    """Extract the actual invitees from a native group-join notice.
+
+    The link named username is the inviter; the link named names contains
+    newcomers. Never infer recipients from the sender or a shortened summary.
+    """
+    if len(raw) > 65536:
+        return None
+    xml = raw.partition('\n')[2]
+    if not xml.startswith('<sysmsg type="sysmsgtemplate">'):
+        return None
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    template = root.findtext('./sysmsgtemplate/content_template/template')
+    if template != '"$username$"邀请"$names$"加入了群聊':
+        return None
+    links = root.findall('./sysmsgtemplate/content_template/link_list/link')
+    if len(links) != 2 or [link.get('name') for link in links] != ['username','names']:
+        return None
+    inviter = links[0].findtext('./memberlist/member/nickname')
+    members = links[1].findall('./memberlist/member')
+    if not isinstance(inviter,str) or not 1 <= len(inviter.strip()) <= 120 or not 1 <= len(members) <= 20:
+        return None
+    names = [member.findtext('nickname') for member in members]
+    if any(not isinstance(name,str) or not 1 <= len(name.strip()) <= 120 for name in names):
+        return None
+    names = [name.strip() for name in names]
+    if len(set(names)) != len(names):
+        return None
+    return JOIN_PREFIX + json.dumps({'inviter':inviter.strip(),'newcomers':names},ensure_ascii=False,separators=(',',':'))
+
 SUMMARY = re.compile(r'^(?:\[\d+/\d+\]\n)?(?:Group archive summary|グループの保存記録まとめ|群聊存档总结) · ')
 
 def config(path):
@@ -161,6 +197,8 @@ class Engine:
         elif kind == 1:
             first, separator, rest = raw.partition('\n')
             text = rest if separator and first.strip().rstrip(':') == sender_id else raw
+        elif kind == 10000:
+            text = join_notice(raw) or native._extract_wechat_xml(raw, kind)
         else:
             text = native._extract_wechat_xml(raw, kind)
         text = text.strip()

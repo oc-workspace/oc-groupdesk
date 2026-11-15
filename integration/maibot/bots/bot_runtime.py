@@ -106,6 +106,12 @@ def sync(bridge):
     except Exception as exc:
         bridge.health['relogin_recovery_error']=type(exc).__name__
     try:
+        import auto_welcome
+        auto_welcome.step(bridge,conf,status,state.get('enabled') and local_ready,reader)
+        bridge.health.pop('auto_welcome_error',None)
+    except Exception as exc:
+        bridge.health['auto_welcome_error']=type(exc).__name__
+    try:
         import bot_health
         bot_health.report(bridge,conf,status,reader,state.get('enabled') and local_ready)
     except Exception:
