@@ -85,7 +85,7 @@ def enabled(profile, now):
     return gd.available(profile, now) and profile.get('policy', {}).get('auto_welcome') is True
 
 
-def scan_group(bridge, journal, chat, profile, now):
+def scan_group(bridge, journal, chat, now):
     with journal.db() as db:
         cursor = db.execute('SELECT epoch,seq,activated_at FROM cursors WHERE chat_id=?', (chat,)).fetchone()
     if cursor is None:
@@ -149,15 +149,18 @@ def step(bridge, conf, status, active, reader, now=None):
     journal = Journal()
     settle(bridge, journal, now)
     chats = {int(chat): external for chat, external in conf['groups'].items()}
+    # gd.sync() has just published and ACKed this snapshot. The bridge policy
+    # object is reloaded only after this function returns, so use this copy.
+    profiles = gd.load_profiles() or {}
     for chat in chats:
-        profile = gd.profile(bridge.policy.cfg, str(chat))
+        profile = profiles.get(str(chat))
         if not active or not enabled(profile, now):
             with journal.db() as db:
                 db.execute('DELETE FROM cursors WHERE chat_id=?', (chat,))
                 db.execute('UPDATE jobs SET status="attention",error="welcome_disabled" WHERE chat_id=? AND status="queued"', (chat,))
             continue
         if reader:
-            scan_group(bridge, journal, chat, profile, now)
+            scan_group(bridge, journal, chat, now)
     if not active or not reader or status.get('wechat_connected') is not True or status.get('running') is not True:
         return
     if status.get('ui_input_blocked') or status.get('sender_queue_depth', status.get('queue_depth')) != 0:
@@ -175,7 +178,7 @@ def step(bridge, conf, status, active, reader, now=None):
         due = job['source_at'] + MIN_DELAY + int(hashlib.sha256(job['id'].encode()).hexdigest()[:4], 16) % DELAY_SPAN
         if now < due:
             return
-        profile = gd.profile(bridge.policy.cfg, str(job['chat_id']))
+        profile = profiles.get(str(job['chat_id']))
         if not enabled(profile, now) or now - job['source_at'] > MAX_AGE:
             db.execute('UPDATE jobs SET status="attention",error="welcome_expired_or_disabled" WHERE id=?', (job['id'],))
             return

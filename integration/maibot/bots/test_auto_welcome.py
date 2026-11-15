@@ -11,6 +11,7 @@ gd = types.ModuleType('groupdesk_runtime')
 gd.SNAPSHOT = Path('/tmp/auto-welcome-test/snapshot.json')
 gd.available = lambda profile, now: profile.get('enabled', False)
 gd.profile = lambda cfg, chat: cfg['managed_groups'][chat]
+gd.load_profiles = lambda: {}
 previous_gd = sys.modules.get('groupdesk_runtime')
 sys.modules['groupdesk_runtime'] = gd
 spec = importlib.util.spec_from_file_location('auto_welcome_tested', SOURCE)
@@ -53,6 +54,7 @@ class AutoWelcomeTests(unittest.TestCase):
         gd.SNAPSHOT = Path(self.tmp.name) / 'snapshot.json'
         self.profile = {'enabled': True, 'policy': {'auto_welcome': True,
             'language': {'mode': 'follow', 'fallback': 'zh-CN'}}}
+        gd.load_profiles = lambda: {'1': self.profile}
         self.agent = Agent()
         self.bridge = types.SimpleNamespace(
             agent=self.agent, policy=types.SimpleNamespace(cfg={'managed_groups': {'1': self.profile}}),
@@ -100,6 +102,7 @@ class AutoWelcomeTests(unittest.TestCase):
 
     def test_disabled_group_resets_cursor_and_queued_work(self):
         self.step()
+        self.bridge.policy.cfg = {'managed_groups': {'1': {'enabled': True, 'policy': {'auto_welcome': True}}}}
         self.profile['policy']['auto_welcome'] = False
         self.step()
         with w.Journal().db() as db:
