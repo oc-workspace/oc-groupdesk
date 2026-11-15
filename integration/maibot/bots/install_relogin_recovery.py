@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 
 BEFORE={
+    'relogin_recovery.py':'f20bec1a3ea9f12a5c17f97827f19c4c0b455866611a9faef302435d29021452',
     'bot_runtime.py':'fd687b638cbe43cd0ff58877ad630c4e671640dd0d78eadea508690d969d0e92',
     'migration_launch.py':'5441de932dd5805790899a018875760ec6803d2953d3a6ef933fa49dc9c2f020',
     'groupdesk_runtime.py':'d488500a276a5c653aec509bd8f8a4c4ff0812c04ee90d345d7289f9771fa7a0',
@@ -37,7 +38,9 @@ def install(runtime):
         body=path.read_bytes();ast.parse(body.decode(),filename=str(path))
         current=(dest/name).read_bytes() if (dest/name).exists() else None
         if current is not None and digest(current)==digest(body):continue
-        if (name not in BEFORE and current is not None) or (name in BEFORE and (current is None or digest(current)!=BEFORE[name])):
+        if name=='relogin_recovery.py':
+            if current is not None and digest(current)!=BEFORE[name]:raise ValueError('Unreviewed runtime baseline: '+name)
+        elif current is None or digest(current)!=BEFORE[name]:
             raise ValueError('Unreviewed runtime baseline: '+name)
         changed.append((name,body))
     if not changed:return 'already_installed'
