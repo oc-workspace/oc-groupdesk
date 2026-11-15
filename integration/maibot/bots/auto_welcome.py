@@ -125,7 +125,7 @@ def scan_group(bridge, journal, chat, profile, now):
 def settle(bridge, journal, now):
     with journal.db() as db:
         db.execute('UPDATE jobs SET status="attention",error="uncertain_after_restart" WHERE status="reserved" AND reserved_at<?', (now-120,))
-        jobs = db.execute('SELECT id,send_seq FROM jobs WHERE status="submitted" ORDER BY source_at LIMIT 10').fetchall()
+        jobs = db.execute('SELECT id,send_seq,reserved_at FROM jobs WHERE status="submitted" ORDER BY source_at LIMIT 10').fetchall()
     for job in jobs:
         try:
             result = bridge.agent.get_message(job['send_seq'])
@@ -133,6 +133,9 @@ def settle(bridge, journal, now):
             continue
         state = result.delivery_status
         if state == 'pending':
+            if job['reserved_at'] is not None and now - job['reserved_at'] > 300:
+                with journal.db() as db:
+                    db.execute('UPDATE jobs SET status="attention",error="delivery_pending_timeout" WHERE id=? AND status="submitted"', (job['id'],))
             continue
         status = 'sent' if state == 'sent' else 'attention'
         error = None if status == 'sent' else 'delivery_' + state + ':' + str(result.delivery_error or '')[:100]
@@ -164,6 +167,8 @@ def step(bridge, conf, status, active, reader, now=None):
     if bridge.health.get('robot', {}).get('state') != 'active':
         return
     with journal.db() as db:
+        if db.execute('SELECT 1 FROM jobs WHERE status IN ("reserved","submitted") LIMIT 1').fetchone():
+            return
         job = db.execute('SELECT * FROM jobs WHERE status="queued" ORDER BY source_at,id LIMIT 1').fetchone()
         if job is None:
             return

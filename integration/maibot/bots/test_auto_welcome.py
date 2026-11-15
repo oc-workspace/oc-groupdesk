@@ -154,6 +154,22 @@ class AutoWelcomeTests(unittest.TestCase):
         with w.Journal().db() as db:
             self.assertEqual(db.execute('SELECT error FROM jobs').fetchone()['error'], 'bot_already_replied_after_join')
 
+    def test_pending_delivery_blocks_next_welcome_then_times_out_safely(self):
+        self.step()
+        self.now += 5
+        self.agent.rows = [self.join(1, ['First']), self.join(2, ['Second'])]
+        self.step()
+        self.now += 45
+        self.step()
+        self.assertEqual(len(self.agent.sent), 1)
+        self.step()
+        self.assertEqual(len(self.agent.sent), 1)
+        self.now += 301
+        self.step()
+        self.assertEqual(len(self.agent.sent), 2)
+        with w.Journal().db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs WHERE error="delivery_pending_timeout"').fetchone()[0], 1)
+
 
 if __name__ == '__main__':
     unittest.main()
