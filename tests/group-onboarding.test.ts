@@ -29,6 +29,12 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {OnboardingFlow} from '../web/onboarding-flow.js';
 test('a completed flow stays complete with optional connection warnings and exposes no repeated greeting action',()=>{
  const noop=()=>{};
- const html=renderToStaticMarkup(createElement(OnboardingFlow,{flow:{id:'parent',ready:true,status:'succeeded',group:{name:'Synthetic group',enabled:true,revision:2,applied_revision:2},followups:{greeting:{id:'g',status:'succeeded'},verify:{id:'v',status:'succeeded',result:{wechat:false,reader:true,sender:true}}}},activeJob:null,busy:false,onRefresh:noop,onVerify:noop,onGreeting:noop,onViewTask:noop,onOpenGroup:noop,onRetry:noop,onCancel:noop}));
+ const html=renderToStaticMarkup(createElement(OnboardingFlow,{flow:{id:'parent',ready:true,status:'succeeded',group:{name:'Synthetic group',enabled:true,revision:2,applied_revision:2},followups:{greeting:{id:'g',status:'succeeded'},verify:{id:'v',status:'succeeded',result:{wechat:false,reader:true,sender:true}}}},activeJob:null,busy:false,onRefresh:noop,onVerify:noop,onGreeting:noop,onRetryGreeting:noop,canRetryGreeting:true,onViewTask:noop,onOpenGroup:noop,onRetry:noop,onCancel:noop}));
  assert(html.includes('必做步骤已完成'));assert(html.includes('查看问候结果'));assert(html.includes('部分连接待恢复'));assert(!html.includes('发送入群问候（需确认）'));assert(html.includes('4、5、6 均为可选操作'));
+});
+test('a confirmed failed greeting exposes a retry action when the safe runtime is ready',()=>{
+ const noop=()=>{};
+ const html=renderToStaticMarkup(createElement(OnboardingFlow,{flow:{id:'parent',ready:true,status:'succeeded',group:{name:'Synthetic group',enabled:true},followups:{greeting:{id:'g',status:'failed',error_code:'greeting_failed'}}},activeJob:null,busy:false,onRefresh:noop,onVerify:noop,onGreeting:noop,onRetryGreeting:noop,canRetryGreeting:true,onViewTask:noop,onOpenGroup:noop,onRetry:noop,onCancel:noop}));
+ assert(html.includes('重新尝试问候（需确认）'));
+ assert(html.includes('核对旧尝试没有任何发送记录'));
 });

@@ -83,6 +83,35 @@ class MetadataTests(unittest.TestCase):
    for payload in [{'group_name':[]},{'group_name':' '},{'group_name':'x'*201},{'group_name':'name','kind':'verify'}]:
     with self.assertRaises(Failure):d.handle({'id':str(uuid.uuid4()),'kind':'discover',**payload})
 class GreetingTests(unittest.TestCase):
+ def test_safe_retry_uses_new_deterministic_attempt_and_rejects_any_previous_send(self):
+  with tempfile.TemporaryDirectory() as t:
+   path=Path(t)/'state.db'
+   with sqlite3.connect(path) as db:db.executescript('CREATE TABLE pending(id TEXT PRIMARY KEY,sender TEXT,display TEXT,kind TEXT,first REAL,last REAL,text TEXT,article INTEGER,explicit INTEGER,fast INTEGER,greeting INTEGER,chat_id TEXT,policy_revision TEXT,received_at REAL);CREATE TABLE sends(turn_id TEXT,status TEXT);CREATE TABLE turns(id TEXT,status TEXT,expires REAL,chat_id TEXT);CREATE TABLE onboarding_admin_requests(id TEXT PRIMARY KEY,chat_id TEXT,created REAL);')
+   @contextlib.contextmanager
+   def connect():
+    db=sqlite3.connect(path);db.row_factory=sqlite3.Row
+    try:
+     with db:yield db
+    finally:db.close()
+   policy=N(cfg={},db=connect,_quota=lambda *a,**k:None);gd=N(profile=lambda *a:{},available=lambda *a:True,revision=lambda *a:'2')
+   job=uuid.uuid4();old=job.hex;retry=uuid.uuid5(job,'groupdesk-greeting-retry-1').hex
+   with connect() as db:
+    db.execute('INSERT INTO onboarding_admin_requests VALUES(?,"2",?)',(old,time.time()-500))
+    db.execute('INSERT INTO turns VALUES(?,"expired",?,"2")',(old,time.time()-100))
+   def run(generation=1):
+    out=io.StringIO();payload=json.dumps({'job_id':str(job),'chat_id':2,'retry_generation':generation})
+    with patch.dict(sys.modules,{'policy':N(Policy=lambda *a:policy),'groupdesk_runtime':gd}),patch.object(sys,'stdin',io.StringIO(payload)),contextlib.redirect_stdout(out):
+     try:runpy.run_path(str(Path(__file__).parent/'greeting.py'))
+     except SystemExit as e:self.assertEqual(e.code,0)
+    return json.loads(out.getvalue())['greeting_status']
+   self.assertEqual(run(),'queued');self.assertEqual(run(),'queued')
+   with connect() as db:self.assertEqual([r[0] for r in db.execute('SELECT id FROM pending')],[retry])
+   with connect() as db:
+    db.execute('DELETE FROM pending WHERE id=?',(retry,));db.execute('INSERT INTO sends VALUES(?,"uncertain")',(old,))
+   self.assertEqual(run(2),'uncertain')
+   with connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],0)
+   with connect() as db:db.execute('UPDATE sends SET status="sent" WHERE turn_id=?',(old,))
+   self.assertEqual(run(2),'sent')
  def test_repeated_greeting_uses_one_normal_pending_task_and_never_requeues_an_uncertain_send(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'state.db'

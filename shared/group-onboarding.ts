@@ -11,7 +11,7 @@ export const onboardingErrors:Record<string,string>={
  source_expired:'群列表已过期，请重新读取后选择。',
  restart_failed:'服务重载未完成。新群保持停用，请重试接入以继续检查。',
  greeting_pending:'问候已交给正常回复队列，尚未确认送达。请检查群聊并刷新；不会自动重复发送。',
- greeting_failed:'本次问候未能完成，请查看群聊与运行记录；不会自动重发。',
+ greeting_failed:'本次问候未能完成，未自动重发。可在确认后请求安全重试；运行端仅在核实旧尝试没有任何发送记录时才重新生成。',
  not_ready:'群尚未启用或机器人尚未确认当前配置，请先完成接入并刷新检查。',
  operation_failed:'接入任务暂未完成，群保持停用。请查看当前步骤后重试；不要重复创建同一个群。'
 };
