@@ -2,7 +2,7 @@ import contextlib,copy,hashlib,io,json,runpy,sqlite3,sys,tempfile,time,unittest,
 from pathlib import Path
 from types import SimpleNamespace as N
 from unittest.mock import patch
-from ops import Driver,Failure,append_scope,save,sha
+from ops import Driver,Failure,append_scope,proven_preinput_failures,save,sha
 BOT='11111111-2222-4333-8444-555555555555';SLUG=BOT.replace('-','')
 SELECTED={'id':'a'*64,'native_id':'new_room@chatroom','name':'New selected group','ambiguous':False,'external_id':None}
 class Fake(Driver):
@@ -83,6 +83,27 @@ class MetadataTests(unittest.TestCase):
    for payload in [{'group_name':[]},{'group_name':' '},{'group_name':'x'*201},{'group_name':'name','kind':'verify'}]:
     with self.assertRaises(Failure):d.handle({'id':str(uuid.uuid4()),'kind':'discover',**payload})
 class GreetingTests(unittest.TestCase):
+ def test_only_exact_preinput_failure_without_archive_receipt_is_proven(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);job=uuid.uuid4();attempt=uuid.uuid5(job,'groupdesk-greeting-retry-1').hex
+   for name in ['limits','bridge','wechat/bowxt','reader/data']:(root/name).mkdir(parents=True)
+   with sqlite3.connect(root/'limits/limits.sqlite3') as db:
+    db.execute('CREATE TABLE sends(id TEXT,turn_id TEXT,status TEXT)');db.execute('INSERT INTO sends VALUES(?,?,?)',('send-1',attempt,'failed'))
+   with sqlite3.connect(root/'bridge/delivery.sqlite3') as db:
+    db.execute('CREATE TABLE outbound(id TEXT,state TEXT,seq INTEGER)');db.execute('INSERT INTO outbound VALUES(?,?,?)',('send-1','failed',241))
+   with sqlite3.connect(root/'wechat/bowxt/messages.db') as db:
+    db.execute('CREATE TABLE messages(seq INTEGER,chat_id INTEGER,direction TEXT,verified INTEGER,delivery_status TEXT,delivery_error TEXT,content TEXT,timestamp TEXT)')
+    db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?,?)',(241,2,'outgoing',0,'failed','WeChat search field was not found in the AT-SPI tree after one refresh','synthetic greeting','2026-11-16T12:54:33+00:00'))
+   with sqlite3.connect(root/'reader/data/archive.sqlite3') as db:db.execute('CREATE TABLE messages(chat_id INTEGER,content TEXT,is_self INTEGER,source_at REAL,observed_at REAL)')
+   check=lambda:proven_preinput_failures(root,str(job),2,2)
+   self.assertEqual(check(),[1]);self.assertEqual(proven_preinput_failures(root,str(job),2,3),[])
+   with sqlite3.connect(root/'reader/data/archive.sqlite3') as db:db.execute('INSERT INTO messages VALUES(?,?,?,?,?)',(2,'synthetic greeting',1,1794833673,1794833673))
+   self.assertEqual(check(),[])
+   with sqlite3.connect(root/'reader/data/archive.sqlite3') as db:db.execute('DELETE FROM messages')
+   with sqlite3.connect(root/'wechat/bowxt/messages.db') as db:db.execute('UPDATE messages SET delivery_error=?',('Send result not verified',))
+   self.assertEqual(check(),[])
+   with sqlite3.connect(root/'wechat/bowxt/messages.db') as db:db.execute('UPDATE messages SET delivery_error=?,verified=1',('WeChat search field was not found in the AT-SPI tree after one refresh',))
+   self.assertEqual(check(),[])
  def test_safe_retry_uses_new_deterministic_attempt_and_rejects_any_previous_send(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'state.db'
@@ -98,8 +119,8 @@ class GreetingTests(unittest.TestCase):
    with connect() as db:
     db.execute('INSERT INTO onboarding_admin_requests VALUES(?,"2",?)',(old,time.time()-500))
     db.execute('INSERT INTO turns VALUES(?,"expired",?,"2")',(old,time.time()-100))
-   def run(generation=1):
-    out=io.StringIO();payload=json.dumps({'job_id':str(job),'chat_id':2,'retry_generation':generation})
+   def run(generation=1,proven=()):
+    out=io.StringIO();payload=json.dumps({'job_id':str(job),'chat_id':2,'retry_generation':generation,'proven_preinput_failures':list(proven)})
     with patch.dict(sys.modules,{'policy':N(Policy=lambda *a:policy),'groupdesk_runtime':gd}),patch.object(sys,'stdin',io.StringIO(payload)),contextlib.redirect_stdout(out):
      try:runpy.run_path(str(Path(__file__).parent/'greeting.py'))
      except SystemExit as e:self.assertEqual(e.code,0)
@@ -107,11 +128,15 @@ class GreetingTests(unittest.TestCase):
    self.assertEqual(run(),'queued');self.assertEqual(run(),'queued')
    with connect() as db:self.assertEqual([r[0] for r in db.execute('SELECT id FROM pending')],[retry])
    with connect() as db:
-    db.execute('DELETE FROM pending WHERE id=?',(retry,));db.execute('INSERT INTO sends VALUES(?,"uncertain")',(old,))
+    db.execute('DELETE FROM pending WHERE id=?',(retry,));db.execute('INSERT INTO sends VALUES(?,"failed")',(retry,))
    self.assertEqual(run(2),'uncertain')
+   self.assertEqual(run(2,[1]),'queued')
+   with connect() as db:
+    db.execute('DELETE FROM pending');db.execute('INSERT INTO sends VALUES(?,"uncertain")',(old,))
+   self.assertEqual(run(3,[1]),'uncertain')
    with connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM pending').fetchone()[0],0)
    with connect() as db:db.execute('UPDATE sends SET status="sent" WHERE turn_id=?',(old,))
-   self.assertEqual(run(2),'sent')
+   self.assertEqual(run(3,[1]),'sent')
  def test_repeated_greeting_uses_one_normal_pending_task_and_never_requeues_an_uncertain_send(self):
   with tempfile.TemporaryDirectory() as t:
    path=Path(t)/'state.db'

@@ -50,7 +50,7 @@ class Agent:
  def run(self):
   while True:
    try:
-    task=self.api('claim',{'version':'4'}).get('task')
+    task=self.api('claim',{'version':'5'}).get('task')
     if task:self.run_one(task)
     else:time.sleep(10)
    except Exception:time.sleep(20)

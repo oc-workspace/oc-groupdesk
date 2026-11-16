@@ -36,5 +36,5 @@ test('a confirmed failed greeting exposes a retry action when the safe runtime i
  const noop=()=>{};
  const html=renderToStaticMarkup(createElement(OnboardingFlow,{flow:{id:'parent',ready:true,status:'succeeded',group:{name:'Synthetic group',enabled:true},followups:{greeting:{id:'g',status:'failed',error_code:'greeting_failed'}}},activeJob:null,busy:false,onRefresh:noop,onVerify:noop,onGreeting:noop,onRetryGreeting:noop,canRetryGreeting:true,onViewTask:noop,onOpenGroup:noop,onRetry:noop,onCancel:noop}));
  assert(html.includes('重新尝试问候（需确认）'));
- assert(html.includes('核对旧尝试没有任何发送记录'));
+ assert(html.includes('证实在输入前失败'));
 });
