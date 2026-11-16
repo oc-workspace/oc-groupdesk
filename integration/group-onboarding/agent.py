@@ -28,7 +28,7 @@ class Agent:
   reporter=threading.Thread(target=progress,daemon=True);reporter.start()
   try:
    self.api('report',{**base,'status':'working','stage':'ack' if task['kind']=='greeting' else 'preflight'})
-   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id','group_name'} and v is not None}
+   local={k:v for k,v in task.items() if k in {'id','kind','candidate','external_id','group_name','retry_generation'} and v is not None}
    if task.get('receipt_only'):
     if task['kind']!='greeting':raise RuntimeError('scope_mismatch')
     local['kind']='greeting_status'
@@ -50,7 +50,7 @@ class Agent:
  def run(self):
   while True:
    try:
-    task=self.api('claim',{'version':'3'}).get('task')
+    task=self.api('claim',{'version':'4'}).get('task')
     if task:self.run_one(task)
     else:time.sleep(10)
    except Exception:time.sleep(20)

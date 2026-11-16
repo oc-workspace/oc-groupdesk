@@ -94,6 +94,26 @@ test('late greeting receipts use a fenced read-only claim and cannot accept anot
  assert.deepEqual((await overview()).groups.map((g:any)=>[g.id,g.revision,g.external_id]),before);
  assert.equal((await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,b.id)).status,404);
 });
+test('failed greeting requires fresh v4 runtime and confirmation before a single safe retry',async()=>{
+ const parent=(await req('/group-onboarding/jobs/'+connectId,'GET',undefined,a.id)).data;
+ const greeting=parent.followups.greeting;
+ const path='/group-onboarding/jobs/'+connectId+'/greeting/retry';
+ const body={request_id:randomUUID(),confirmed:true};
+ await withBot(a.id,()=>pool.query("UPDATE group_onboarding_jobs SET status='failed',error_code='greeting_failed',result='{}' WHERE id=$1",[greeting.id]));
+ assert.equal((await req(path,'POST',body,a.id)).status,409);
+ const v4=async()=>(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'4'},undefined,ta)).data.task;
+ assert.equal(await v4(),null);
+ assert.equal((await req(path,'POST',{request_id:randomUUID(),confirmed:false},a.id)).status,400);
+ assert.equal((await req(path,'POST',body,b.id)).status,409);
+ const retried=await req(path,'POST',body,a.id);assert.equal(retried.status,202,JSON.stringify(retried.data));assert.equal(retried.data.id,greeting.id);
+ assert.equal(retried.data.status,'queued');assert.equal((await req(path,'POST',body,a.id)).data.id,greeting.id);
+ assert.equal((await req(path,'POST',{request_id:randomUUID(),confirmed:true},a.id)).status,409);
+ assert.equal(await claim(),null); // Older agents cannot claim a retry generation.
+ const task=await v4();assert.equal(task.id,greeting.id);assert.equal(task.retry_generation,1);assert.equal(task.receipt_only,undefined);
+ assert.equal((await report(task,{greeting_status:'sent',chat_id:2,external_id:parent.group.external_id})).status,200);
+ assert.equal((await req(path,'POST',{request_id:randomUUID(),confirmed:true},a.id)).status,409);
+ const done=(await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,a.id)).data;assert.equal(done.status,'succeeded');
+});
 test('model helper default is independent and AI cannot choose foreign IDs or enable groups',async()=>{
  let key='';await withBot(a.id,async()=>{key=randomUUID();await pool.query("INSERT INTO model_credentials(id,name,base_url,key_ciphertext,key_hint,key_digest,client_type) VALUES($1,'maibot-gpt','https://example.com/v1',$2,'synthetic','synthetic','openai_responses')",[key,sealKey('synthetic-not-real')]);await pool.query("INSERT INTO credential_models(credential_id,model_id,display_name,capability,source) VALUES($1,'gpt-6-luna','gpt-6-luna','text','manual')",[key]);});
  let models=(await req('/models','GET',undefined,a.id)).data;const before=(await overview()).groups.map((g:any)=>g.revision);
@@ -129,10 +149,10 @@ test('template copies keep full restricted language and follow flags without cha
 test('named discovery validates input and agent capability, carries exact query and records an empty result without binding',async()=>{
  assert.equal((await req('/group-onboarding/discover','POST',{request_id:randomUUID(),group_name:'   '},a.id)).status,400);
  assert.equal((await req('/group-onboarding/discover','POST',{request_id:randomUUID(),group_name:'Shanghai Entrepreneurs Meetup'},a.id)).status,409);
- assert.equal((await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).status,200);
+ assert.equal((await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'4'},undefined,ta)).status,200);
  const body={request_id:randomUUID(),group_name:'  Shanghai Entrepreneurs Meetup  '};const before=(await overview()).groups;
  const job=await req('/group-onboarding/discover','POST',body,a.id);assert.equal(job.status,202);assert.equal(job.data.requested_group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await req('/group-onboarding/discover','POST',body,a.id)).data.id,job.data.id);
- const task=(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'2'},undefined,ta)).data.task;assert.equal(task.group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await report(task,{candidates:[]})).status,200);
+ const task=(await req('/runtime/group-onboarding/claim','POST',{...identity(a.id),version:'4'},undefined,ta)).data.task;assert.equal(task.group_name,'Shanghai Entrepreneurs Meetup');assert.equal((await report(task,{candidates:[]})).status,200);
  const done=(await req('/group-onboarding/jobs/'+job.data.id,'GET',undefined,a.id)).data;assert.equal(done.status,'succeeded');assert.equal(done.requested_group_name,'Shanghai Entrepreneurs Meetup');assert.deepEqual(done.result.candidates,[]);assert.deepEqual((await overview()).groups,before);
 });
 

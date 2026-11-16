@@ -1,6 +1,8 @@
 """Idempotent admin-requested greeting through the normal policy/model sender."""
 import hashlib,json,sqlite3,sys,time,uuid
 from contextlib import closing
+def attempt_id(job,generation):
+ return job.hex if generation==0 else uuid.uuid5(job,'groupdesk-greeting-retry-'+str(generation)).hex
 def receipt_status(db,identifier,chat,now):
  if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='onboarding_admin_requests'").fetchone():return 'failed'
  request=db.execute('SELECT chat_id FROM onboarding_admin_requests WHERE id=?',(identifier,)).fetchone()
@@ -16,12 +18,31 @@ def receipt_status(db,identifier,chat,now):
   return 'failed' if all(r['status']=='failed' for r in sends) else 'uncertain'
  if db.execute('SELECT 1 FROM pending WHERE id=?',(identifier,)).fetchone() or (turn and turn['status']=='active' and turn['expires']>now):return 'queued'
  return 'failed'
+def earlier_status(db,job,generation,chat,now):
+ """A new attempt is permitted only if every earlier one has no send record."""
+ pending=False
+ for number in range(generation):
+  identifier=attempt_id(job,number)
+  request=db.execute('SELECT chat_id FROM onboarding_admin_requests WHERE id=?',(identifier,)).fetchone()
+  if request and request['chat_id']!=chat:raise ValueError('Wrong group')
+  turn=db.execute('SELECT chat_id,status,expires FROM turns WHERE id=?',(identifier,)).fetchone()
+  if turn and str(turn['chat_id'])!=chat:raise ValueError('Wrong group')
+  sends=db.execute('SELECT status FROM sends WHERE turn_id=?',(identifier,)).fetchall()
+  if any(row['status']=='sent' for row in sends):return 'sent'
+  if sends or turn and turn['status']=='sent':return 'uncertain'
+  if db.execute('SELECT 1 FROM pending WHERE id=?',(identifier,)).fetchone() or turn and turn['status']=='active' and turn['expires']>now:pending=True
+ return 'queued' if pending else 'failed'
 
-value=json.load(sys.stdin);identifier=str(uuid.UUID(value['job_id'])).replace('-','');chat=str(value['chat_id']);now=time.time()
+value=json.load(sys.stdin);job=uuid.UUID(value['job_id']);generation=value.get('retry_generation',0)
+if type(generation) is not int or not 0<=generation<=5:raise ValueError('Invalid retry generation')
+identifier=attempt_id(job,generation);chat=str(value['chat_id']);now=time.time()
 if value.get('check_only') is True:
  # Reconciliation must never create a table, reserve quota, or enqueue a send.
  with closing(sqlite3.connect('file:/limits-state/limits.sqlite3?mode=ro',uri=True)) as db:
   db.row_factory=sqlite3.Row;status=receipt_status(db,identifier,chat,now)
+  if generation:
+   earlier=earlier_status(db,job,generation,chat,now)
+   if status!='sent' and earlier!='failed':status=earlier
  print(json.dumps({'greeting_status':status,'chat_id':int(chat)}));sys.exit(0)
 
 from policy import Policy
@@ -29,6 +50,10 @@ import groupdesk_runtime as gd
 p=Policy('/limits-state')
 with p.db() as db:
  db.execute('CREATE TABLE IF NOT EXISTS onboarding_admin_requests(id TEXT PRIMARY KEY,chat_id TEXT NOT NULL,created REAL NOT NULL)')
+ if generation:
+  earlier=earlier_status(db,job,generation,chat,now)
+  if earlier!='failed':
+   print(json.dumps({'greeting_status':earlier,'chat_id':int(chat)}));sys.exit(0)
  existing=db.execute('SELECT chat_id FROM onboarding_admin_requests WHERE id=?',(identifier,)).fetchone()
  if existing:
   if existing['chat_id']!=chat:raise ValueError('Wrong group')
