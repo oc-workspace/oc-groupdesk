@@ -4,6 +4,8 @@ The website cannot access Docker or this Unix socket. Only its account-local
 Docker agent can request these fixed operations; host service binds one UUID.
 """
 import fcntl,hashlib,json,os,re,shutil,socketserver,sqlite3,subprocess,time,urllib.request,uuid
+from datetime import datetime
+from contextlib import closing
 from pathlib import Path
 
 class Failure(Exception):
@@ -33,6 +35,31 @@ def append_scope(conf,selected,chat,external):
  if name not in settings['allowed']:settings['allowed'].append(name)
  settings['compose']['services']['wechat-bridge'].setdefault('environment',{})['WECHAT_ALLOWED_GROUPS']=json.dumps(list(settings['bridge']),ensure_ascii=False)
  return settings
+
+def proven_preinput_failures(persist,job,generation,chat):
+ """Clear only failed attempts whose exact send stopped before UI input."""
+ if not generation:return []
+ root=Path(persist)
+ paths=[root/'limits/limits.sqlite3',root/'bridge/delivery.sqlite3',root/'wechat/bowxt/messages.db',root/'reader/data/archive.sqlite3']
+ try:
+  with closing(sqlite3.connect('file:'+str(paths[0])+'?mode=ro',uri=True)) as limits,closing(sqlite3.connect('file:'+str(paths[1])+'?mode=ro',uri=True)) as bridge,closing(sqlite3.connect('file:'+str(paths[2])+'?mode=ro',uri=True)) as bowxt,closing(sqlite3.connect('file:'+str(paths[3])+'?mode=ro',uri=True)) as archive:
+   proven=[];job_id=uuid.UUID(job)
+   for number in range(generation):
+    attempt=job_id.hex if number==0 else uuid.uuid5(job_id,'groupdesk-greeting-retry-'+str(number)).hex
+    sends=limits.execute('SELECT id,status FROM sends WHERE turn_id=?',(attempt,)).fetchall()
+    if not sends or any(status!='failed' for _,status in sends):continue
+    safe=True
+    for send_id,_ in sends:
+     outbound=bridge.execute('SELECT state,seq FROM outbound WHERE id=?',(send_id,)).fetchone()
+     if not outbound or outbound[0]!='failed' or not isinstance(outbound[1],int):safe=False;break
+     message=bowxt.execute('SELECT chat_id,direction,verified,delivery_status,delivery_error,content,timestamp FROM messages WHERE seq=?',(outbound[1],)).fetchone()
+     if not message or message[:5]!=(chat,'outgoing',0,'failed','WeChat search field was not found in the AT-SPI tree after one refresh'):safe=False;break
+     sent_at=datetime.fromisoformat(message[6].replace('Z','+00:00')).timestamp();lower,upper=sent_at-600,sent_at+600
+     if bowxt.execute("SELECT 1 FROM messages WHERE chat_id=? AND content=? AND seq<>? AND (verified=1 OR delivery_status='sent') LIMIT 1",(chat,message[5],outbound[1])).fetchone():safe=False;break
+     if archive.execute('SELECT 1 FROM messages WHERE chat_id=? AND content=? AND is_self=1 AND (source_at BETWEEN ? AND ? OR observed_at BETWEEN ? AND ?) LIMIT 1',(chat,message[5],lower,upper,lower,upper)).fetchone():safe=False;break
+    if safe:proven.append(number)
+   return proven
+ except (OSError,sqlite3.Error,ValueError,TypeError):return []
 
 class Driver:
  def __init__(self,bot_id,base='/opt'):
@@ -194,7 +221,8 @@ class Driver:
   if not check_only:need(all(self.verify(external).get(k) for k in ['wechat','reader','sender']),'not_ready')
   chat=next((int(k) for k,v in self.validate()['groups'].items() if v==external),None);need(chat is not None)
   code=(Path(__file__).parent/'greeting.py').read_text()
-  try:return {**self.exec('wechat-bridge',code,{'job_id':identifier(job),'chat_id':chat,'check_only':check_only,'retry_generation':retry_generation},timeout=25),'external_id':external,'chat_id':chat}
+  safe=proven_preinput_failures(self.persist,job,retry_generation,chat)
+  try:return {**self.exec('wechat-bridge',code,{'job_id':identifier(job),'chat_id':chat,'check_only':check_only,'retry_generation':retry_generation,'proven_preinput_failures':safe},timeout=25),'external_id':external,'chat_id':chat}
   except Failure:raise Failure('greeting_failed')
  def handle(self,task):
   need(isinstance(task,dict) and set(task)<={'id','kind','candidate','external_id','group_name','retry_generation'})

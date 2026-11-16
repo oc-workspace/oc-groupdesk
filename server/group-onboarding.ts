@@ -54,7 +54,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
   const flows=(await pool.query("SELECT j.id,j.kind,j.status,j.stage,j.group_id,j.created_at,g.name AS group_name,(j.status='succeeded' AND g.external_id IS NOT NULL AND g.revision=g.applied_revision) AS ready FROM group_onboarding_jobs j JOIN groups g ON g.deleted_at IS NULL AND g.id=j.group_id WHERE j.kind='connect' ORDER BY j.created_at DESC LIMIT 30")).rows;
   res.json({agent,jobs,versions,flows});
  });
- app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid(),group_name:z.string().trim().min(1).max(200).optional()}).strict().parse(req.body);if(b.group_name)requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE version IN ('2','3','4')")).rowCount,409,'指定群名读取运行端正在更新，请稍后刷新');const id=await transaction(db=>insertJob('discover',b.request_id,b.group_name?{group_name:b.group_name}:{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
+ app.post('/api/group-onboarding/discover',async(req,res)=>{await activeBot(req.botId!);await agentReady();const b=z.object({request_id:z.uuid(),group_name:z.string().trim().min(1).max(200).optional()}).strict().parse(req.body);if(b.group_name)requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE version IN ('2','3','4','5')")).rowCount,409,'指定群名读取运行端正在更新，请稍后刷新');const id=await transaction(db=>insertJob('discover',b.request_id,b.group_name?{group_name:b.group_name}:{},req.admin!.username,null,null,db));res.status(202).json(await readJob(id));});
  app.get('/api/group-onboarding/jobs/:id',async(req,res)=>res.json(await readJob(z.uuid().parse(req.params.id))));
  app.post('/api/group-onboarding/jobs/:id/retry',async(req,res)=>{
   await activeBot(req.botId!);await agentReady();const id=z.uuid().parse(req.params.id);
@@ -113,7 +113,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
  });
  app.post('/api/group-onboarding/jobs/:id/greeting/retry',async(req,res)=>{
   await activeBot(req.botId!);
-  requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE singleton=true AND version='4' AND seen_at>now()-interval '90 seconds'")).rowCount,409,'问候安全重试运行端正在更新，请稍后刷新');
+  requireCondition((await pool.query("SELECT 1 FROM group_onboarding_agent WHERE singleton=true AND version='5' AND seen_at>now()-interval '90 seconds'")).rowCount,409,'问候安全重试运行端正在更新，请稍后刷新');
   const parentId=z.uuid().parse(req.params.id),body=z.object({request_id:z.uuid(),confirmed:z.literal(true)}).strict().parse(req.body);
   const id=await transaction(async db=>{
    const parent=(await db.query("SELECT j.id,j.status,j.group_id,g.enabled,g.external_id,g.revision,g.applied_revision FROM group_onboarding_jobs j JOIN groups g ON g.id=j.group_id AND g.deleted_at IS NULL WHERE j.id=$1 AND j.kind='connect' FOR UPDATE OF j",[parentId])).rows[0];
@@ -136,11 +136,11 @@ const runtimeIdentity=z.object({contract:z.literal(1),instance_id:z.uuid(),accou
 async function identity(req:express.Request,value:unknown){const input=runtimeIdentity.parse(value),b=await activeBot(req.botId!);requireCondition(b.runtime_instance_id===input.instance_id&&b.account_fingerprint===input.account_fingerprint,403,onboardingErrors.scope_mismatch);return b;}
 export function registerOnboardingRuntime(app:express.Express){
  app.post('/api/runtime/group-onboarding/claim',async(req,res)=>{
-  const b=z.object({...runtimeIdentity.shape,version:z.enum(['1','2','3','4'])}).strict().parse(req.body);await identity(req,b);
+  const b=z.object({...runtimeIdentity.shape,version:z.enum(['1','2','3','4','5'])}).strict().parse(req.body);await identity(req,b);
   const task=await transaction(async db=>{
    await db.query('SELECT pg_advisory_xact_lock(78511971)');
    await db.query('INSERT INTO group_onboarding_agent(singleton,instance_id,seen_at,version) VALUES(true,$1,now(),$2) ON CONFLICT(singleton) DO UPDATE SET seen_at=now(),instance_id=excluded.instance_id,version=excluded.version',[b.instance_id,b.version]);
-   const j=(await db.query("SELECT * FROM group_onboarding_jobs WHERE (status='queued' OR (status='working' AND lease_until<now() AND ($1::boolean OR NOT(result @> '{\"receipt_only\":true}'::jsonb))) OR ($1::boolean AND kind='greeting' AND status='failed' AND error_code='greeting_pending' AND (lease_until IS NULL OR lease_until<now()))) AND ($2::boolean OR kind<>'greeting' OR coalesce((input->>'retry_generation')::integer,0)=0) ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END,created_at LIMIT 1 FOR UPDATE",[['3','4'].includes(b.version),b.version==='4'])).rows[0];if(!j)return null;
+   const j=(await db.query("SELECT * FROM group_onboarding_jobs WHERE (status='queued' OR (status='working' AND lease_until<now() AND ($1::boolean OR NOT(result @> '{\"receipt_only\":true}'::jsonb))) OR ($1::boolean AND kind='greeting' AND status='failed' AND error_code='greeting_pending' AND (lease_until IS NULL OR lease_until<now()))) AND ($2::boolean OR kind<>'greeting' OR coalesce((input->>'retry_generation')::integer,0)=0) ORDER BY CASE WHEN status='failed' THEN 1 ELSE 0 END,created_at LIMIT 1 FOR UPDATE",[['3','4','5'].includes(b.version),b.version==='5'])).rows[0];if(!j)return null;
    const receiptOnly=j.kind==='greeting'&&(j.status==='failed'||j.result?.receipt_only===true);
    const lease=randomUUID();await db.query("UPDATE group_onboarding_jobs SET status='working',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now(),result=result||$3,error_code=NULL WHERE id=$1",[j.id,lease,receiptOnly?{receipt_only:true}:{}]);
    const selected=j.kind==='connect'?(await pool.query('SELECT result FROM group_onboarding_jobs WHERE id=$1',[j.parent_id])).rows[0]?.result?.candidates?.find((c:any)=>c.id===j.input.candidate_id):null;

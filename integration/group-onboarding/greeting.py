@@ -18,8 +18,8 @@ def receipt_status(db,identifier,chat,now):
   return 'failed' if all(r['status']=='failed' for r in sends) else 'uncertain'
  if db.execute('SELECT 1 FROM pending WHERE id=?',(identifier,)).fetchone() or (turn and turn['status']=='active' and turn['expires']>now):return 'queued'
  return 'failed'
-def earlier_status(db,job,generation,chat,now):
- """A new attempt is permitted only if every earlier one has no send record."""
+def earlier_status(db,job,generation,chat,now,proven):
+ """An earlier send blocks replay unless its pre-input failure was proven."""
  pending=False
  for number in range(generation):
   identifier=attempt_id(job,number)
@@ -29,19 +29,22 @@ def earlier_status(db,job,generation,chat,now):
   if turn and str(turn['chat_id'])!=chat:raise ValueError('Wrong group')
   sends=db.execute('SELECT status FROM sends WHERE turn_id=?',(identifier,)).fetchall()
   if any(row['status']=='sent' for row in sends):return 'sent'
-  if sends or turn and turn['status']=='sent':return 'uncertain'
+  if turn and turn['status']=='sent':return 'uncertain'
+  if sends and not (number in proven and all(row['status']=='failed' for row in sends)):return 'uncertain'
   if db.execute('SELECT 1 FROM pending WHERE id=?',(identifier,)).fetchone() or turn and turn['status']=='active' and turn['expires']>now:pending=True
  return 'queued' if pending else 'failed'
 
 value=json.load(sys.stdin);job=uuid.UUID(value['job_id']);generation=value.get('retry_generation',0)
 if type(generation) is not int or not 0<=generation<=5:raise ValueError('Invalid retry generation')
+proven=value.get('proven_preinput_failures',[])
+if type(proven) is not list or any(type(n) is not int or not 0<=n<generation for n in proven):raise ValueError('Invalid pre-input proof')
 identifier=attempt_id(job,generation);chat=str(value['chat_id']);now=time.time()
 if value.get('check_only') is True:
  # Reconciliation must never create a table, reserve quota, or enqueue a send.
  with closing(sqlite3.connect('file:/limits-state/limits.sqlite3?mode=ro',uri=True)) as db:
   db.row_factory=sqlite3.Row;status=receipt_status(db,identifier,chat,now)
   if generation:
-   earlier=earlier_status(db,job,generation,chat,now)
+   earlier=earlier_status(db,job,generation,chat,now,proven)
    if status!='sent' and earlier!='failed':status=earlier
  print(json.dumps({'greeting_status':status,'chat_id':int(chat)}));sys.exit(0)
 
@@ -51,7 +54,7 @@ p=Policy('/limits-state')
 with p.db() as db:
  db.execute('CREATE TABLE IF NOT EXISTS onboarding_admin_requests(id TEXT PRIMARY KEY,chat_id TEXT NOT NULL,created REAL NOT NULL)')
  if generation:
-  earlier=earlier_status(db,job,generation,chat,now)
+  earlier=earlier_status(db,job,generation,chat,now,proven)
   if earlier!='failed':
    print(json.dumps({'greeting_status':earlier,'chat_id':int(chat)}));sys.exit(0)
  existing=db.execute('SELECT chat_id FROM onboarding_admin_requests WHERE id=?',(identifier,)).fetchone()
