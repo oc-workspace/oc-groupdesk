@@ -174,4 +174,42 @@ class GuiAndDiagnosticTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as t:
    directory=Path(t)/'reports';d.write_diagnostic(directory,d.diagnostic_event(self.report(),'inspect','info'))
    event=d.diagnostic_event(d.diagnostic_context(directory),'verify','success','gui','gui','gui');self.assertEqual(event['wechat_version'],'4.1.13.23');self.assertEqual(event['platform'],'linux');self.assertNotIn('path',event)
+class MacGuiProbeTests(unittest.TestCase):
+ def test_commands_require_consent_before_checking_or_writing(self):
+  with tempfile.TemporaryDirectory() as t, patch.object(d,'wechat_info',side_effect=AssertionError('inspection')):
+   for command,extra in [('install-mac-gui',[]),('verify-mac-gui',['--chat','Synthetic test group'])]:
+    argv=['tool',command,'--directory',t+'/probe','--report-directory',t+'/reports',*extra]
+    with patch.object(d.sys,'argv',argv),self.assertRaisesRegex(ValueError,'本人确认'):
+     d.main()
+   self.assertEqual(list(Path(t).iterdir()),[])
+
+ def test_verified_ocr_records_safe_probe_phase_and_never_claims_runtime_method(self):
+  with tempfile.TemporaryDirectory() as t, patch.object(d,'mac_gui_supported',return_value=True), patch.object(d,'detect_os',return_value='macos'), patch.object(d,'wechat_info',return_value={'detected_os':'macos','version':'4.1.13'}), patch.object(d.os,'geteuid',return_value=1000):
+   path=Path(t)/'probe';path.mkdir(mode=0o700)
+   binary=path/'wechat-gui-probe';binary.write_text('fixture');binary.chmod(0o700)
+   argv=['tool','verify-mac-gui','--directory',str(path),'--report-directory',t+'/reports','--chat','Synthetic private test group','--confirm-read']
+   with patch.object(d.sys,'argv',argv),patch.object(d.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()) as output:
+    run.return_value=Mock(returncode=0,stdout='passed\n')
+    d.main()
+    inputs=json.loads(run.call_args.kwargs['input'])
+    self.assertEqual(run.call_args.args[0],[str(binary)])
+    self.assertRegex(inputs['marker'],r'^GROUPDESK [23456789]{8}$')
+    self.assertNotIn(inputs['title'],output.getvalue())
+   result=d.read_diagnostics(t+'/reports')
+   event=result['events'][-1]
+   self.assertEqual((event['phase'],event['outcome'],event['used_method']),('mac_gui_probe','success','unknown'))
+   self.assertNotIn(inputs['title'],json.dumps(result))
+   self.assertNotIn(inputs['marker'],json.dumps(result))
+
+ def test_run_records_blocker_without_printing_raw_ocr(self):
+  with tempfile.TemporaryDirectory() as t, patch.object(d,'mac_gui_supported',return_value=True), patch.object(d,'detect_os',return_value='macos'), patch.object(d,'wechat_info',return_value={'detected_os':'macos'}),patch.object(d.os,'geteuid',return_value=1000):
+   path=Path(t)/'probe';path.mkdir(mode=0o700)
+   binary=path/'wechat-gui-probe';binary.write_text('fixture');binary.chmod(0o700)
+   argv=['tool','verify-mac-gui','--directory',str(path),'--report-directory',t+'/reports','--chat','Test group','--confirm-read']
+   with patch.object(d.sys,'argv',argv),patch.object(d.subprocess,'run',return_value=Mock(returncode=2,stdout='unexpected private fixture')),contextlib.redirect_stdout(io.StringIO()) as output:
+    with self.assertRaises(d.MacGuiError) as error:d.main()
+    self.assertNotIn('private fixture',str(error.exception)+output.getvalue())
+   event=d.read_diagnostics(t+'/reports')['events'][-1]
+   self.assertEqual((event['phase'],event['outcome'],event['failure_code'],event['used_method']),('mac_gui_probe','blocked','gui_not_verified','unknown'))
+
 if __name__=='__main__':unittest.main()

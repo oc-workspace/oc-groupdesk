@@ -1,11 +1,12 @@
 """GroupDesk target-device preflight, reader installation plan and one-use pairing.
 inspect/reader-plan are local and read-only; install-reader needs explicit consent.
-Never reads chats, captures keys, logs in, restarts WeChat or enables a bot.
+verify-mac-gui performs an explicitly authorized OCR check without emitting chat text.
 """
 import argparse,getpass,json,os,platform,re,shutil,subprocess,uuid,urllib.request,urllib.parse
 import hashlib,importlib.metadata,io,sys,tarfile,tempfile,venv
 from pathlib import Path
 APPROVED_SITE = 'https://groupdesk.rococo.dev'
+MAC_GUI_SOURCES = {}  # Populated by the authenticated download route.
 KEEPER_COMMIT='2225294fd0761e10ce15540f21e7dbb2ac304c3c'
 KEEPER_SHA256='7beed277d9bcb9d6a3715e5634a5f8ccda69af8c546030a098d170cddef48f31'
 KEEPER_URL='https://codeload.github.com/labazhou2024/chatlog-keeper/tar.gz/'+KEEPER_COMMIT
@@ -140,10 +141,10 @@ def reader_plan(report,reading_mode='auto'):
     gui=reading_mode=='gui'
     compare=reading_mode=='auto' and keeper['status'] not in ['project_verified_build','upstream_reported']
     route='gui_review' if gui else 'compare_database_and_gui' if compare else 'database_review'
-    return {'contract':3,'reading_mode':reading_mode,'route':route,'requires_user_confirmation':True,'gui':report.get('gui',gui_preflight()),'inspection':report,'recommended_tool':'gui' if gui else 'evaluate_candidates' if compare else choice,'gui_backup_available':True,'can_install_keeper_component':installable,'sources':{'chatlog':CHATLOG_DOC,'chatlog-keeper':KEEPER_DOC},'steps':[
+    return {'contract':3,'reading_mode':reading_mode,'route':route,'requires_user_confirmation':True,'gui':report.get('gui',gui_preflight()),'inspection':report,'recommended_tool':'gui' if gui else 'evaluate_candidates' if compare else choice,'gui_backup_available':True,'can_install_mac_gui_probe':reading_mode!='database' and native and mac_gui_supported() and bool(MAC_GUI_SOURCES),'can_install_keeper_component':installable,'sources':{'chatlog':CHATLOG_DOC,'chatlog-keeper':KEEPER_DOC},'steps':[
         '先核对实际微信版本、架构和安装方式；已有微信先保留，不同时安装两个读取工具。',
         '未验证不等于不可用；先核对两个数据库候选。数据库方案确实不可用时可以提出GUI备用，但先由本人确认，不能静默回退；显式选择GUI时不安装数据库读取组件。',
-        'GUI需对应平台的后台采集适配器、可操作微信桌面、稳定身份/去重/断点恢复；缺包记录gui_adapter_missing，不将本地AI能读屏当作完整接入。授权前不试读聊天，不上传截图、窗口内容或剪贴板。',
+        '原生 macOS 14+ 可用 install-mac-gui 准备组件，经本人同意后用 verify-mac-gui 做限定测试群的单次试读。持续采集仍需后台适配器、稳定身份、去重和断点恢复。',
         'project_verified_build仅表示构建匹配；upstream_reported仅为上游说明；needs_verification必须先核对兼容性，不直接执行安装。',
         '缺少微信时由本地AI先提供官方版本/来源/影响，确认安装后重新inspect；不为了兼容擅自覆盖日常微信。',
         'chatlog-keeper未发布PyPI：不能pip install chatlog-keeper。可安装固定提交的已校验源码；chatlog仅按官方文档核实具体版本和校验和后安装，不编造可用Release。',
@@ -154,13 +155,13 @@ def reader_plan(report,reading_mode='auto'):
     ],'changes_made':False,'account_read_verified':False,'groupdesk_runtime_verified':False}
 
 REPORT_METHODS={'unknown','chatlog_keeper','chatlog','gui','macos_wechat_export'}
-REPORT_PHASES={'inspect','plan','install','connect','verify'}
+REPORT_PHASES={'inspect','plan','install','connect','verify','mac_gui_probe'}
 REPORT_OUTCOMES={'info','planned','success','blocked','failed'}
 REPORT_ERRORS={'none','database_unavailable','gui_adapter_missing','gui_not_verified','login_required','permission_required','unsupported_platform','missing_components','install_failed','connection_failed','verification_failed','unknown'}
 def gui_preflight():
     # Presence only: no screen capture, clipboard, window titles or message inspection.
     os_name=detect_os()
-    return {'candidate':os_name in ['linux','windows','macos'],'desktop_session_hint':bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')) if os_name=='linux' else 'not_checked','screen_access_verified':False,'wechat_session_verified':False,'groupdesk_gui_adapter_verified':False,'status':'needs_verification','notes':['本人确认后评估GUI备用，不静默切换','须有目标平台的持续采集适配器；AI能点击鼠标不等于已接入','微信需已登录、未锁定、桌面可操作；授权前不试读聊天']}
+    return {'candidate':os_name in ['linux','windows','macos'],'desktop_session_hint':bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')) if os_name=='linux' else 'not_checked','mac_gui_probe_available':mac_gui_supported() and bool(MAC_GUI_SOURCES),'screen_access_verified':False,'wechat_session_verified':False,'groupdesk_gui_adapter_verified':False,'status':'needs_verification','notes':['本人确认后评估GUI备用，不静默切换','须有目标平台的持续采集适配器；AI能点击鼠标不等于已接入','微信需已登录、未锁定、桌面可操作；授权前不试读聊天']}
 
 def diagnostic_event(report,phase,outcome,reading_mode='auto',selected_method='unknown',used_method='unknown',failure_code='none'):
     if reading_mode not in {'auto','database','gui'} or selected_method not in REPORT_METHODS or used_method not in REPORT_METHODS or phase not in REPORT_PHASES or outcome not in REPORT_OUTCOMES or failure_code not in REPORT_ERRORS:raise ValueError('不支持的安装记录字段')
@@ -185,6 +186,8 @@ def validate_diagnostics(value):
         if not re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}',event['report_id']):raise ValueError('安装报告编号格式不正确')
         uuid.UUID(event['report_id']);dt=datetime.fromisoformat(event['generated_at'].replace('Z','+00:00'))
         if not dt.tzinfo or len(event['generated_at'])>40 or event['phase'] not in REPORT_PHASES or event['outcome'] not in REPORT_OUTCOMES or event['reading_mode'] not in {'auto','database','gui'} or event['selected_method'] not in REPORT_METHODS or event['used_method'] not in REPORT_METHODS or event['failure_code'] not in REPORT_ERRORS:raise ValueError('不支持的安装诊断值')
+        if event['phase']=='mac_gui_probe' and (event['selected_method']!='gui' or event['reading_mode']=='database' or event['outcome']=='success' and (event['platform']!='macos' or event['failure_code']!='none')):
+            raise ValueError('Mac 界面试读报告需明确选择 GUI，且试读通过仅支持 macOS')
         if event['phase']=='verify' and event['outcome']=='success' and event['used_method']=='unknown':raise ValueError('本地试读成功时需注明实际读取方式')
         if event['used_method']!='unknown' and (event['phase']!='verify' or event['outcome']!='success'):raise ValueError('实际读取方式仅随成功的本地验收记录提交')
         if event['platform'] not in {'unknown','linux','macos','windows'} or event['arch'] not in {'unknown','x86_64','arm64','other'} or not isinstance(event['wechat_version'],str) or len(event['wechat_version'])>48 or not re.fullmatch(r'(?:unknown|\d{1,3}(?:\.[0-9A-Za-z]{1,12}){1,4}(?:[+() _-][0-9A-Za-z.+() _-]{1,16})?)',event['wechat_version']) or event['compatibility'] not in {'unknown','project_verified_build','upstream_reported','needs_verification','not_supported','wechat_not_detected'}:raise ValueError('版本或兼容性字段不正确')
@@ -321,6 +324,115 @@ def pair(site,bot_id,directory):
     return value
 
 
+def mac_gui_supported():
+    version = platform.mac_ver()[0].split('.')[0]
+    return detect_os() == 'macos' and version.isdecimal() and int(version) >= 14 and platform.machine() in {'arm64', 'x86_64'}
+
+
+def mac_gui_install(directory, confirmed):
+    if not confirmed:
+        raise ValueError('请先确认安装方案，再使用 --confirm-install。')
+    if not mac_gui_supported():
+        raise MacGuiError('unsupported_platform', '试读工具要求目标设备运行 macOS 14 或更新版本。')
+    if os.geteuid() == 0:
+        raise ValueError('请用 Mac 上登录微信的普通用户运行。')
+    if set(MAC_GUI_SOURCES) != {'ReadProbe.swift', 'LICENSE'}:
+        raise MacGuiError('missing_components', '请重新从 GroupDesk 下载包含 Mac 组件的配套工具。')
+    if not command(['/usr/bin/xcode-select', '-p'])['ok']:
+        raise MacGuiError('missing_components', 'Mac 尚未准备 Apple 命令行工具。请先按安装助手的提示确认安装。')
+    target = Path(directory).expanduser().absolute()
+    if target.exists() or target.is_symlink():
+        raise ValueError('请选择一个新的工具目录，保留原目录。')
+    private_report_directory(target)
+    for name, source in MAC_GUI_SOURCES.items():
+        (target / name).write_text(source, encoding='utf-8')
+    try:
+        with tempfile.TemporaryDirectory(prefix='build-', dir=target) as temporary:
+            compiled = Path(temporary) / 'wechat-gui-probe'
+            result = subprocess.run(
+                ['/usr/bin/xcrun', '--sdk', 'macosx', 'swiftc', '-parse-as-library', '-O',
+                 '-module-cache-path', str(Path(temporary) / 'cache'),
+                 '-target', platform.machine() + '-apple-macosx14.0',
+                 str(target / 'ReadProbe.swift'), '-o', str(compiled)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180, check=False,
+            )
+            if result.returncode or command([str(compiled), 'self-test']) != {'ok': True, 'version': 'ready'}:
+                raise MacGuiError('install_failed', '组件编译或启动检查失败，请检查 Apple 命令行工具版本后重试。')
+            compiled.chmod(0o700)
+            compiled.rename(target / 'wechat-gui-probe')
+    except (OSError, subprocess.TimeoutExpired):
+        raise MacGuiError('install_failed', '组件编译未完成，请检查 Apple 命令行工具并换一个新的安装目录。') from None
+
+
+class MacGuiError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def mac_gui_verify(directory, title, confirmed):
+    import secrets
+
+    if not confirmed:
+        raise ValueError('请本人确认当前 Mac、测试群和屏幕读取范围，再使用 --confirm-read。')
+    if not mac_gui_supported():
+        raise MacGuiError('unsupported_platform', '请在已登录微信的 macOS 14 或更新版本的桌面执行。')
+    if os.geteuid() == 0:
+        raise ValueError('请用 Mac 上登录微信的普通用户运行。')
+    title = title.strip()
+    if not 1 <= len(title) <= 160 or any(ord(char) < 32 for char in title):
+        raise ValueError('请填写专用测试群标题栏的完整名称。')
+    root = Path(directory).expanduser()
+    if not root.is_dir():
+        raise MacGuiError('missing_components', '请先安装 Mac 试读组件。')
+    probe = private_report_directory(root) / 'wechat-gui-probe'
+    if probe.is_symlink() or not probe.is_file() or probe.stat().st_uid != os.getuid() or probe.stat().st_mode & 0o077:
+        raise MacGuiError('missing_components', '找不到私有的 Mac 试读组件，请重新准备。')
+    marker = 'GROUPDESK ' + ''.join(secrets.choice('23456789') for _ in range(8))
+    print('请保持测试群打开、Mac 解锁。接收端输入框留空。请用另一台设备上的群成员账号，在这个测试群手动发送下面一整行：', flush=True)
+    print(marker, flush=True)
+    try:
+        result = subprocess.run([str(probe)], input=json.dumps({'title': title, 'marker': marker}),
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                timeout=105, check=False)
+    except subprocess.TimeoutExpired:
+        raise MacGuiError('gui_not_verified', '试读超时。请确认测试群可见，并且测试消息显示在聊天区，再试一次。') from None
+    except OSError:
+        raise MacGuiError('missing_components', '无法启动试读组件，请重新准备。') from None
+    status = result.stdout.strip()
+    if result.returncode == 0 and status == 'passed':
+        return
+    if status == 'permission_required':
+        raise MacGuiError(status, '请在系统设置 → 隐私与安全性 → 屏幕与系统录音，允许当前终端录屏，然后重新打开终端。')
+    if status == 'login_required':
+        raise MacGuiError(status, '请解锁 Mac、登录微信，打开唯一一个主窗口，并把它完整放在同一个屏幕上。')
+    raise MacGuiError('gui_not_verified', '没有核对到正确群标题和测试消息。请检查群标题、窗口布局和消息是否清晰可见。')
+
+
+def run_mac_gui(args):
+    phase = 'install' if args.action == 'install-mac-gui' else 'mac_gui_probe'
+    if not (args.confirm_install if phase == 'install' else args.confirm_read):
+        raise ValueError('请本人确认后再执行该步骤。')
+    desktop = {'detected_os': detect_os(), 'cpu_arch': platform.machine()}
+    desktop['wechat'] = wechat_info(desktop['detected_os'], desktop['cpu_arch'])
+    private_report_directory(args.report_directory)
+    try:
+        if phase == 'install':
+            mac_gui_install(args.directory, args.confirm_install)
+        else:
+            mac_gui_verify(args.directory, args.chat, args.confirm_read)
+    except MacGuiError as error:
+        write_diagnostic(args.report_directory, diagnostic_event(
+            desktop, phase, 'blocked', args.reading_mode, 'gui', failure_code=error.code,
+        ))
+        raise
+    write_diagnostic(args.report_directory, diagnostic_event(
+        desktop, phase, 'success', args.reading_mode, 'gui',
+    ))
+    print('Mac 试读组件已准备好，请继续登录和验证。' if phase == 'install' else
+          'Mac 微信界面试读通过，已保存安装摘要。持续收消息和机器人在线仍待单独验证。')
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);commands=p.add_subparsers(dest='action',required=True)
     for action in ['inspect','reader-plan']:
@@ -328,6 +440,16 @@ def main():
         a.add_argument('--maibot-container',type=container_name);a.add_argument('--bridge-container',type=container_name);a.add_argument('--wechat-container',type=container_name);a.add_argument('--reader-container',type=container_name);a.add_argument('--reader-directory');a.add_argument('--reading-mode',choices=['auto','database','gui'],default='auto');a.add_argument('--report-directory')
     a=commands.add_parser('install-reader',help='本人确认后准备固定源码组件；仅安装不等于已读通')
     a.add_argument('--directory',required=True);a.add_argument('--confirm-install',action='store_true');a.add_argument('--report-directory')
+    for action in ('install-mac-gui', 'verify-mac-gui'):
+        a = commands.add_parser(action, help='准备或验证 Mac 微信界面单群试读')
+        a.add_argument('--directory', required=True)
+        a.add_argument('--report-directory', required=True)
+        a.add_argument('--reading-mode', choices=['auto', 'gui'], default='gui')
+        if action == 'install-mac-gui':
+            a.add_argument('--confirm-install', action='store_true')
+        else:
+            a.add_argument('--chat', required=True)
+            a.add_argument('--confirm-read', action='store_true')
     a=commands.add_parser('pair',help='本人连接设备；有报告时自动上报仅含诊断摘要的记录')
     a.add_argument('--site',required=True);a.add_argument('--bot',required=True);a.add_argument('--directory',required=True);a.add_argument('--report-directory')
     a=commands.add_parser('record-report',help='记录本地步骤结果，不读取聊天；成功试读需本人确认已经实际验收')
@@ -343,6 +465,8 @@ def main():
             write_diagnostic(args.report_directory,diagnostic_event(report,'inspect' if args.action=='inspect' else 'plan','info' if args.action=='inspect' else 'planned',args.reading_mode,method))
             value['installation_report_saved']=True
         print(json.dumps(value,ensure_ascii=False,indent=2))
+    elif args.action in ('install-mac-gui', 'verify-mac-gui'):
+        run_mac_gui(args)
     elif args.action=='install-reader':
         try:
             value=install_reader(args.directory,args.confirm_install)

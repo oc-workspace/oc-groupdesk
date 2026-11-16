@@ -70,8 +70,15 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
  });
  app.get('/api/bots/:id/onboarding/device-tool',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);await task(id);
-  const script=await readFile(new URL('../integration/maibot/bots/device_setup.py',import.meta.url),'utf8');
-  res.type('text/x-python').attachment('groupdesk-device-setup.py').send(script.replace("APPROVED_SITE = 'https://groupdesk.rococo.dev'",'APPROVED_SITE = '+JSON.stringify(site())));
+  const [script,probe,license]=await Promise.all([
+   readFile(new URL('../integration/maibot/bots/device_setup.py',import.meta.url),'utf8'),
+   readFile(new URL('../integration/local-collector/macos-gui/ReadProbe.swift',import.meta.url),'utf8'),
+   readFile(new URL('../integration/local-collector/macos-gui/LICENSE',import.meta.url),'utf8'),
+  ]);
+  const bundled=script
+   .replace("APPROVED_SITE = 'https://groupdesk.rococo.dev'",()=> 'APPROVED_SITE = '+JSON.stringify(site()))
+   .replace('MAC_GUI_SOURCES = {}',()=> 'MAC_GUI_SOURCES = '+JSON.stringify({'ReadProbe.swift':probe,LICENSE:license}));
+  res.set('Cache-Control','private, no-store').type('text/x-python').attachment('groupdesk-device-setup.py').send(bundled);
  });
  app.post('/api/bots/:id/onboarding/install-assist',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);manage(req);requireCondition(allowed(req.admin!,'models.manage'),403,'没有模型与 Key 管理权限');
