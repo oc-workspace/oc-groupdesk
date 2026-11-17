@@ -113,7 +113,13 @@ test('failed greeting requires fresh v5 runtime and confirmation before a single
  assert.equal(await claim(),null); // Older agents cannot claim a retry generation.
  assert.equal(await v4(),null);
  const task=await v5();assert.equal(task.id,greeting.id);assert.equal(task.retry_generation,1);assert.equal(task.receipt_only,undefined);
- assert.equal((await report(task,{greeting_status:'sent',chat_id:2,external_id:parent.group.external_id})).status,200);
+ assert.equal((await report(task,{},'failed',{error_code:'not_ready'})).status,200);
+ const preflight=(await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,a.id)).data;
+ assert.equal(preflight.status,'failed');assert.equal(preflight.error_code,'not_ready');
+ const recovered=await req(path,'POST',{request_id:randomUUID(),confirmed:true},a.id);
+ assert.equal(recovered.status,202);assert.equal(recovered.data.status,'queued');
+ const retry=await v5();assert.equal(retry.id,greeting.id);assert.equal(retry.retry_generation,2);
+ assert.equal((await report(retry,{greeting_status:'sent',chat_id:2,external_id:parent.group.external_id})).status,200);
  assert.equal((await req(path,'POST',{request_id:randomUUID(),confirmed:true},a.id)).status,409);
  const done=(await req('/group-onboarding/jobs/'+greeting.id,'GET',undefined,a.id)).data;assert.equal(done.status,'succeeded');
 });
