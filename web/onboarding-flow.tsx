@@ -5,7 +5,7 @@ const statusName:Record<string,string>={queued:'排队中',working:'处理中',s
 export function OnboardingFlow({flow,activeJob,busy,action,onRefresh,onVerify,onGreeting,onRetryGreeting,canRetryGreeting,onViewTask,onOpenGroup,onRetry,onCancel}:{flow:any;activeJob:any;busy:boolean;action?:string;onRefresh:()=>void;onVerify:()=>void;onGreeting:()=>void;onRetryGreeting:()=>void;canRetryGreeting:boolean;onViewTask:(id:string)=>void;onOpenGroup:()=>void;onRetry:()=>void;onCancel:()=>void}){
  const follow=(kind:string)=>flow.followups?.[kind]||(activeJob?.parent_id===flow.id&&activeJob.kind===kind?activeJob:null);
   const verify=follow('verify'),greeting=follow('greeting');
-  const retryableGreeting=greeting?.status==='failed'&&greeting.error_code==='greeting_failed';
+  const retryableGreeting=greeting?.status==='failed'&&['greeting_failed','not_ready'].includes(greeting.error_code);
  const verified=verify?.status==='succeeded'&&verify.result?.wechat&&verify.result?.reader&&verify.result?.sender;
  const done=flow.ready;const waiting=['queued','working'].includes(flow.status)||(flow.status==='succeeded'&&!done);
  return <section className={'panel onboarding-panel onboarding-flow '+(done?'flow-complete':'')} aria-label="完整群接入流程">

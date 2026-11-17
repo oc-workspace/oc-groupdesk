@@ -121,7 +121,7 @@ export function registerOnboardingAdmin(app:express.Express,caller=callTextModel
    const greeting=(await db.query("SELECT * FROM group_onboarding_jobs WHERE parent_id=$1 AND kind='greeting' FOR UPDATE",[parentId])).rows[0];
    requireCondition(greeting,404,'本群尚无问候任务');
    if(greeting.input.retry_request_id===body.request_id)return greeting.id;
-   requireCondition(greeting.status==='failed'&&greeting.error_code==='greeting_failed',409,'只有明确失败的问候可以请求安全重试；待确认回执不能重发');
+   requireCondition(greeting.status==='failed'&&['greeting_failed','not_ready'].includes(greeting.error_code),409,'只有明确失败或发送前未就绪的问候可以请求安全重试；待确认回执不能重发');
    requireCondition(greeting.group_id===parent.group_id&&greeting.input.external_id===parent.external_id,409,onboardingErrors.scope_mismatch);
    const generation=(greeting.input.retry_generation||0)+1;requireCondition(generation<=5,409,'本次问候已达到安全尝试上限，请检查模型与运行记录');
    const input={...greeting.input,retry_generation:generation,retry_request_id:body.request_id};
