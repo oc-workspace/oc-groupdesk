@@ -10,6 +10,7 @@ export function requestActivityLabel(path:string,method='GET'):string|null{
  if(path==='/group-onboarding/suggest')return 'AI 正在生成配置建议…';
  if(path==='/topics/draft')return 'AI 正在完善话题草稿…';
  if(/^\/model-credentials\/[^/]+\/refresh$/.test(path))return '正在查询可用模型…';
+ if(/^\/keys\/[^/]+\/catalog$/.test(path))return '正在刷新指定 Key 的模型目录…';
  if(path==='/group-onboarding/discover')return '正在提交微信群读取任务…';
  if(path==='/group-onboarding/connect')return '正在提交新群接入…';
  if(/\/import$/.test(path))return '正在上传并整理素材…';
