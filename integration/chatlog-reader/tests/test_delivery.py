@@ -70,6 +70,19 @@ class DeliveryTests(unittest.TestCase):
         proof=self.agent.confirmed_send_reference(receipt)
         self.assertEqual((proof['epoch'],proof['seq'],proof['server_id']),(EPOCH,1,'1'))
         self.assertEqual(self.agent.confirmed_send_reference(receipt),proof)
+    def test_summary_confirms_at_actual_submission_after_queue_wait(self):
+        q=self.agent.send_text(1,'Synthetic reply',client_id='groupdesk-summary-test-0')
+        self.now+=600
+        receipt=replace(q,delivery_status='unverified',timestamp=datetime.fromtimestamp(self.now,timezone.utc).isoformat())
+        stale=self.confirmed(1,source_at=NOW+5,observed_at=NOW+6)
+        submitted=self.confirmed(2,source_at=self.now+86,observed_at=self.now+2)
+        self.source.rows=[stale,submitted]
+        self.now+=3
+        self.assertIsNone(self.agent.confirmed_send_reference(q))
+        proof=self.agent.confirmed_send_reference(receipt)
+        self.assertEqual((proof['epoch'],proof['seq'],proof['server_id']),(EPOCH,2,'2'))
+        self.assertEqual(len(self.sender.sent),1)
+
     def test_ambiguous_reader_rows_never_yield_a_quote_reference(self):
         self.sender.status='sent';q=self.send();self.source.rows=[self.confirmed(1),self.confirmed(2)];self.now+=3
         self.assertIsNone(self.agent.confirmed_send_reference(self.agent.wait_delivery(q)))

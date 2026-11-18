@@ -82,7 +82,17 @@ class ReaderAgent:
             except (AttributeError,TypeError,ValueError,sqlite3.Error):pass
         return queued
 
-    def _source_confirmation(self, anchor):
+    def _source_confirmation(self, anchor, submitted_at=None):
+        # A summary can stay in the native queue across a login outage.
+        start=math.ceil(anchor['started'])
+        end=anchor['started']+180
+        observed_start=anchor['started']
+        observed_end=self.clock()+2
+        if submitted_at is not None:
+            start=max(start,submitted_at-180)
+            end=submitted_at+180
+            observed_start=max(observed_start,submitted_at-2)
+            observed_end=min(observed_end,submitted_at+60)
         after=anchor['after_seq'];upper=None;matches=[]
         for _ in range(5):
             page=self.request('/v1/stream',{'chat':anchor['chat_id'],'after':after,'limit':200})
@@ -100,8 +110,8 @@ class ReaderAgent:
                 if not math.isfinite(at) or not math.isfinite(observed):return None
                 if (type(row.get('is_self')) is int and row['is_self']==1 and row.get('msg_type')==1
                     and re.fullmatch(r'[1-9]\d{0,20}',str(row.get('server_id') or ''))
-                    and math.ceil(anchor['started'])<=at<=anchor['started']+180
-                    and anchor['started']<=observed<=self.clock()+2
+                    and start<=at<=end
+                    and observed_start<=observed<=observed_end
                     and abs(at-observed)<=180
                     and isinstance(row.get('content'),str)
                     and hashlib.sha256(row['content'].strip().encode()).hexdigest()==anchor['text_sha256']):
@@ -160,7 +170,9 @@ class ReaderAgent:
         available only after the event-fed archive independently identifies
         exactly one outgoing message in the same chat after the send anchor.
         """
-        if getattr(receipt,'delivery_status',None)!='sent':return None
+        summary=str(getattr(receipt,'client_id','') or '').startswith('groupdesk-summary-')
+        statuses=('sent','unverified') if summary else ('sent',)
+        if getattr(receipt,'delivery_status',None) not in statuses:return None
         with self.db() as db:
             found=db.execute('SELECT * FROM reader_send_checks WHERE queued_seq=?',(getattr(receipt,'seq',None),)).fetchone()
         if not found:return None
@@ -170,14 +182,22 @@ class ReaderAgent:
             or not isinstance(receipt.content,str)
             or hashlib.sha256(receipt.content.strip().encode()).hexdigest()!=anchor['text_sha256']):return None
         if anchor['source_seq'] is None:
+            submitted_at=None
+            if summary:
+                try:
+                    submitted=datetime.fromisoformat(receipt.timestamp.replace('Z','+00:00'))
+                    if submitted.tzinfo is None:return None
+                    submitted_at=submitted.timestamp()
+                except (AttributeError,TypeError,ValueError):return None
+                if not anchor['started']-2<=submitted_at<=self.clock()+2:return None
             with self.db() as db:
                 overlap=db.execute('SELECT 1 FROM reader_send_checks WHERE queued_seq<? AND chat_id=? AND epoch=? AND text_sha256=? AND started>=? AND source_seq IS NULL LIMIT 1',
                     (receipt.seq,anchor['chat_id'],anchor['epoch'],anchor['text_sha256'],anchor['started']-180)).fetchone()
             if overlap:return None
-            for delay in (0,.25,.5,1,2):
-                if not 0<=self.clock()-anchor['started']<=180:break
+            for delay in ((0,) if summary else (0,.25,.5,1,2)):
+                if not summary and not 0<=self.clock()-anchor['started']<=180:break
                 if delay:self.sleeper(delay)
-                try:row=self._source_confirmation(anchor)
+                try:row=self._source_confirmation(anchor,submitted_at) if summary else self._source_confirmation(anchor)
                 except Exception:return None
                 if row:
                     try:

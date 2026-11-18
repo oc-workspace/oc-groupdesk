@@ -365,3 +365,37 @@ test('legacy queued snapshots get full rules and fresh statistics; old previews 
  const j=await job(id);assert.equal(j.status,'preview',j.error);assert.equal(j.template.instructions,legacy.entertainment);assert.equal(j.source.stats.stats_version,2);assert.equal(j.source.stats.characterRankings.length,2);
  await pool.query("UPDATE summary_jobs SET source=source#-'{stats,characterRankings}' WHERE id=$1",[id]);const before=await job(id);const r=await req('/summaries/jobs/'+id+'/publish','POST',{report});assert.equal(r.status,400);assert.match(r.data.error,/统计/);assert.deepEqual(await job(id),before);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });
+
+test('offline summaries keep the report and resume only the outstanding part after a lease expires',async()=>{
+ const id=await create(a,true);await source(id);await processSummary(caller);
+ await pool.query("INSERT INTO summary_parts(job_id,ordinal,body,status) VALUES($1,1,'Synthetic second part','waiting')",[id]);
+ const path='/runtime/summaries/jobs/'+id+'/part';
+ const delivery=(ready:boolean)=>req('/runtime/summaries/claim','POST',{external_id:a.external_id,kind:'delivery',sender_ready:ready},true);
+ const reportBefore=(await job(id)).report;
+ assert.equal((await delivery(false)).data.job,null);
+ assert.equal((await job(id)).progress.delivery_wait,'wechat');
+ await pool.query("UPDATE summary_jobs SET created_at=now()-interval '2 hours' WHERE id=$1",[id]);
+ await tick();
+ assert.equal((await job(id)).status,'delivery_ready');
+ const first=(await delivery(true)).data.job;
+ const body={token:first.token,ordinal:0,action:'reserve'};
+ assert.equal((await req(path,'POST',body,true)).data.send,true);
+ const wait={...body,action:'defer',reason:'confirmation'};
+ assert.equal((await req(path,'POST',wait,true)).status,200);
+ assert.equal((await req(path,'POST',wait,true)).status,200);
+ const second=(await delivery(true)).data.job;
+ assert.equal(second.parts[0].status,'reserved');
+ assert.equal((await req(path,'POST',{...body,token:second.token},true)).data.send,false);
+ assert.equal((await req(path,'POST',{...body,token:second.token,ordinal:1},true)).status,409);
+ const proof={epoch:'b'.repeat(32),seq:2100,server_id:'123456700',confirmed_at:new Date().toISOString()};
+ assert.equal((await req(path,'POST',{...body,token:second.token,action:'sent',proof},true)).status,200);
+ await pool.query("UPDATE summary_jobs SET lease_until=now()-interval '1 second' WHERE id=$1",[id]);
+ await tick();
+ const third=(await delivery(true)).data.job;
+ assert.deepEqual(third.parts.map((part:any)=>part.status),['sent','waiting']);
+ assert.equal((await job(id)).report,reportBefore);
+ const remaining={token:third.token,ordinal:1};
+ assert.equal((await req(path,'POST',{...remaining,action:'reserve'},true)).data.send,true);
+ assert.equal((await req(path,'POST',{...remaining,action:'sent',proof:{...proof,seq:2101,server_id:'123456701'}},true)).status,200);
+ assert.equal((await job(id)).status,'sent');
+});
