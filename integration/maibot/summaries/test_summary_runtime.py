@@ -1,4 +1,5 @@
-import asyncio,json,tempfile,time,unittest
+import asyncio,sqlite3,time,unittest
+from contextlib import contextmanager
 from datetime import datetime,timezone
 from types import SimpleNamespace as N
 from unittest.mock import patch
@@ -26,18 +27,30 @@ class RecordTests(unittest.TestCase):
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
  def setUp(self):
-  self.calls=[];self.sent=[];self.reserved=set();self.p={'enabled':True,'valid_until':time.time()+75,'external_id':'synthetic','revision':7,'policy':{'language':{'mode':'follow','allowed':[]}}}
+  self.db=sqlite3.connect(':memory:',check_same_thread=False)
+  self.addCleanup(self.db.close)
+  self.db.execute('CREATE TABLE outbound(id TEXT PRIMARY KEY,state TEXT,seq INTEGER)')
+  self.calls=[];self.sent=[];self.p={'enabled':True,'valid_until':time.time()+75,'external_id':'synthetic','revision':7,'policy':{'language':{'mode':'follow','allowed':[]}}}
   self.chat=N(id=1);self.bridge=N(control=lambda:{'enabled':True,'send_enabled':True},chats={1:self.chat},policy=N(cfg={'managed_groups':{'1':self.p}}),health={'verified_sends':0},send_lock=asyncio.Lock())
   self.proof={'epoch':'a'*32,'seq':10,'server_id':'123','confirmed_at':datetime.now(timezone.utc).isoformat()}
-  self.bridge.agent=N(get_history=lambda *a,**kw:[message()],send_text=self.send,wait_delivery=lambda *a,**kw:N(seq=10,delivery_status='sent'),confirmed_send_reference=lambda *a:self.proof)
-  self.bridge.ledger=N(reserve=self.reserve,finish=lambda *a:None)
+  self.status={'running':True,'wechat_connected':True}
+  self.make_receipt=lambda seq:message(seq,direction='outgoing',client_id=self.sent[seq-10][1]['client_id'],
+    content=self.sent[seq-10][0][1],timestamp=datetime.now(timezone.utc).isoformat(),delivery_status='sent')
+  self.bridge.agent=N(get_history=lambda *a,**kw:[message()],send_text=self.send,status=lambda:self.status.copy(),
+   get_message=lambda seq:self.make_receipt(seq),confirmed_send_reference=lambda *a:self.proof)
+  self.bridge.ledger=N(reserve=self.reserve,finish=self.finish,connect=self.connect)
   self.job={'id':'synthetic-job','token':'synthetic-token','external_id':'synthetic','group_revision':7,'start':START.isoformat(),'end':END.isoformat(),'parts':[{'ordinal':0,'body':'A short synthetic summary.'}]}
+ @contextmanager
+ def connect(self):
+  with self.db:yield self.db
  def reserve(self,key):
-  if key in self.reserved:return False
-  self.reserved.add(key);return True
- def send(self,*a,**kw):self.sent.append((a,kw));return N(seq=10)
+  with self.connect() as db:
+   return db.execute("INSERT OR IGNORE INTO outbound(id,state) VALUES (?, 'reserved')",(key,)).rowcount==1
+ def finish(self,key,state,seq):
+  with self.connect() as db:db.execute('UPDATE outbound SET state=?,seq=? WHERE id=?',(state,seq,key))
+ def send(self,*a,**kw):self.sent.append((a,kw));return N(seq=9+len(self.sent))
  def api(self,path,body):
-  self.calls.append((path,body));return {'send':True,'text':'A short synthetic summary.'} if body.get('action')=='reserve' else {'ok':True}
+  self.calls.append((path,body));return {'send':True,'text':self.job['parts'][body['ordinal']]['body']} if body.get('action')=='reserve' else {'ok':True}
  async def test_source_uses_existing_server_history_without_any_send(self):
   with patch.object(s.gd,'api',side_effect=self.api):await s.source(self.bridge,self.chat,self.job)
   self.assertEqual(self.sent,[]);self.assertEqual(self.calls[0][1]['messages'][0]['text'],'Synthetic discussion')
@@ -79,12 +92,18 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'sent');self.assertEqual(self.calls[-1][1]['proof'],self.proof);self.assertTrue(self.sent[0][1]['client_id'].startswith('groupdesk-summary-'))
  async def test_ui_sent_without_native_id_remains_uncertain_and_is_not_retried(self):
   self.bridge.agent.confirmed_send_reference=lambda *a:None
+  make=self.make_receipt
+  def previous_receipt(seq):
+   receipt=make(seq)
+   receipt.timestamp=START.isoformat()
+   return receipt
+  self.make_receipt=previous_receipt
   with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):await s.deliver(self.bridge,self.chat,self.job)
   self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'uncertain')
  async def test_duplicate_or_uncertain_local_reservation_never_replays_send(self):
   self.reserve('summary-synthetic-job-0')
   with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):
-   with self.assertRaises(ValueError):await s.deliver(self.bridge,self.chat,self.job)
+   await s.deliver(self.bridge,self.chat,self.job)
   self.assertFalse(self.sent);self.assertEqual(self.calls[-1][1]['action'],'uncertain')
  async def test_closed_control_expired_profile_and_wrong_revision_block_delivery(self):
   for mutate in [lambda:self.bridge.__setattr__('control',lambda:{'enabled':False,'send_enabled':False}),lambda:self.p.update(valid_until=0),lambda:self.p.update(revision=8)]:
@@ -95,9 +114,46 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
   with patch.object(s.gd,'api',return_value={'send':False}),patch.object(s.gd,'check_remote_revision',return_value=True):await s.deliver(self.bridge,self.chat,self.job)
   self.assertFalse(self.sent)
  async def test_unconfirmed_send_stops_following_segments(self):
-  self.job['parts'].append({'ordinal':1,'body':'second part'});self.bridge.agent.wait_delivery=lambda *a,**kw:N(seq=10,delivery_status='unknown')
+  self.job['parts'].append({'ordinal':1,'body':'second part'});self.bridge.agent.get_message=lambda seq:message(seq,direction='outgoing',delivery_status='unknown',client_id=self.sent[0][1]['client_id'],content=self.sent[0][0][1])
   with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):await s.deliver(self.bridge,self.chat,self.job)
   self.assertEqual(len(self.sent),1);self.assertEqual(self.calls[-1][1]['action'],'uncertain')
+ async def test_locked_sender_preserves_unqueued_part(self):
+  self.status['ui_input_blocked']=True
+  with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):
+   await s.deliver(self.bridge,self.chat,self.job)
+  self.assertFalse(self.sent)
+  self.assertEqual([body['action'] for _,body in self.calls],['defer'])
+  self.assertEqual(self.calls[0][1]['reason'],'wechat')
+ async def test_pending_survives_a_new_lease_and_sends_next_part_without_replaying(self):
+  self.job['parts'].append({'ordinal':1,'body':'The second synthetic part.'})
+  make=self.make_receipt
+  def still_queued(seq):
+   receipt=make(seq)
+   receipt.delivery_status='pending'
+   receipt.timestamp=START.isoformat()
+   return receipt
+  self.make_receipt=still_queued
+  with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):
+   await s.deliver(self.bridge,self.chat,self.job)
+   self.assertEqual(self.calls[-1][1]['reason'],'confirmation')
+   self.assertEqual(s.queued_sequence(self.bridge.ledger,'summary-synthetic-job-0'),10)
+   self.job['parts'][0]['status']='reserved'
+   self.status['wechat_connected']=False
+   await s.deliver(self.bridge,self.chat,self.job)
+   self.assertEqual(self.calls[-1][1]['reason'],'wechat')
+   self.status['wechat_connected']=True
+   self.make_receipt=make
+   await s.deliver(self.bridge,self.chat,self.job)
+  self.assertEqual([body['ordinal'] for _,body in self.calls if body['action']=='sent'],[0,1])
+  self.assertEqual(len(self.sent),2)
+  self.assertEqual([body['ordinal'] for _,body in self.calls if body['action']=='reserve'],[0,1])
+ async def test_recovered_job_skips_proven_first_part(self):
+  self.job['parts'][0]['status']='sent'
+  self.job['parts'].append({'ordinal':1,'body':'The second synthetic part.'})
+  with patch.object(s.gd,'api',side_effect=self.api),patch.object(s.gd,'check_remote_revision',return_value=True):
+   await s.deliver(self.bridge,self.chat,self.job)
+  self.assertEqual([body['ordinal'] for _,body in self.calls],[1,1])
+  self.assertEqual(len(self.sent),1)
  async def test_failed_ack_retries_only_ack(self):
   failures=0
   def api(path,body):

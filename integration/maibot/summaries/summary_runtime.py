@@ -74,38 +74,96 @@ async def source(bridge,chat,job):
     try:await asyncio.to_thread(gd.api,path,payload)
     except Exception as exc:bridge.health['summary_error']=type(exc).__name__
 
+async def sender_ready(bridge):
+    try:
+        status=await asyncio.to_thread(bridge.agent.status)
+    except Exception:
+        return False
+    return (status.get('running') is True and status.get('wechat_connected') is True
+            and not status.get('paused') and not status.get('ui_input_blocked'))
+
+def queued_sequence(ledger, identifier):
+    with ledger.connect() as db:
+        row=db.execute('SELECT seq FROM outbound WHERE id=?',(identifier,)).fetchone()
+    return row[0] if row else None
+
+async def part_result(path,payload):
+    for attempt in range(3):
+        try:
+            return await asyncio.to_thread(gd.api,path,payload)
+        except OSError as exc:
+            if getattr(exc,'code',0) in range(400,500) or attempt==2:
+                raise
+            await asyncio.sleep(1)
+
+async def reconcile_part(bridge,seq,identifier,chat,body):
+    try:
+        receipt=await asyncio.to_thread(bridge.agent.get_message,seq)
+    except Exception:
+        return 'defer',None
+    if (receipt.seq!=seq or receipt.chat_id!=chat.id or receipt.client_id!='groupdesk-'+identifier
+        or receipt.direction!='outgoing' or str(receipt.content).strip()!=body.strip()):
+        return 'uncertain',None
+    if receipt.delivery_status=='pending':
+        return 'defer',None
+    if receipt.delivery_status=='failed':
+        return 'failed',None
+    if receipt.delivery_status not in ('sent','unverified'):
+        return 'uncertain',None
+    try:
+        proof=await asyncio.to_thread(bridge.agent.confirmed_send_reference,receipt)
+    except Exception:
+        proof=None
+    if proof:
+        return 'sent',proof
+    try:
+        within_confirmation=time.time()-aware(receipt.timestamp).timestamp()<60
+    except (ValueError,TypeError):
+        within_confirmation=False
+    return ('defer' if within_confirmation else 'uncertain'),None
+
 async def deliver(bridge,chat,job):
     async with bridge.send_lock:
         for part in job['parts']:
-            ordinal=part['ordinal'];identifier='summary-'+job['id']+'-'+str(ordinal);path='/summaries/jobs/'+job['id']+'/part'
+            if part.get('status')=='sent':
+                continue
+            ordinal=part['ordinal']
+            identifier='summary-'+job['id']+'-'+str(ordinal)
+            path='/summaries/jobs/'+job['id']+'/part'
+            scope={'token':job['token'],'ordinal':ordinal}
             p=gd.profile(bridge.policy.cfg,str(chat.id))
-            if not bridge.control()['enabled'] or not bridge.control()['send_enabled'] or not gd.available(p,time.time()):return
-            if p['external_id']!=job['external_id'] or p['revision']!=job['group_revision'] or not await asyncio.to_thread(gd.check_remote_revision,p):return
-            if not isinstance(part['body'],str) or not 1<=len(part['body'])<=2000 or not gd.language_allowed(p,part['body']):return
-            reserved=await asyncio.to_thread(gd.api,path,{'token':job['token'],'ordinal':ordinal,'action':'reserve'})
-            if not reserved.get('send'):return
-            state='uncertain';proof=None
-            try:
-                if not bridge.ledger.reserve(identifier):raise ValueError('Already reserved or uncertain')
-                queued=await asyncio.to_thread(bridge.agent.send_text,chat.id,reserved['text'],client_id='groupdesk-'+identifier)
-                receipt=await asyncio.to_thread(bridge.agent.wait_delivery,queued,timeout=60)
-                state=receipt.delivery_status if receipt.delivery_status in ['sent','failed'] else 'uncertain'
-                if state=='sent':
-                    reference=getattr(bridge.agent,'confirmed_send_reference',None)
-                    try:proof=await asyncio.to_thread(reference,receipt) if callable(reference) else None
-                    except Exception:proof=None
-                    state='sent' if proof else 'uncertain'
-                bridge.ledger.finish(identifier,state,getattr(receipt,'seq',None))
-                if state=='sent':bridge.health['verified_sends']+=1
-            finally:
-                # ACK may be retried; the actual send is never replayed.
-                for attempt in range(3):
+            if not bridge.control()['enabled'] or not bridge.control()['send_enabled'] or not gd.available(p,time.time()):
+                return
+            if p['external_id']!=job['external_id'] or p['revision']!=job['group_revision'] or not await asyncio.to_thread(gd.check_remote_revision,p):
+                return
+            if not isinstance(part['body'],str) or not 1<=len(part['body'])<=2000 or not gd.language_allowed(p,part['body']):
+                return
+            if not await sender_ready(bridge):
+                await part_result(path,{**scope,'action':'defer','reason':'wechat'})
+                return
+            if part.get('status')!='reserved':
+                reserved=await asyncio.to_thread(gd.api,path,{**scope,'action':'reserve'})
+                if not reserved.get('send'):
+                    return
+                if bridge.ledger.reserve(identifier):
                     try:
-                        await asyncio.to_thread(gd.api,path,{'token':job['token'],'ordinal':ordinal,'action':state,**({'proof':proof} if state=='sent' else {})});break
+                        queued=await asyncio.to_thread(bridge.agent.send_text,chat.id,reserved['text'],client_id='groupdesk-'+identifier)
+                        bridge.ledger.finish(identifier,'pending',queued.seq)
                     except Exception:
-                        if attempt==2:raise
-                        await asyncio.sleep(1)
-            if state!='sent':return
+                        # A request can fail after reaching the sender; never
+                        # submit a second copy without knowing the outcome.
+                        await part_result(path,{**scope,'action':'uncertain'})
+                        return
+            seq=queued_sequence(bridge.ledger,identifier)
+            state,proof=await reconcile_part(bridge,seq,identifier,chat,part['body']) if seq is not None else ('uncertain',None)
+            if state=='defer':
+                await part_result(path,{**scope,'action':'defer','reason':'confirmation'})
+                return
+            bridge.ledger.finish(identifier,state,seq)
+            await part_result(path,{**scope,'action':state,**({'proof':proof} if proof else {})})
+            if state!='sent':
+                return
+            bridge.health['verified_sends']+=1
 
 async def commands(bridge,chat,profile):
     page=getattr(bridge.agent,'summary_command_page',None)
@@ -165,7 +223,7 @@ async def step(bridge):
         result=await asyncio.to_thread(gd.api,'/summaries/claim',{'external_id':p['external_id'],'kind':'source'})
         if result.get('job'):await source(bridge,chat,result['job'])
         if bridge.control()['send_enabled']:
-            result=await asyncio.to_thread(gd.api,'/summaries/claim',{'external_id':p['external_id'],'kind':'delivery'})
+            result=await asyncio.to_thread(gd.api,'/summaries/claim',{'external_id':p['external_id'],'kind':'delivery','sender_ready':await sender_ready(bridge)})
             if result.get('job'):await deliver(bridge,chat,result['job'])
 
 async def run(bridge):

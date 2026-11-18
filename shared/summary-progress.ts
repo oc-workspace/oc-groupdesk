@@ -8,5 +8,7 @@ export function summaryProgressText(job:{status:string;progress?:Record<string,a
  if(p.strategy==='hierarchical')parts.push(`分段归纳 ${p.completed_model_batches||0}/${p.model_batches} · 最后统一合并跨时段话题`);
  if(p.phase==='reducing')parts.push(`正在合并中间归纳 · 第 ${p.merge_round} 轮`);
  if(p.phase==='merging')parts.push('正在生成全天最终总结');
+ if(job.status==='delivery_ready'&&p.delivery_wait==='wechat')parts.push('等待微信恢复，已保留总结正文和发送进度');
+ if(job.status==='delivery_ready'&&p.delivery_wait==='confirmation')parts.push('等待核对微信回执，确认后继续发送剩余分段');
  return parts.join('；');
 }

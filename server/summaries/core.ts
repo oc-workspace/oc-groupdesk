@@ -46,7 +46,10 @@ export async function enqueue(db:Db,groupId:string,window:unknown,publish:boolea
 export async function tick(now=Date.now()){
  await pool.query('DELETE FROM summary_source_cache WHERE expires_at<=now()');
  await pool.query("DELETE FROM summary_source_batches b USING summary_jobs j WHERE b.job_id=j.id AND j.status<>'reading'");
- await pool.query("UPDATE summary_jobs SET status=CASE WHEN status='delivering' THEN 'uncertain' ELSE 'failed' END,error=CASE WHEN status='delivering' THEN '发送确认中断，请核实群内消息，系统不会自动重发' ELSE '任务超时或被中断，请手动重新创建' END,source=NULL,finished_at=now() WHERE (status IN ('reading','generating','delivering') AND lease_until<now()) OR (status IN ('waiting_source','queued','delivery_ready') AND created_at<now()-interval '1 hour')");
+ await pool.query(`UPDATE summary_jobs
+   SET status='delivery_ready',lease_until=NULL,progress=progress||'{"delivery_wait":"confirmation"}'::jsonb
+   WHERE status='delivering' AND lease_until<now() AND progress->>'delivery_resumable'='true'`);
+ await pool.query("UPDATE summary_jobs SET status=CASE WHEN status='delivering' THEN 'uncertain' ELSE 'failed' END,error=CASE WHEN status='delivering' THEN '发送确认中断，请核实群内消息，系统不会自动重发' ELSE '任务超时或被中断，请手动重新创建' END,source=NULL,finished_at=now() WHERE (status IN ('reading','generating','delivering') AND lease_until<now()) OR ((status IN ('waiting_source','queued') OR (status='delivery_ready' AND progress->>'delivery_resumable' IS DISTINCT FROM 'true')) AND created_at<now()-interval '1 hour')");
  for(let i=0;i<20;i++){
   const worked=await transaction(async db=>{
    const s=(await db.query('SELECT * FROM summary_schedules WHERE enabled AND next_run<=$1 ORDER BY next_run FOR UPDATE SKIP LOCKED LIMIT 1',[new Date(now)])).rows[0];if(!s)return false;

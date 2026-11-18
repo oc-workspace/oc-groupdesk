@@ -50,7 +50,7 @@ export function registerSummaryRuntime(app:express.Express){
  registerSourceBatches(app,authorized);
  registerSummaryCommands(app);
  app.post('/api/runtime/summaries/claim',async(req,res)=>{
-  const b=z.object({external_id:z.string().min(1).max(200),kind:z.enum(['source','delivery'])}).parse(req.body);
+  const b=z.object({external_id:z.string().min(1).max(200),kind:z.enum(['source','delivery']),sender_ready:z.boolean().optional()}).parse(req.body);
   const result=await transaction(async db=>{
    const g=(await db.query('SELECT id FROM groups WHERE deleted_at IS NULL AND external_id=$1',[b.external_id])).rows[0];requireCondition(g,404,'群不存在');await authorized(req,g.id,db);
    await db.query('UPDATE summary_settings SET last_adapter_seen=now() WHERE group_id=$1',[g.id]);
@@ -60,8 +60,17 @@ export function registerSummaryRuntime(app:express.Express){
     const cached=await readCachedSource(db,j);
     if(cached){await queueCachedSource(db,j.id,cached);await audit('summary','summary.cache_reused',j.id,{cache_id:cached.progress.cache_id},db);return null;}
    }
+   if(b.kind==='delivery'&&b.sender_ready===false){
+    await db.query(`UPDATE summary_jobs
+      SET progress=coalesce(progress,'{}'::jsonb)||'{"delivery_resumable":true,"delivery_wait":"wechat"}'::jsonb
+      WHERE group_id=$1 AND status='delivery_ready' AND progress->>'delivery_wait' IS DISTINCT FROM 'wechat'`,[g.id]);
+    return null;
+   }
+   if(b.kind==='delivery'&&b.sender_ready===true){
+    await db.query(`UPDATE summary_jobs SET progress=(coalesce(progress,'{}'::jsonb)-'delivery_wait')||'{"delivery_resumable":true}'::jsonb WHERE id=$1`,[j.id]);
+   }
    const token=randomUUID();await db.query('UPDATE summary_jobs SET status=$2,lease_until=now()+interval \'2 minutes\',source_token=CASE WHEN $3 THEN $4 ELSE source_token END,delivery_token=CASE WHEN $3 THEN delivery_token ELSE $4 END WHERE id=$1',[j.id,b.kind==='source'?'reading':'delivering',b.kind==='source',token]);
-   return {id:j.id,token,external_id:j.external_id,group_revision:j.group_revision,start:j.window_start,end:j.window_end,...(b.kind==='delivery'?{parts:(await db.query('SELECT ordinal,body FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[j.id])).rows}:{})};
+   return {id:j.id,token,external_id:j.external_id,group_revision:j.group_revision,start:j.window_start,end:j.window_end,...(b.kind==='delivery'?{parts:(await db.query('SELECT ordinal,body,status FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[j.id])).rows}:{})};
   });res.json({job:result});
  });
  app.post('/api/runtime/summaries/jobs/:id/source',async(req,res)=>{
@@ -80,6 +89,7 @@ export function registerSummaryRuntime(app:express.Express){
   const id=uuid(req.params.id),b=z.discriminatedUnion('action',[
    z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.literal('reserve')}),
    z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.literal('sent'),proof}),
+   z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.literal('defer'),reason:z.enum(['wechat','confirmation'])}),
    z.object({token:z.uuid(),ordinal:z.number().int().min(0).max(7),action:z.enum(['failed','uncertain'])})
   ]).parse(req.body);
   const result=await transaction(async db=>{
@@ -90,6 +100,14 @@ export function registerSummaryRuntime(app:express.Express){
     if(part.status!=='waiting')return {send:false};
     requireCondition(!(await db.query("SELECT 1 FROM summary_parts WHERE job_id=$1 AND ordinal<$2 AND status<>'sent'",[id,b.ordinal])).rowCount,409,'前一段尚未确认');
     await db.query("UPDATE summary_parts SET status='reserved' WHERE job_id=$1 AND ordinal=$2",[id,b.ordinal]);await db.query("UPDATE summary_jobs SET lease_until=now()+interval '2 minutes' WHERE id=$1",[id]);return {send:true,text:part.body};
+   }
+   if(b.action==='defer'){
+    await valid(j,db,true);
+    if(j.status==='delivery_ready'&&j.progress?.delivery_wait===b.reason)return {ok:true};
+    requireCondition(j.status==='delivering'&&['waiting','reserved'].includes(part.status),409,'当前分段无法继续等待');
+    requireCondition(!(await db.query("SELECT 1 FROM summary_parts WHERE job_id=$1 AND ordinal<$2 AND status<>'sent'",[id,b.ordinal])).rowCount,409,'前一段尚未确认');
+    await db.query(`UPDATE summary_jobs SET status='delivery_ready',lease_until=NULL,progress=coalesce(progress,'{}'::jsonb)||jsonb_build_object('delivery_resumable',true,'delivery_wait',$2::text) WHERE id=$1`,[id,b.reason]);
+    return {ok:true};
    }
    if(part.status===b.action){
     if(b.action==='sent')requireCondition(part.source_epoch===b.proof.epoch&&Number(part.source_seq)===b.proof.seq&&part.wechat_server_id===b.proof.server_id,409,'发送确认与已存微信消息不一致');
