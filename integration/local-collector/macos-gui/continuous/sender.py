@@ -31,7 +31,8 @@ class MacSender:
             ready = health.get('state') == 'collecting' and 0 <= self.archive.clock()-health['updated_at'] < 30
         except (OSError, ValueError, KeyError, TypeError):
             ready = False
-        return {'wechat_connected': ready and self.executable is not None and self.capture is not None,
+        return {'running': ready and self.executable is not None and self.capture is not None,
+                'wechat_connected': ready and self.executable is not None and self.capture is not None,
                 'queue_depth': 0, 'ui_input_blocked': False,
                 'sender_ready': self.executable is not None and self.capture is not None}
 

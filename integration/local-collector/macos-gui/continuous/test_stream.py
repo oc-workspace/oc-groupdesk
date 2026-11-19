@@ -189,6 +189,15 @@ class StreamTests(unittest.TestCase):
         with patch.object(source.subprocess,'run') as run:
             run.return_value=type('Result',(),{'stdout':'{"error":"private chat"}','returncode':2})()
             with self.assertRaisesRegex(source.Blocked,'^capture_unavailable$'):capture.snapshot()
+    def test_hourly_inspection_receives_actual_running_flag(self):
+        binary=self.root/'capture';binary.write_text('fixture');binary.chmod(0o700)
+        sender=MacSender(self.archive,binary,binary)
+        self.archive.status('collecting')
+        self.assertTrue(sender.status()['running'])
+        self.assertTrue(sender.status()['wechat_connected'])
+        self.archive.status('blocked','login_required')
+        self.assertFalse(sender.status()['running'])
+        self.assertFalse(sender.status()['wechat_connected'])
     def test_sender_crash_is_not_retried_for_same_client_id(self):
         binary=self.root/'send';binary.write_text('fixture');binary.chmod(0o700)
         capture=self.root/'capture';capture.write_text('fixture');capture.chmod(0o700)
