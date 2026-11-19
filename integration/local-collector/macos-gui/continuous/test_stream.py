@@ -159,6 +159,20 @@ class StreamTests(unittest.TestCase):
         agent=source.GUIAgent(object(),self.archive)
         self.assertEqual(agent.claim(chat_ids=[31]),[]);self.assertFalse(agent.source_status['connected'])
         self.assertEqual(agent.claim(chat_ids=[42]),[])
+    def test_existing_bot_lifecycle_can_check_paused_source_and_reset_ingress(self):
+        first=self.baseline(message('a'))
+        current=source.normalize(self.cfg,snapshot(message('a'),message('new','Bob')))
+        self.archive.commit(first,current,current[1:]);self.archive.status('collecting')
+        delegate=type('Delegate',(),{'status':lambda _: {'wechat_connected':True,'queue_depth':0}})()
+        agent=source.GUIAgent(delegate,self.archive)
+        self.assertEqual(agent.request('/v1/status',{}),{'ok':True,'source':'macos_gui'})
+        self.assertTrue(agent.status()['wechat_connected'])
+        agent.reset_live_cursors([31])
+        self.assertEqual(agent.claim(chat_ids=[31]),[])
+        self.assertEqual(len(self.archive.page()),2)
+        self.archive.status('blocked','login_required')
+        self.assertFalse(agent.request('/v1/status',{})['ok'])
+        self.assertFalse(agent.status()['wechat_connected'])
     def test_second_collector_cannot_take_the_same_window_lock(self):
         with source.capture_lock(self.root):
             with self.assertRaisesRegex(source.Blocked,'collector_already_running'):

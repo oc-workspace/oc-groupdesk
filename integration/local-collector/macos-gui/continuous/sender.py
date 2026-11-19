@@ -24,6 +24,24 @@ class MacSender:
                           client_id TEXT NOT NULL UNIQUE,content_hash TEXT NOT NULL,status TEXT NOT NULL,
                           created TEXT NOT NULL)''')
 
+    def status(self):
+        try:
+            from mac_gui_stream import json_file
+            health = json_file(self.archive.root / 'health.json')
+            ready = health.get('state') == 'collecting' and 0 <= self.archive.clock()-health['updated_at'] < 30
+        except (OSError, ValueError, KeyError, TypeError):
+            ready = False
+        return {'wechat_connected': ready and self.executable is not None and self.capture is not None,
+                'queue_depth': 0, 'ui_input_blocked': False,
+                'sender_ready': self.executable is not None and self.capture is not None}
+
+    def get_message(self, seq):
+        with self.archive.db() as db:
+            row = db.execute('SELECT status FROM sends WHERE seq=?', (seq,)).fetchone()
+        if not row:
+            raise Blocked('send_not_found')
+        return SimpleNamespace(seq=seq, delivery_status=row['status'])
+
     def ensure_chat(self, name, _kind=None):
         group = self.archive.config['group']
         if name != group['name']:

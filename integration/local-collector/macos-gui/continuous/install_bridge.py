@@ -36,6 +36,13 @@ def install(package, runtime, expected_sha, confirmed=False, check=False):
             from mac_gui_stream import Archive, check_config, json_file
             from mac_gui_sender import MacSender
             config = check_config(json_file(os.environ['MAC_GUI_CONFIG']))
+            connection = json.loads(gd.CONNECTION.read_text())
+            expected_external = 'bowxt-' + config['bot_id'].replace('-', '') + ':' + str(config['group']['id'])
+            fingerprint = hashlib.sha256(config['account_id'].encode()).hexdigest()
+            if (connection.get('bot_id') != config['bot_id']
+                or connection.get('account_fingerprint') != fingerprint
+                or connection.get('groups', {}).get(str(config['group']['id'])) != expected_external):
+                raise ValueError('Mac GUI account, bot or group binding differs')
             archive = Archive(os.environ['MAC_GUI_STATE'], config)
             sender = MacSender(archive, os.environ.get('MAC_GUI_SENDER'), os.environ.get('MAC_GUI_CAPTURE'))
             self.agent = attach_mac_gui(sender, os.environ['MAC_GUI_CONFIG'], os.environ['MAC_GUI_STATE'])
@@ -50,7 +57,7 @@ def install(package, runtime, expected_sha, confirmed=False, check=False):
     text = text.replace(original_health, "self.health['data_source']='macos-gui' if getattr(self.agent,'source_kind',None)=='wechat_gui' else 'chatlog-keeper' if getattr(self.agent,'source_kind',None)=='wechat_database' else 'bowxt-ui'", 1)
     text = text.replace("if self.health['data_source']=='chatlog-keeper':self.health['reader']=dict(self.agent.source_status)",
                         "if self.health['data_source'] in {'chatlog-keeper','macos-gui'}:self.health['reader']=dict(self.agent.source_status)")
-    text = marker + '\n' + text
+    text = 'import hashlib\nimport json\n' + marker + '\n' + text
     ast.parse(text)
     files = {bridge: text.encode(), runtime/'limits/mac_gui_stream.py': (package/'stream.py').read_bytes(),
              runtime/'limits/mac_gui_sender.py': (package/'sender.py').read_bytes()}

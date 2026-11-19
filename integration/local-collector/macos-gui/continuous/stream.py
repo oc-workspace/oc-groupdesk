@@ -401,6 +401,34 @@ class GUIAgent:
     def __getattr__(self, name):
         return getattr(self.delegate, name)
 
+    def reader_health(self):
+        now = self.archive.clock()
+        try:
+            value = json_file(self.archive.root / 'health.json')
+            connected = value.get('state') == 'collecting' and 0 <= now - value['updated_at'] < 30
+        except (OSError, ValueError, KeyError, TypeError):
+            connected = False
+        self.source_status = {'source': 'macos_gui', 'connected': connected, 'checked_at': now}
+        return connected
+
+    def request(self, route, query):
+        if route != '/v1/status' or query:
+            raise Blocked('unsupported_gui_request')
+        return {'ok': self.reader_health(), 'source': 'macos_gui'}
+
+    def status(self):
+        value = self.delegate.status()
+        return {**value, 'wechat_connected': self.reader_health() and value.get('wechat_connected') is True}
+
+    def reset_live_cursors(self, chat_ids):
+        if set(chat_ids) != {self.archive.config['group']['id']} or not self.reader_health():
+            raise Blocked('source_unavailable')
+        with self.archive.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            maximum = db.execute('SELECT coalesce(max(seq),0) FROM messages').fetchone()[0]
+            db.execute('INSERT INTO consumers(name,after_seq) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET after_seq=excluded.after_seq,pending=NULL,lease_id=NULL,lease_until=0',
+                       (self.consumer, maximum))
+
     def claim(self, *, chat_ids=(), limit=4, lease_seconds=120, timeout=3,
               require_sender=True, require_at_me=False, replay_existing=False):
         if replay_existing or require_at_me:
@@ -408,14 +436,8 @@ class GUIAgent:
         if self.archive.config['group']['id'] not in chat_ids or limit < 1:
             return []
         now = self.archive.clock()
-        try:
-            health = json_file(self.archive.root / 'health.json')
-            if health.get('state') != 'collecting' or not 0 <= now - health['updated_at'] < 30:
-                raise Blocked('source_unavailable')
-        except (OSError, ValueError, KeyError):
-            self.source_status = {'source': 'macos_gui', 'connected': False, 'checked_at': now}
+        if not self.reader_health():
             return []
-        self.source_status = {'source': 'macos_gui', 'connected': True, 'checked_at': now}
         with self.archive.db() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute('INSERT OR IGNORE INTO consumers(name) VALUES(?)', (self.consumer,))

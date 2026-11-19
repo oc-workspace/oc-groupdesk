@@ -29,7 +29,7 @@
 
 需要已经准备好的本机器人 GroupDesk MaiBot 运行包，其中包含 bridge/app.py、limits 及 attach_reader 接入点。`install_bridge.py --runtime 运行目录 --expected-sha256 已审阅的app.py摘要 --check` 先列出改动文件。本人同意后使用 `--confirm-install`，保留备份后安装两个源模块及桥入口。此步骤不启动进程。
 
-设置桥进程的 MAC_GUI_CONFIG、MAC_GUI_STATE、MAC_GUI_CAPTURE。配置及档案要能由运行桥的同一用户访问，不能同时选择 CHATLOG_READER_URL。桥仍使用原有群权限、参与规则、Persona、模型与回复队列。
+设置桥进程的 MAC_GUI_CONFIG、MAC_GUI_STATE、MAC_GUI_CAPTURE。配置及档案要能由运行桥的同一用户访问，不能同时选择 CHATLOG_READER_URL。连接文件 bot_id 与 config 一致，account_fingerprint 为固定 account_id UUID 文本的 SHA256，groups 对应项使用 `bowxt-<机器人UUID去横线>:<群整数ID>`。安装后的桥在启动时核对这三项，防止混用机器人或群。`bot_runtime` 的暂停、恢复和健康上报接口由 GUIAgent 支持，启用时重置本地消费位点以跳过暂停期间积累的旧对话，仍保留历史档案。桥仍使用原有群权限、参与规则、Persona、模型与回复队列。
 
 可选的 MAC_GUI_SENDER 指向本机 wechat-gui-sender，需要辅助功能、屏幕录制和已校准的 composer_top。当前发送器限 200 字符的单行文本。发送前核对账号和群，操作 ID 在本地持久化。不确定的发送不会自动重试，GUI 可见结果不充当独立微信送达回执。未配置发送器时仅接入消息读取。
 
