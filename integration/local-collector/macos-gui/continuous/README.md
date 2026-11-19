@@ -2,14 +2,14 @@
 
 这套组件在本机已登录的微信上读取指定群的结构化辅助功能控件。安装脚本编译 Capture.swift，stream.py 将消息和断点存入本机器人私有 SQLite 档案。首次窗口作为历史基线，后续新消息可通过 GUIAgent 的 claim/ack 接口进入既有 MaiBot 群策略桥。
 
-普通用户继续在 GroupDesk 选择 GUI、下载配套工具、复制安装说明给有本机操作能力的 AI。下面的技术步骤由本地 AI 执行。当前仅有合成数据和编译验收，目标微信构建仍须现场校准，尤其要核实其是否暴露独立消息行、发言人及当前账号。只有文字行或 OCR 结果的版本会停在未适配状态。
+普通用户继续在 GroupDesk 选择 GUI、下载配套工具、复制安装说明给有本机操作能力的 AI。下面的技术步骤由本地 AI 执行。首版处理可确认的结构化文字消息。当前仅有合成数据和编译验收，目标微信构建仍须现场校准，尤其要核实其是否暴露独立消息行、发言人及当前账号。只有文字行或 OCR 结果的版本会停在未适配状态。
 
 ## 安装和校准
 
 1. 本人看过安装范围后，运行下载工具的 `install-mac-gui-stream --directory 新私有目录 --report-directory 私有报告目录 --confirm-install`。需要 macOS 14+、Apple 命令行工具和普通桌面用户。组件不下载依赖。
 2. 从 `config.template.json` 准备本机器人 config.json，填写真实 bot UUID、固定私有 account UUID、GroupDesk 已绑定群的整数 ID、精确群标题和准确微信构建。为自己及两位知情测试成员登记本地 UUID。配置文件 0600、状态目录 0700。
 3. 本人确认专用测试群和辅助功能读取/滚动范围后，用 `stream.py layout --config 配置 --state 状态目录 --capture wechat-gui-capture绝对路径 --confirm-read` 获取无文本结构。可通过 `--path '[索引,...]'` 只检查消息列表子树。确有需要且本人同意后，`--include-values` 会显示该子树文本，只在本机检查人工测试内容，勿上传日常聊天或截图。
-4. 填写 profile 中的 header、account、container、sender、body、scroll。每个 selector 用相对 path 和实际 role，必要时额外核对 identifier 或 description。消息列表的每个子节点须对应一条独立消息。纯时间分隔项只可按明确 role+identifier 排除。profile.account_value 须能从实际当前账号字段核对。不要填猜测的身份、路径或整块正文拆分规则。
+4. 填写 profile 中的 header、account、container、sender、body、scroll。每个 selector 用相对 path 和实际 role，必要时额外核对 identifier 或 description。消息列表的每个子节点须对应一条独立消息。纯时间分隔项只可按明确 role+identifier 排除。profile.account_value 须能从实际当前账号字段核对。自己的气泡若缺少发言人字段，可额外配置经实测的 outgoing_row（明确 role 和 identifier/description）、self_sender 和 outgoing_body，独立核对自己的文字行。不要填猜测的身份、路径或整块正文拆分规则。
 5. `message_id` 和 `timestamp` 是可选的真实 AX 字段，前者必须每条唯一且稳定，后者必须是含时区的 ISO 时间。没有原始时间时档案保留实际观察时间。没有稳定 ID 时按发言人、正文、方向、时间和相邻上下文对齐，重复上下文无法唯一确定时会暂停。
 6. 校准 scroll_step，使相邻历史页有重叠。`composer_top` 只用于可选的短文本发送。用 `stream.py check` 读取当前测试群并报告识别条数，输出不包含正文。
 

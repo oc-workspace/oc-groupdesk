@@ -99,9 +99,22 @@ func snapshot(_ window: AXUIElement, _ profile: [String:Any]) throws -> [String:
         if let skip = profile["separator"] as? [String:Any], skip["identifier"] is String {
             if (try? check(element,skip)) != nil { continue }
         }
-        try check(element,rowCheck)
-        let display = try field(element,sender)
-        let content = try field(element,body)
+        var outgoing = false
+        if let own = profile["outgoing_row"] as? [String:Any],
+           own["identifier"] is String || own["description"] is String {
+            outgoing = (try? check(element,own)) != nil
+        }
+        let display: String
+        let content: String
+        if outgoing {
+            guard let ownName = profile["self_sender"] as? String, !ownName.isEmpty else { throw fail("identity_unresolved") }
+            display = ownName
+            content = try field(element,profile["outgoing_body"] as? [String:Any] ?? body)
+        } else {
+            try check(element,rowCheck)
+            display = try field(element,sender)
+            content = try field(element,body)
+        }
         var value: [String:Any] = ["sender":display,"content":content]
         if let identifier = profile["message_id"] as? [String:Any] {
             value["ui_id"] = try field(element,identifier)

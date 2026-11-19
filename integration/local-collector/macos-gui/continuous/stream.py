@@ -64,7 +64,7 @@ def digest(value):
 
 def check_config(value):
     required = {'contract', 'bot_id', 'account_id', 'wechat_build', 'group', 'roster', 'profile'}
-    if not isinstance(value, dict) or set(value) != required or value['contract'] != 1:
+    if not isinstance(value, dict) or set(value) != required or type(value['contract']) is not int or value['contract'] != 1:
         raise Blocked('invalid_config')
     for field in ('bot_id', 'account_id'):
         if not isinstance(value[field], str) or str(uuid.UUID(value[field])) != value[field]:
@@ -72,17 +72,17 @@ def check_config(value):
     if not isinstance(value['wechat_build'], str) or not value['wechat_build'].isdigit():
         raise Blocked('invalid_build')
     group = value['group']
-    if set(group) != {'id', 'name'} or type(group['id']) is not int or not 0 < group['id'] < 2**31 or not isinstance(group['name'], str) or not 1 <= len(group['name']) <= 160:
+    if not isinstance(group, dict) or set(group) != {'id', 'name'} or type(group['id']) is not int or not 0 < group['id'] < 2**31 or not isinstance(group['name'], str) or not 1 <= len(group['name']) <= 160:
         raise Blocked('invalid_group')
     roster = value['roster']
     if not isinstance(roster, dict) or not 2 <= len(roster) <= 500:
         raise Blocked('sender_roster_required')
     for label, person in roster.items():
-        if not isinstance(label, str) or not label or len(label) > 160 or set(person) != {'id', 'name', 'self'}:
+        if not isinstance(label, str) or not label or len(label) > 160 or not isinstance(person, dict) or set(person) != {'id', 'name', 'self'}:
             raise Blocked('invalid_sender')
         if not isinstance(person['name'], str) or not 1 <= len(person['name']) <= 160 or type(person['self']) is not bool:
             raise Blocked('invalid_sender')
-        if str(uuid.UUID(person['id'])) != person['id']:
+        if not isinstance(person['id'], str) or str(uuid.UUID(person['id'])) != person['id']:
             raise Blocked('invalid_sender')
     if len({row['id'] for row in roster.values()}) != len(roster) or sum(p['self'] for p in roster.values()) != 1:
         raise Blocked('ambiguous_sender')
@@ -97,6 +97,13 @@ def check_config(value):
             raise Blocked('invalid_profile')
     if not isinstance(profile.get('account_value'), str) or not profile['account_value']:
         raise Blocked('account_guard_required')
+    if 'outgoing_row' in profile:
+        own = profile['outgoing_row']
+        self_label = profile.get('self_sender')
+        if not isinstance(own, dict) or not own.get('role') or not (own.get('identifier') or own.get('description')):
+            raise Blocked('outgoing_guard_required')
+        if not isinstance(self_label, str) or self_label not in roster or not roster[self_label]['self']:
+            raise Blocked('outgoing_guard_required')
     if not isinstance(profile.get('row'), dict) or not profile['row'].get('role'):
         raise Blocked('row_guard_required')
     return value
