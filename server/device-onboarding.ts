@@ -66,18 +66,20 @@ export function registerDeviceOnboarding(app:express.Express,caller=callTextMode
  });
  app.get('/api/bots/:id/onboarding/install-prompt',async(req,res)=>{
   const id=z.uuid().parse(req.params.id),b=await accessibleBot(req.admin!,id),f=await task(id),mode=(await installationSummary(id)).reading_mode;
-  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind,mode),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind,mode),contract:5});
+  res.json({prompt:installationPrompt(b,f.device_os,site(),f.device_kind,mode),stages:installationStagePrompts(b,f.device_os,site(),f.device_kind,mode),contract:6});
  });
  app.get('/api/bots/:id/onboarding/device-tool',async(req,res)=>{
   const id=z.uuid().parse(req.params.id);await accessibleBot(req.admin!,id);await task(id);
-  const [script,probe,license]=await Promise.all([
+  const sourceNames=['ReadProbe.swift','LICENSE',
+   'continuous/Capture.swift','continuous/SenderCapture.swift','continuous/Send.swift',
+   'continuous/stream.py','continuous/sender.py','continuous/install_bridge.py','continuous/test_stream.py','continuous/config.template.json','continuous/README.md'];
+  const [script,...sources]=await Promise.all([
    readFile(new URL('../integration/maibot/bots/device_setup.py',import.meta.url),'utf8'),
-   readFile(new URL('../integration/local-collector/macos-gui/ReadProbe.swift',import.meta.url),'utf8'),
-   readFile(new URL('../integration/local-collector/macos-gui/LICENSE',import.meta.url),'utf8'),
+   ...sourceNames.map(name=>readFile(new URL('../integration/local-collector/macos-gui/'+name,import.meta.url),'utf8')),
   ]);
   const bundled=script
    .replace("APPROVED_SITE = 'https://groupdesk.rococo.dev'",()=> 'APPROVED_SITE = '+JSON.stringify(site()))
-   .replace('MAC_GUI_SOURCES = {}',()=> 'MAC_GUI_SOURCES = '+JSON.stringify({'ReadProbe.swift':probe,LICENSE:license}));
+   .replace('MAC_GUI_SOURCES = {}',()=> 'MAC_GUI_SOURCES = '+JSON.stringify(Object.fromEntries(sourceNames.map((name,index)=>[name,sources[index]]))));
   res.set('Cache-Control','private, no-store').type('text/x-python').attachment('groupdesk-device-setup.py').send(bundled);
  });
  app.post('/api/bots/:id/onboarding/install-assist',async(req,res)=>{

@@ -1,0 +1,64 @@
+{
+  "contract": 1,
+  "bot_id": "REPLACE_WITH_GROUPDESK_BOT_UUID",
+  "account_id": "GENERATE_PRIVATE_ACCOUNT_UUID",
+  "wechat_build": "REPLACE_WITH_EXACT_BUILD",
+  "group": {
+    "id": 0,
+    "name": "REPLACE_WITH_TEST_GROUP_TITLE"
+  },
+  "roster": {
+    "REPLACE_WITH_SELF_LABEL": {
+      "id": "GENERATE_LOCAL_UUID",
+      "name": "My bot",
+      "self": true
+    },
+    "REPLACE_WITH_FIRST_TEST_LABEL": {
+      "id": "GENERATE_LOCAL_UUID",
+      "name": "First tester",
+      "self": false
+    },
+    "REPLACE_WITH_SECOND_TEST_LABEL": {
+      "id": "GENERATE_LOCAL_UUID",
+      "name": "Second tester",
+      "self": false
+    }
+  },
+  "profile": {
+    "title": "REPLACE_WITH_TEST_GROUP_TITLE",
+    "header": {
+      "path": [],
+      "role": "REPLACE_WITH_ACTUAL_ROLE",
+      "attribute": "AXValue"
+    },
+    "account": {
+      "path": [],
+      "role": "REPLACE_WITH_ACTUAL_ROLE",
+      "attribute": "AXValue"
+    },
+    "account_value": "REPLACE_WITH_ACTUAL_VISIBLE_ACCOUNT_IDENTITY",
+    "container": {
+      "path": [],
+      "role": "REPLACE_WITH_ACTUAL_ROLE"
+    },
+    "row": {
+      "role": "REPLACE_WITH_ACTUAL_MESSAGE_ROW_ROLE"
+    },
+    "sender": {
+      "path": [],
+      "role": "REPLACE_WITH_ACTUAL_ROLE",
+      "attribute": "AXValue"
+    },
+    "body": {
+      "path": [],
+      "role": "REPLACE_WITH_ACTUAL_ROLE",
+      "attribute": "AXValue"
+    },
+    "scroll": {
+      "path": [],
+      "role": "AXScrollBar"
+    },
+    "scroll_step": 0.001,
+    "composer_top": 0.7
+  }
+}

@@ -212,4 +212,36 @@ class MacGuiProbeTests(unittest.TestCase):
    event=d.read_diagnostics(t+'/reports')['events'][-1]
    self.assertEqual((event['phase'],event['outcome'],event['failure_code'],event['used_method']),('mac_gui_probe','blocked','gui_not_verified','unknown'))
 
+class MacContinuousInstallTests(unittest.TestCase):
+ def test_continuous_installer_refuses_without_consent_or_on_wrong_platform(self):
+  with tempfile.TemporaryDirectory() as t, patch.object(d,'mac_gui_supported',side_effect=AssertionError('inspect')):
+   with self.assertRaises(ValueError):d.install_mac_stream(t+'/new',False)
+   self.assertFalse((Path(t)/'new').exists())
+  with patch.object(d,'mac_gui_supported',return_value=False):
+   with self.assertRaises(d.MacGuiError):d.install_mac_stream('/unused',True)
+ def test_extended_bundle_keeps_legacy_probe_install_scoped_to_two_files(self):
+  with tempfile.TemporaryDirectory() as t,patch.object(d,'mac_gui_supported',return_value=True),patch.object(d.os,'geteuid',return_value=1000),patch.object(d,'MAC_GUI_SOURCES',{'ReadProbe.swift':'fixture','LICENSE':'MIT','continuous/stream.py':'not copied'}),patch.object(d,'command',side_effect=[{'ok':True,'version':'xcode'},{'ok':True,'version':'ready'}]):
+   def compile(args,**kwargs):
+    Path(args[-1]).write_text('synthetic executable')
+    return Mock(returncode=0)
+   with patch.object(d.subprocess,'run',side_effect=compile):d.mac_gui_install(t+'/probe',True)
+   self.assertFalse((Path(t)/'probe/continuous').exists())
+ def test_continuous_install_prepares_only_private_pinned_sources_and_no_capture(self):
+  sources={name:'fixture' for name in d.CONTINUOUS_FILES};sources['LICENSE']='MIT'
+  with tempfile.TemporaryDirectory() as t,patch.object(d,'mac_gui_supported',return_value=True),patch.object(d.os,'geteuid',return_value=1000),patch.object(d,'MAC_GUI_SOURCES',sources),patch.object(d,'command',return_value={'ok':True,'version':'xcode'}):
+   commands=[]
+   def compile(args,**kwargs):
+    commands.append(args);Path(args[-1]).write_text('synthetic executable');return Mock(returncode=0)
+   with patch.object(d.subprocess,'run',side_effect=compile),contextlib.redirect_stdout(io.StringIO()):d.install_mac_stream(t+'/new',True)
+   root=Path(t)/'new';self.assertEqual(root.stat().st_mode&0o777,0o700)
+   self.assertEqual((root/'wechat-gui-capture').stat().st_mode&0o777,0o700)
+   self.assertTrue((root/'config.template.json').is_file());self.assertFalse((root/'messages.sqlite3').exists())
+   self.assertEqual(len(commands),2);self.assertTrue(all(command[0]=='/usr/bin/xcrun' for command in commands))
+ def test_gap_reason_is_safe_metadata_without_copying_private_health(self):
+  with tempfile.TemporaryDirectory() as t:
+   path=Path(t)/'health.json';path.write_text(json.dumps({'error':'history_gap','content':'private fixture'}))
+   self.assertEqual(d.mac_stream_failure(t),'gui_history_gap')
+   path.write_text(json.dumps({'error':'private fixture'}))
+   self.assertEqual(d.mac_stream_failure(t),'gui_not_verified')
+
 if __name__=='__main__':unittest.main()

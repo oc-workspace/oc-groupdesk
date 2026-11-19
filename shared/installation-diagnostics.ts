@@ -3,7 +3,7 @@ export const readingModes=['auto','database','gui'] as const;
 export const readingMethods=['unknown','chatlog_keeper','chatlog','gui','macos_wechat_export'] as const;
 export const readingModeLabels={auto:'由 AI 检查后推荐',database:'只使用数据库读取',gui:'使用微信界面读取（GUI 备用）'};
 export const readingMethodLabels={unknown:'尚未确定',chatlog_keeper:'chatlog-keeper 数据库读取',chatlog:'chatlog 数据库读取',gui:'微信界面读取（GUI）',macos_wechat_export:'Mac 数据库读取'};
-export const installationFailureLabels={none:'无',database_unavailable:'数据库读取方案不可用或尚未验证',gui_adapter_missing:'缺少适配当前设备的界面采集组件',gui_not_verified:'界面读取尚未验证',login_required:'微信需要登录或解锁',permission_required:'需要本人确认设备操作权限',unsupported_platform:'当前平台或版本尚未适配',missing_components:'缺少运行组件',install_failed:'组件安装未完成',connection_failed:'设备尚未连接',verification_failed:'实际读取或收发验证未通过',unknown:'需要进一步排查'};
+export const installationFailureLabels={none:'无',gui_layout_unavailable:'当前微信界面结构或版本需要重新适配',gui_identity_unresolved:'当前账号、群或发言人尚未核对',gui_history_gap:'补读暂未找到可确认的历史断点，请检查本地采集状态',gui_bridge_not_ready:'Mac 持续采集尚未接通 MaiBot 策略桥',database_unavailable:'数据库读取方案不可用或尚未验证',gui_adapter_missing:'缺少适配当前设备的界面采集组件',gui_not_verified:'界面读取尚未验证',login_required:'微信需要登录或解锁',permission_required:'需要本人确认设备操作权限',unsupported_platform:'当前平台或版本尚未适配',missing_components:'缺少运行组件',install_failed:'组件安装未完成',connection_failed:'设备尚未连接',verification_failed:'实际读取或收发验证未通过',unknown:'需要进一步排查'};
 export const installationReportSchema=z.object({
  contract:z.literal(1),report_id:z.uuid(),generated_at:z.string().max(40).datetime({offset:true}),
  phase:z.enum(['inspect','plan','install','connect','verify','mac_gui_probe']),outcome:z.enum(['info','planned','success','blocked','failed']),

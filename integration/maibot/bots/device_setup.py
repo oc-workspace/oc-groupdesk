@@ -141,10 +141,10 @@ def reader_plan(report,reading_mode='auto'):
     gui=reading_mode=='gui'
     compare=reading_mode=='auto' and keeper['status'] not in ['project_verified_build','upstream_reported']
     route='gui_review' if gui else 'compare_database_and_gui' if compare else 'database_review'
-    return {'contract':3,'reading_mode':reading_mode,'route':route,'requires_user_confirmation':True,'gui':report.get('gui',gui_preflight()),'inspection':report,'recommended_tool':'gui' if gui else 'evaluate_candidates' if compare else choice,'gui_backup_available':True,'can_install_mac_gui_probe':reading_mode!='database' and native and mac_gui_supported() and bool(MAC_GUI_SOURCES),'can_install_keeper_component':installable,'sources':{'chatlog':CHATLOG_DOC,'chatlog-keeper':KEEPER_DOC},'steps':[
+    return {'contract':3,'reading_mode':reading_mode,'route':route,'requires_user_confirmation':True,'gui':report.get('gui',gui_preflight()),'inspection':report,'recommended_tool':'gui' if gui else 'evaluate_candidates' if compare else choice,'gui_backup_available':True,'can_install_mac_gui_stream':reading_mode!='database' and native and mac_gui_supported() and CONTINUOUS_FILES <= set(MAC_GUI_SOURCES),'can_install_mac_gui_probe':reading_mode!='database' and native and mac_gui_supported() and bool(MAC_GUI_SOURCES),'can_install_keeper_component':installable,'sources':{'chatlog':CHATLOG_DOC,'chatlog-keeper':KEEPER_DOC},'steps':[
         '先核对实际微信版本、架构和安装方式；已有微信先保留，不同时安装两个读取工具。',
         '未验证不等于不可用；先核对两个数据库候选。数据库方案确实不可用时可以提出GUI备用，但先由本人确认，不能静默回退；显式选择GUI时不安装数据库读取组件。',
-        '原生 macOS 14+ 可用 install-mac-gui 准备组件，经本人同意后用 verify-mac-gui 做限定测试群的单次试读。持续采集仍需后台适配器、稳定身份、去重和断点恢复。',
+        '原生 macOS 14+ 可用 install-mac-gui 准备组件，经本人同意后用 verify-mac-gui 做限定测试群的单次试读。持续采集可继续 install-mac-gui-stream，先校准当前微信的结构化消息行和滚动区域，再验证发言人、去重、恢复和 MaiBot 接收。',
         'project_verified_build仅表示构建匹配；upstream_reported仅为上游说明；needs_verification必须先核对兼容性，不直接执行安装。',
         '缺少微信时由本地AI先提供官方版本/来源/影响，确认安装后重新inspect；不为了兼容擅自覆盖日常微信。',
         'chatlog-keeper未发布PyPI：不能pip install chatlog-keeper。可安装固定提交的已校验源码；chatlog仅按官方文档核实具体版本和校验和后安装，不编造可用Release。',
@@ -157,7 +157,7 @@ def reader_plan(report,reading_mode='auto'):
 REPORT_METHODS={'unknown','chatlog_keeper','chatlog','gui','macos_wechat_export'}
 REPORT_PHASES={'inspect','plan','install','connect','verify','mac_gui_probe'}
 REPORT_OUTCOMES={'info','planned','success','blocked','failed'}
-REPORT_ERRORS={'none','database_unavailable','gui_adapter_missing','gui_not_verified','login_required','permission_required','unsupported_platform','missing_components','install_failed','connection_failed','verification_failed','unknown'}
+REPORT_ERRORS={'none','database_unavailable','gui_adapter_missing','gui_not_verified','login_required','permission_required','unsupported_platform','missing_components','install_failed','connection_failed','verification_failed','gui_layout_unavailable','gui_identity_unresolved','gui_history_gap','gui_bridge_not_ready','unknown'}
 def gui_preflight():
     # Presence only: no screen capture, clipboard, window titles or message inspection.
     os_name=detect_os()
@@ -336,7 +336,7 @@ def mac_gui_install(directory, confirmed):
         raise MacGuiError('unsupported_platform', '试读工具要求目标设备运行 macOS 14 或更新版本。')
     if os.geteuid() == 0:
         raise ValueError('请用 Mac 上登录微信的普通用户运行。')
-    if set(MAC_GUI_SOURCES) != {'ReadProbe.swift', 'LICENSE'}:
+    if not {'ReadProbe.swift', 'LICENSE'} <= set(MAC_GUI_SOURCES):
         raise MacGuiError('missing_components', '请重新从 GroupDesk 下载包含 Mac 组件的配套工具。')
     if not command(['/usr/bin/xcode-select', '-p'])['ok']:
         raise MacGuiError('missing_components', 'Mac 尚未准备 Apple 命令行工具。请先按安装助手的提示确认安装。')
@@ -344,8 +344,8 @@ def mac_gui_install(directory, confirmed):
     if target.exists() or target.is_symlink():
         raise ValueError('请选择一个新的工具目录，保留原目录。')
     private_report_directory(target)
-    for name, source in MAC_GUI_SOURCES.items():
-        (target / name).write_text(source, encoding='utf-8')
+    for name in ('ReadProbe.swift', 'LICENSE'):
+        (target / name).write_text(MAC_GUI_SOURCES[name], encoding='utf-8')
     try:
         with tempfile.TemporaryDirectory(prefix='build-', dir=target) as temporary:
             compiled = Path(temporary) / 'wechat-gui-probe'
@@ -433,6 +433,101 @@ def run_mac_gui(args):
           'Mac 微信界面试读通过，已保存安装摘要。持续收消息和机器人在线仍待单独验证。')
 
 
+
+CONTINUOUS_FILES = {
+    'continuous/Capture.swift', 'continuous/SenderCapture.swift', 'continuous/Send.swift',
+    'continuous/stream.py', 'continuous/sender.py', 'continuous/install_bridge.py',
+    'continuous/test_stream.py', 'continuous/config.template.json', 'continuous/README.md',
+}
+
+
+def install_mac_stream(directory, confirmed):
+    if not confirmed:
+        raise ValueError('请先让本地 AI 说明安装方案，再由本人确认安装。')
+    if not mac_gui_supported() or os.geteuid() == 0:
+        raise MacGuiError('unsupported_platform', '请在 macOS 14 或更新版本的普通用户桌面准备持续采集组件。')
+    if not CONTINUOUS_FILES <= set(MAC_GUI_SOURCES):
+        raise MacGuiError('missing_components', '请从接入页面重新下载包含持续采集组件的配套工具。')
+    if not command(['/usr/bin/xcode-select', '-p'])['ok']:
+        raise MacGuiError('missing_components', '请先按本地 AI 指引准备 Apple 命令行工具。')
+    target = Path(directory).expanduser().absolute()
+    if target.exists() or target.is_symlink():
+        raise ValueError('请选择全新的机器人专用组件目录。')
+    private_report_directory(target)
+    (target / 'LICENSE').write_text(MAC_GUI_SOURCES['LICENSE'], encoding='utf-8')
+    for name in CONTINUOUS_FILES:
+        source = target / Path(name).name
+        source.write_text(MAC_GUI_SOURCES[name], encoding='utf-8')
+        source.chmod(0o600)
+    try:
+        with tempfile.TemporaryDirectory(prefix='compile-', dir=target) as temporary:
+            for output, sources in [('wechat-gui-capture', ['Capture.swift']),
+                                    ('wechat-gui-sender', ['SenderCapture.swift', 'Send.swift'])]:
+                binary = Path(temporary) / output
+                result = subprocess.run(
+                    ['/usr/bin/xcrun', '--sdk', 'macosx', 'swiftc', '-parse-as-library', '-O',
+                     '-module-cache-path', str(Path(temporary) / 'cache'),
+                     '-target', platform.machine() + '-apple-macosx14.0',
+                     *[str(target / name) for name in sources], '-o', str(binary)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180, check=False,
+                )
+                if result.returncode:
+                    raise MacGuiError('install_failed', '持续采集组件编译失败，请核对 Apple 命令行工具版本。')
+                binary.chmod(0o700)
+                binary.rename(target / output)
+    except (OSError, subprocess.TimeoutExpired):
+        raise MacGuiError('install_failed', '持续采集组件编译未完成，AI 可检查这次的新目录。') from None
+    print('持续采集组件已准备。请本地 AI 校准当前微信界面并完成测试群验收。')
+
+
+def mac_stream_failure(state):
+    try:
+        path=Path(state)/'health.json'
+        if path.is_symlink() or path.stat().st_size>4096:
+            return 'gui_not_verified'
+        error=json.loads(path.read_text()).get('error')
+        if error in {'layout_unavailable','version_changed','scroll_unavailable','observer_unavailable'}:
+            return 'gui_layout_unavailable'
+        if error in {'identity_unresolved','account_guard_required','chat_not_verified'}:
+            return 'gui_identity_unresolved'
+        if error in {'history_gap','ambiguous_overlap','view_changed_during_recovery'}:
+            return 'gui_history_gap'
+    except (OSError,ValueError,TypeError):
+        pass
+    return 'gui_not_verified'
+
+
+def mac_stream_action(args):
+    if not (args.confirm_install if args.action == 'install-mac-gui-stream' else args.confirm_read):
+        raise ValueError('请先由本人确认本次安装或持续读取范围。')
+    if args.action == 'install-mac-gui-stream':
+        try:
+            install_mac_stream(args.directory, args.confirm_install)
+        except MacGuiError as error:
+            write_diagnostic(args.report_directory, diagnostic_event({}, 'install', 'blocked', 'gui', 'gui', failure_code=error.code))
+            raise
+        write_diagnostic(args.report_directory, diagnostic_event({}, 'install', 'success', 'gui', 'gui'))
+        return
+    if not mac_gui_supported() or os.geteuid() == 0:
+        raise MacGuiError('unsupported_platform', '请在本人 macOS 桌面执行。')
+    target = private_report_directory(args.directory)
+    script, capture = target / 'stream.py', target / 'wechat-gui-capture'
+    for path in (script, capture):
+        if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077:
+            raise MacGuiError('missing_components', '请检查本机器人的持续采集组件。')
+    action = 'verify' if args.action == 'verify-mac-gui-stream' else 'run'
+    result = subprocess.run([sys.executable, str(script), action, '--config', args.config, '--state', args.state,
+                             '--capture', str(capture), '--confirm-read'], check=False)
+    report = {'detected_os': 'macos', 'cpu_arch': platform.machine(), 'wechat': wechat_info('macos', platform.machine())}
+    if result.returncode:
+        write_diagnostic(args.report_directory, diagnostic_event(report, 'verify' if action == 'verify' else 'connect', 'blocked',
+                                                               'gui', 'gui', failure_code=mac_stream_failure(args.state)))
+        raise MacGuiError('gui_not_verified', '持续读取验收未完成，请本地 AI 检查私有 health.json 中的原因代码。')
+    if action == 'verify':
+        write_diagnostic(args.report_directory, diagnostic_event(report, 'verify', 'success', 'gui', 'gui', 'gui'))
+        print('已记录本地持续采集读取验收。请继续核对断线恢复、MaiBot 接收和站点真实连接。')
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);commands=p.add_subparsers(dest='action',required=True)
     for action in ['inspect','reader-plan']:
@@ -450,6 +545,16 @@ def main():
         else:
             a.add_argument('--chat', required=True)
             a.add_argument('--confirm-read', action='store_true')
+    for action in ('install-mac-gui-stream', 'verify-mac-gui-stream', 'run-mac-gui-stream'):
+        a = commands.add_parser(action, help='准备、验收或启动 Mac 持续采集')
+        a.add_argument('--directory', required=True)
+        a.add_argument('--report-directory', required=True)
+        if action == 'install-mac-gui-stream':
+            a.add_argument('--confirm-install', action='store_true')
+        else:
+            a.add_argument('--config', required=True)
+            a.add_argument('--state', required=True)
+            a.add_argument('--confirm-read', action='store_true')
     a=commands.add_parser('pair',help='本人连接设备；有报告时自动上报仅含诊断摘要的记录')
     a.add_argument('--site',required=True);a.add_argument('--bot',required=True);a.add_argument('--directory',required=True);a.add_argument('--report-directory')
     a=commands.add_parser('record-report',help='记录本地步骤结果，不读取聊天；成功试读需本人确认已经实际验收')
@@ -465,6 +570,8 @@ def main():
             write_diagnostic(args.report_directory,diagnostic_event(report,'inspect' if args.action=='inspect' else 'plan','info' if args.action=='inspect' else 'planned',args.reading_mode,method))
             value['installation_report_saved']=True
         print(json.dumps(value,ensure_ascii=False,indent=2))
+    elif args.action in ('install-mac-gui-stream', 'verify-mac-gui-stream', 'run-mac-gui-stream'):
+        mac_stream_action(args)
     elif args.action in ('install-mac-gui', 'verify-mac-gui'):
         run_mac_gui(args)
     elif args.action=='install-reader':
