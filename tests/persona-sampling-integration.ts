@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {pool,transaction} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {samplePersonaDatasets} from '../server/persona-sampling.js';
 import {processPersonaJob} from '../server/persona-generation.js';

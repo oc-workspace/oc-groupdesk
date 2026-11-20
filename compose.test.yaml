@@ -21,6 +21,7 @@ services:
       BOT_API_TOKEN: isolated-test-bot-token-at-least-32-characters
       MODEL_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       COOKIE_SECURE: "false"
+      GROUPDESK_IMPORT_BUILTIN_TOPICS: "1"
       DATA_DIR: /tmp/groupdesk-test-data
     depends_on:
       postgres-test:

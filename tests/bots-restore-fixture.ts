@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {controlPool,pool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createBot,ensureLegacyIsolation,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot,botRecord} from '../server/bot-workspaces.js';
 import {legacyBotId,dataDirectory} from '../server/bot-context.js';

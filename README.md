@@ -12,3 +12,5 @@ React/Vite、TypeScript/Express、PostgreSQL控制库与机器人业务库，配
 群总结在微信锁定或掉线时保留正文与分段进度，微信恢复后先核对原回执，再继续发送剩余分段。
 
 开发检查：`npm run build`、`npm test`；数据库集成检查只在专用隔离测试库运行。发布严格遵循[开发与生产发布脚本说明](https://github.com/oc-workspace/openclaw-workspace/blob/main/openclaw-开发与生产发布脚本说明.md)。密钥、Cookie和真实群聊不进入Git或日志。
+
+独立安装请先阅读 [安装包说明](distribution/README.md) 与 [开发/恢复边界](docs/standalone-distribution.md)。现有生产部署不由独立安装测试自动替换。

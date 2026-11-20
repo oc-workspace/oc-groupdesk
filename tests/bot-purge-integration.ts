@@ -6,7 +6,7 @@ import {mkdir,writeFile,readFile,rename,rm,symlink} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {controlPool,pool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {ensureLegacyIsolation,createBot,sqlIdentifier} from '../server/bot-provisioning.js';
 import {initializeUserOwners} from '../server/user-access.js';
 import {legacyBotId} from '../server/bot-context.js';
@@ -64,6 +64,7 @@ test('stale cleanup previews return a refreshable conflict without queuing delet
  }finally{await controlPool.query('UPDATE topics SET visibility=$2 WHERE id=$1',[topic.id,topic.visibility]);}
 });
 test('legacy shared/foreign resources and unknown foreign key dependencies block business cleanup without touching the control DB',async()=>{
+ await controlPool.query("CREATE FUNCTION synthetic_purge_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$; CREATE TRIGGER synthetic_purge_guard BEFORE TRUNCATE ON topics FOR EACH STATEMENT EXECUTE FUNCTION synthetic_purge_guard()");assert(!(await botPurgePreview(legacyBotId)).plan.business.eligible);await controlPool.query('DROP TRIGGER synthetic_purge_guard ON topics; DROP FUNCTION synthetic_purge_guard()');
  const p=await botPurgePreview(legacyBotId);assert(p.plan.business.eligible,JSON.stringify(p.plan.business.blockers));const t=(await controlPool.query('SELECT id FROM topics LIMIT 1')).rows[0].id;await controlPool.query("UPDATE topics SET visibility='common' WHERE id=$1",[t]);assert(!(await botPurgePreview(legacyBotId)).plan.business.eligible);assert.equal((await submit(legacyBotId)).status,409);await controlPool.query("UPDATE topics SET visibility='private' WHERE id=$1",[t]);
  await controlPool.query('CREATE TABLE synthetic_unknown_dependency(topic_id uuid REFERENCES topics(id))');assert(!(await botPurgePreview(legacyBotId)).plan.business.eligible);await controlPool.query('DROP TABLE synthetic_unknown_dependency');assert.equal((await controlPool.query('SELECT current_database() name')).rows[0].name,'groupdesk_test');
 });

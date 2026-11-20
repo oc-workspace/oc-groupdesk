@@ -2,7 +2,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {controlPool,pool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createBot,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot,botRecord} from '../server/bot-workspaces.js';
 import {copyBotConfiguration} from '../server/bot-config-copy.js';

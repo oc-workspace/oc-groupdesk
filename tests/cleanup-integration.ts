@@ -6,7 +6,7 @@ import {mkdir,writeFile,readFile,symlink,rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {controlPool,pool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {createBot,ensureLegacyIsolation,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot} from '../server/bot-workspaces.js';

@@ -1,9 +1,10 @@
-import {readFileSync} from 'node:fs';
+import {readFileSync,existsSync} from 'node:fs';
 import {summaryMemberRules} from '../../shared/summary-member-names.js';
 
 export const builtinSummarySlugs=['comprehensive','technical','ranking','entertainment','news'] as const;
 const originals=JSON.parse(readFileSync(new URL('./legacy-templates.json',import.meta.url),'utf8')) as Record<string,string>;
-const templates=new Map(builtinSummarySlugs.map(slug=>[slug,readFileSync(new URL('../../skills/wechat-server-summary/references/'+slug+'.md',import.meta.url),'utf8')]));
+export function summaryTemplateFile(slug:string){const original=new URL('../../skills/wechat-server-summary/references/'+slug+'.md',import.meta.url);return process.env.GROUPDESK_SUMMARY_LIBRARY!=='generic'&&existsSync(original)?original:new URL('../../distribution/summary-templates/'+slug+'.md',import.meta.url);}
+const templates=new Map(builtinSummarySlugs.map(slug=>[slug,readFileSync(summaryTemplateFile(slug),'utf8')]));
 const compact=(text:string)=>text.replace(/\s/gu,'');
 export function fullSummaryInstructions(slug:string,instructions:string){
  const full=templates.get(slug as typeof builtinSummarySlugs[number]);

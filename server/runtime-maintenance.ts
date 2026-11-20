@@ -8,7 +8,7 @@ import {openControlSecret} from './bot-secrets.js';
 import {legacyBotId} from './bot-context.js';
 import {runtimeInventory,selectionSchema} from '../shared/runtime-maintenance.js';
 import {reasonFields,reasonDetails} from '../shared/deletion.js';
-const host=z.enum(['rococo-root','rococo-root2','rpi-groupdesk-01']);
+const host=z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const json=(v:unknown)=>JSON.stringify(v);
 async function freshAdmin(id:string,db:Pick<typeof controlPool,'query'>=controlPool){const u=(await db.query("SELECT username FROM admins WHERE id=$1 AND deleted_at IS NULL AND role='super_admin' AND status='active' FOR SHARE",[id])).rows[0];requireCondition(u,403,'总管理员权限已变化');return u;}
 async function latest(id:string){return (await controlPool.query('SELECT id,report,created_at FROM managed_runtime_snapshots WHERE host_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[id])).rows[0];}

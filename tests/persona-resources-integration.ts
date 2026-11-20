@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pool,controlPool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createBot,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot,botRecord} from '../server/bot-workspaces.js';
 import {previewResource,importResource,resourceOverview} from '../server/persona-resources.js';

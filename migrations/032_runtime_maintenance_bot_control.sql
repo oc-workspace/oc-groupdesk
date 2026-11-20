@@ -1,10 +1,9 @@
 CREATE TABLE managed_runtime_hosts(
- id text PRIMARY KEY CHECK(id IN ('rococo-root','rococo-root2')),name text NOT NULL,
+ id text PRIMARY KEY CONSTRAINT managed_runtime_hosts_id_check CHECK(id ~ '^[a-z0-9][a-z0-9-]{0,62}$'),name text NOT NULL,
  token_hash text,permit_ciphertext text,enabled boolean NOT NULL DEFAULT false,can_cleanup boolean NOT NULL DEFAULT false,
  last_seen_at timestamptz,version text
 );
 CREATE UNIQUE INDEX runtime_unique_host_token ON managed_runtime_hosts(token_hash) WHERE token_hash IS NOT NULL;
-INSERT INTO managed_runtime_hosts(id,name,can_cleanup) VALUES('rococo-root','GroupDesk与站点备份',false),('rococo-root2','微信机器人运行环境',true);
 CREATE TABLE managed_runtime_snapshots(
  id uuid PRIMARY KEY,host_id text NOT NULL REFERENCES managed_runtime_hosts(id),report jsonb NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()

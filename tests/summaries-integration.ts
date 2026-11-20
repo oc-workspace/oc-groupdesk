@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {pool} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {importExistingCredential} from '../server/models.js';
 import {settings,tick} from '../server/summaries/core.js';
@@ -334,11 +334,11 @@ test('edited previews are revalidated; missing fields preserve the draft and mod
  const bad=await req('/summaries/jobs/'+id+'/publish','POST',{report:report.replace('**今日高光时刻**：两位成员共同细化了验证方法。','')});assert.equal(bad.status,400);assert.deepEqual(await job(id),before);assert.equal((await pool.query('SELECT 1 FROM summary_parts WHERE job_id=$1',[id])).rowCount,0);
  const good=await req('/summaries/jobs/'+id+'/publish','POST',{report:report+'\n四、发言最多排行\n虚构999条'});assert.equal(good.status,200,JSON.stringify(good.data));const parts=(await pool.query('SELECT body FROM summary_parts WHERE job_id=$1 ORDER BY ordinal',[id])).rows.map(r=>r.body).join('\n');assert(!parts.includes('虚构999'));assert(parts.includes('文字输出榜'));assert(parts.includes('综合存在感榜'));assert(!((await job(id)).report.includes('虚构999')));await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });
-test('038 upgrades old builtins and custom templates once, preserves names and old job snapshots',async()=>{
- const sql=await readFile(new URL('../migrations/038_summary_full_hermes_skills.sql',import.meta.url),'utf8'),legacy=JSON.parse(await readFile(new URL('../server/summaries/legacy-templates.json',import.meta.url),'utf8'));
+test('selected template library upgrades old builtins and custom templates once, preserving names and old snapshots',async()=>{
+ const legacy=JSON.parse(await readFile(new URL('../server/summaries/legacy-templates.json',import.meta.url),'utf8'));
  const g=await freshSummaryGroup(),id=await create(g),snapshot=(await job(id)).template;
  for(const [slug,instructions] of [['news',legacy.news],['ranking',legacy.ranking.split('【总结成员昵称格式】')[0]],['technical','后台定制：保留测试建议，不编造结论。']])await pool.query('UPDATE summary_templates SET name=$2,instructions=$3,revision=11 WHERE slug=$1',[slug,'自定义名称 '+slug,instructions]);
- await pool.query(sql);const first=(await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows;await pool.query(sql);assert.deepEqual((await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows,first);
+ await migrate({controlPlane:false,bootstrapAdmin:false});const first=(await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows;await migrate({controlPlane:false,bootstrapAdmin:false});assert.deepEqual((await pool.query("SELECT * FROM summary_templates WHERE slug IN ('news','ranking','technical') ORDER BY slug")).rows,first);
  for(const row of first){assert(row.instructions.includes('[GroupDesk 完整 Skill v2:'+row.slug+']'));assert.equal(row.revision,12);assert.equal(row.name,'自定义名称 '+row.slug);if(row.slug==='technical')assert(row.instructions.includes('后台定制：保留测试建议'));else assert(!row.instructions.includes('## 保留的后台自定义要求'));}
  assert.deepEqual((await job(id)).template,snapshot);await req('/summaries/jobs/'+id+'/cancel','POST',{});
 });

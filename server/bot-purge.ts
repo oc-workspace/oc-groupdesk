@@ -31,7 +31,7 @@ export async function botPurgePreview(id:string){
   runtime={plan_hash:p.plan_hash,eligible:!independentBlockers.length&&!p.inventory.quarantine&&selections.length>0,blockers:independentBlockers,selection:selections,inventory:p.inventory};if(p.inventory.quarantine)runtime.blockers.push('存在此前暂存，请先在运行环境与备份中完成还原或清理');
  }catch(e){runtime_error=(e as Error).message;}
  const plan={business,runtime};const fingerprint=digest(JSON.stringify({id,revision:b.revision,owner:b.owner_user_id,business,runtime:runtime?{hash:runtime.plan_hash,selection:runtime.selection,eligible:runtime.eligible}:null}));
- return {id,name:b.name,confirmation:b.wechat_id,revision:b.revision,deleted:!!b.deleted_at,legacy:id===legacyBotId,can_submit:!blockers.length&&(business.eligible||runtime?.eligible),blockers,plan,plan_hash:fingerprint,runtime_error,job:existing?{id:existing.id,status:existing.status,phase:existing.phase,receipt:existing.receipt,error:existing.error}:null,
+ return {id,runtime_host_id:b.runtime_host_id,name:b.name,confirmation:b.wechat_id,revision:b.revision,deleted:!!b.deleted_at,legacy:id===legacyBotId,can_submit:!blockers.length&&(business.eligible||runtime?.eligible),blockers,plan,plan_hash:fingerprint,runtime_error,job:existing?{id:existing.id,status:existing.status,phase:existing.phase,receipt:existing.receipt,error:existing.error}:null,
   retained:['站点用户、GitHub登录、站点主密钥和控制库','所有用户持有的API Key、公用授权及真实用量账本','Tatsumi及其他机器人、共享资源、必要删除审计','现有备份、共享镜像、被其他容器引用的部署目录及未登记文件'],
   effects:['这是永久物理清理，不能从界面恢复；未删除的登记会先撤销接入并移出正常列表。','只处理下方勾选的范围。未通过核验的内容保留并说明原因；不会为清理扩大范围。','运行环境先停止并临时隔离，再按本次明确授权永久删除；中途失败保留进度，不是到期自动删除。','旧共用库仅清空明确业务表与登记文件，绝不删除整个数据库或站点资料根目录。']};
 }

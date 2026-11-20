@@ -44,7 +44,7 @@ export async function checkedGreetingGroups(botId:string,ids?:string[]){
 
 export async function createMigrationLaunch(db:Db,bot:any,selection:{changeId:string|null;externalIds:(string|undefined)[]},actor:string){
  const move=await pendingMove(bot.id,db);
- requireCondition(move?.id===selection.changeId,409,'迁移记录已变化，请刷新');
+ requireCondition((move?.id||null)===selection.changeId,409,'迁移记录已变化，请刷新');
  if(!move)return;
  requireCondition(selection.externalIds.every(v=>typeof v==='string'&&v.length>0),409,'寒暄群绑定已变化');
  await db.query(`INSERT INTO managed_bot_migration_launches

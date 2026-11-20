@@ -24,7 +24,7 @@ export const topicPolicySchema=z.object({
 export const groupPolicySchema=z.object({
   schema_version:z.literal(1).default(1),topic_scope:z.enum(['all','proactive']).default('all'),
   participation:z.enum(['quiet','moderate','active']).default('moderate'),
-  persona:z.enum(['gt-persona','neutral']).default('gt-persona'),
+  persona:z.enum(['gt-persona','neutral']).default('neutral'),
   identity:identityPolicySchema.default({disclosure:'when_asked',personal_questions:'tactful'}),
   timeouts:timeoutPolicySchema.default(timeoutDefaults),
   conversation:conversationPolicySchema,

@@ -7,7 +7,7 @@ import {readFile,mkdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pool,controlPool,closeBusinessPools} from '../server/db.js';
 import {initializeUserOwners} from '../server/user-access.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {ensureLegacyIsolation,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot,botRecord,botScope} from '../server/bot-workspaces.js';

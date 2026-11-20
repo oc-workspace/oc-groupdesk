@@ -4,7 +4,7 @@ import {createServer,type Server} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {controlPool,pool,closeBusinessPools} from '../server/db.js';
 import {initializeUserOwners} from '../server/user-access.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {ensureLegacyIsolation} from '../server/bot-provisioning.js';
 import {createApp} from '../server/app.js';
 import {legacyBotId} from '../server/bot-context.js';

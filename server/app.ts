@@ -405,7 +405,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
   registerSummaryAdmin(app);
   app.get('/api/logs',async(_req,res)=>res.json((await pool.query('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 150')).rows));
   app.get('/api/system',async(_req,res)=>res.json({
-    version:'0.1.0',server:'rococo-root',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
+    version:'0.1.0',server:process.env.INSTANCE_LABEL||'GroupDesk',database:'PostgreSQL',runtime_token_configured:(process.env.BOT_API_TOKEN||'').length>=32,
     cookie_secure:secureCookies,public_origin:process.env.PUBLIC_ORIGIN||'http://localhost:3110',
     retrieval:'关键词检索 · 中文双字匹配',modules:['群配置','话题','知识库','成员授权','私聊场景','机器人接口'],
     connector:'可信适配器按群同步策略并确认版本；在群配置查看已应用状态'

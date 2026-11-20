@@ -1,7 +1,7 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type Server} from 'node:http';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {pool} from '../server/db.js';
 import {createApp} from '../server/app.js';
 import {makeSkill} from '../server/persona-generation.js';

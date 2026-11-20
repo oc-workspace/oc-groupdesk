@@ -8,3 +8,11 @@ backups
 
 **/._*
 **/.DS_Store
+.backups
+artifacts
+docs/progress
+**/*.dump
+**/*.key
+**/*.log
+**/secrets
+**/__pycache__

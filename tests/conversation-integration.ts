@@ -2,7 +2,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type Server} from 'node:http';
 import {pool} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {importMaterial,datasetRecords} from '../server/persona-materials.js';
 import {processConversationJob} from '../server/conversation-insights.js';

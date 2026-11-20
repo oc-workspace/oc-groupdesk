@@ -8,13 +8,13 @@ import {requireCondition} from './security.js';
 
 const id=z.uuid();
 const kind=z.enum(['host_move','same_host_upgrade','connection_config']);
-const host=z.enum(['rococo-root','rococo-root2','rpi-groupdesk-01']);
+const host=z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const checks=z.object({source_stopped:z.boolean(),data_verified:z.boolean(),target_ready:z.boolean(),identity_verified:z.boolean(),reader_verified:z.boolean(),reply_still_paused:z.boolean()}).strict();
 
 export function registerBotDeploymentChanges(app:express.Express){
  app.get('/api/bot-deployment-hosts',async(req,res)=>{
   requireCondition(allowed(req.admin!,'bots.manage'),403,'没有机器人管理权限');
-  const hosts=(await controlPool.query("SELECT id,name FROM managed_runtime_hosts WHERE id<>'rococo-root' ORDER BY id")).rows;
+  const hosts=(await controlPool.query("SELECT id,name FROM managed_runtime_hosts WHERE can_cleanup OR enabled ORDER BY id")).rows;
   res.json({hosts});
  });
  app.get('/api/bots/:id/deployment-changes',async(req,res)=>{

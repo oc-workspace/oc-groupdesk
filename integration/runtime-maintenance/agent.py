@@ -3,7 +3,7 @@
 Inventory never reads WeChat DB contents, env files or backups. All mutations need
 an expiring server permit, a deleted bot UUID, fresh topology and a local journal.
 """
-import argparse, base64, datetime, fcntl, hashlib, hmac, json, os, re, shutil, stat, subprocess, time, urllib.request, uuid
+import argparse, base64, datetime, fcntl, hashlib, hmac, json, os, re, shutil, stat, subprocess, time, urllib.request, urllib.parse, uuid
 from pathlib import Path
 
 VERSION='runtime-maintenance-v2.1'
@@ -187,7 +187,7 @@ def target(bot_id,all_containers=None):
 
 def inventory(host):
     all_containers=containers();bots=[];legacy=[];warnings=[]
-    if host in {'rococo-root2','rpi-groupdesk-01'}:
+    if host!='rococo-root':
         ids=set()
         for c in all_containers:
             project=(c.get('labels') or {}).get('com.docker.compose.project','')
@@ -209,7 +209,7 @@ def inventory(host):
             known={canonical(b['bot_id']) for b in bots if b['bot_id']!=LEGACY}
             for p in PERSIST.iterdir():
                 if p.name not in known and p.name!='.quarantine':legacy.append(legacy_item(p,'unknown','缺少可信部署清单，仅盘点'))
-    for root,kind in HOST_ROOTS[host]:
+    for root,kind in HOST_ROOTS.get(host,[]):
         p=Path(root)
         if not p.exists():continue
         if kind=='backup':
@@ -231,7 +231,7 @@ def validate_permit(envelope,job,config,current):
     for k,v in {'job_id':job['id'],'host':config['host'],'action':job['action'],'bot_id':job['bot_id'],'lease_token':job['lease_token'],'fingerprint':current}.items():
         if payload.get(k)!=v:raise ValueError('执行许可与当前任务不匹配')
     if not time.time()<payload['expires']<=time.time()+190:raise ValueError('执行许可已过期')
-    if config['host'] not in {'rococo-root2','rpi-groupdesk-01'} or payload['action'] not in {'quarantine','purge','restore'}:raise ValueError('当前服务器只允许盘点')
+    if (config['host'] not in {'rococo-root2','rpi-groupdesk-01'} and config.get('allow_cleanup') is not True) or payload['action'] not in {'quarantine','purge','restore'}:raise ValueError('当前服务器只允许盘点')
     return payload
 
 def stop_stack(context):
@@ -385,14 +385,14 @@ def legacy_target(all_containers=None):
         resources.append({'key':kind+':'+str(path),'kind':kind,'path':str(path),'bytes':info['bytes'],'estimated_reclaimable_bytes':info['allocated'],'blocked':risks,'present':existing(path) is not None});shape.append([str(path),info['inode'],risks])
     for excluded in p.get('excluded_paths',[]):
         resources.append({'key':'retained:'+excluded['path'],'kind':'retained','path':excluded['path'],'bytes':None,'estimated_reclaimable_bytes':None,'blocked':[excluded['reason']],'present':True})
-    resources.append({'key':'containers','kind':'containers','path':'RyuBuddy:4-pinned-containers','bytes':None,'estimated_reclaimable_bytes':None,'blocked':blocked[:],'present':bool(own or nets)})
+    resources.append({'key':'containers','kind':'containers','path':'旧版机器人:4-pinned-containers','bytes':None,'estimated_reclaimable_bytes':None,'blocked':blocked[:],'present':bool(own or nets)})
     exclusive=[];shared=[]
     for img in sorted({c['image'] for c in p['containers']}):
         try:run('docker','image','inspect','--format','{{.Id}}',img)
         except subprocess.CalledProcessError:continue
         if any(c['image']==img and c['id'] not in pins for c in rows):shared.append(img)
         else:exclusive.append(img)
-    resources.append({'key':'images','kind':'images','path':'RyuBuddy:unshared-pinned-images','bytes':None,'estimated_reclaimable_bytes':None,'blocked':[],'present':bool(exclusive)})
+    resources.append({'key':'images','kind':'images','path':'旧版机器人:unshared-pinned-images','bytes':None,'estimated_reclaimable_bytes':None,'blocked':[],'present':bool(exclusive)})
     fp=digest({'profile':p,'paths':shape,'containers':own,'networks':nets,'units':unit_states,'exclusive_images':exclusive});q=None
     if j:
         qr=[]
@@ -432,7 +432,8 @@ class Client:
 def main():
     p=argparse.ArgumentParser();p.add_argument('action',choices=['serve','inventory']);p.add_argument('--config',type=Path,required=True);args=p.parse_args()
     c=json.loads(args.config.read_text())
-    if c['host'] not in HOST_ROOTS or c['url']!='https://groupdesk.rococo.dev':raise ValueError('Use a registered HTTPS control plane')
+    url=urllib.parse.urlsplit(c['url'])
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}',c['host']) or url.username or url.password or url.path not in {'','/'} or url.query or url.fragment or not (url.scheme=='https' or url.scheme=='http' and url.hostname in {'localhost','127.0.0.1','::1'}):raise ValueError('Use a registered host and HTTPS control-plane origin')
     if args.action=='inventory':print(json.dumps(inventory(c['host']),ensure_ascii=False));return
     client=Client(c)
     while True:

@@ -2,7 +2,7 @@ import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type Server} from 'node:http';
 import {pool} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 if(!process.env.DATABASE_URL?.includes('groupdesk_test'))throw Error('Dedicated test database required');
 let server:Server,base='',cookie='',csrf='';

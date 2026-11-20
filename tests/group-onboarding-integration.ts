@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {createServer,type Server} from 'node:http';
 import {pool,controlPool,closeBusinessPools} from '../server/db.js';
-import {migrate} from '../server/migrate.js';
+import {migrate} from './legacy-fixture.js';
 import {createApp} from '../server/app.js';
 import {ensureLegacyIsolation,sqlIdentifier} from '../server/bot-provisioning.js';
 import {withBot,botRecord} from '../server/bot-workspaces.js';

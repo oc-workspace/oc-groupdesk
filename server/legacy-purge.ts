@@ -1,6 +1,6 @@
 // Frozen business-table allowlist. Never drop the control DB, its schema, or use CASCADE.
 import type pg from 'pg';
-import {lstat,realpath,unlink} from 'node:fs/promises';
+import {lstat,realpath,unlink,readFile} from 'node:fs/promises';
 import {resolve,basename} from 'node:path';
 import {controlPool} from './db.js';
 import {digest,requireCondition} from './security.js';
@@ -9,11 +9,13 @@ export const legacyBusinessTables=[
  'topics','knowledge_bases','groups','group_topics','group_knowledge','documents','chunks','memberships','dm_scenes',
  'persona_collections','persona_imports','persona_materials','persona_datasets','personas','persona_versions','persona_jobs',
  'conversation_jobs','conversation_labels','persona_resource_previews','persona_resource_imports','group_persona_features',
- 'summary_settings','summary_schedules','summary_jobs','summary_parts','summary_source_batches',
+ 'summary_settings','summary_schedules','summary_jobs','summary_parts','summary_source_batches','summary_source_cache',
  'interaction_definitions','interaction_settings','group_interactions','interaction_wallets','interaction_daily_checkins','interaction_prizes',
  'interaction_events','interaction_redemptions','interaction_ledger','interaction_daily_usage','interaction_templates',
  'runtime_notifications','runtime_adapters','group_onboarding_jobs','group_onboarding_bindings','group_onboarding_agent','credential_models','model_credentials'
 ];
+// Only the shipped INSERT/UPDATE cancellation trigger is reviewed; TRUNCATE never executes it.
+const reviewedCancelBody=(await readFile(new URL('../migrations/037_summary_payload_cleanup.sql',import.meta.url),'utf8')).split('AS $$')[1].split('$$;')[0];
 type Db=Pick<pg.PoolClient,'query'>;
 export type LegacyFile={root:'uploads'|'persona';name:string;inode:string;device:string;bytes:number;mtime:number;present:boolean};
 async function fileInfo(root:LegacyFile['root'],name:string):Promise<LegacyFile>{
@@ -29,7 +31,7 @@ export async function legacyDataPlan(owner:string,db:Db=controlPool){
  for(const t of ['topics','personas'])if((await db.query('SELECT 1 FROM '+t+" WHERE visibility<>'private' OR created_by_user_id IS DISTINCT FROM $1 LIMIT 1",[owner])).rowCount)blockers.push('包含共享或其他作者的话题/人设；业务数据及资料整体保留，请先处理资源归属');
  if((await db.query('SELECT 1 FROM groups WHERE created_by_user_id IS DISTINCT FROM $1 LIMIT 1',[owner])).rowCount)blockers.push('包含其他作者的群配置，业务空间保留');
  // An unknown referencing table must prevent TRUNCATE, never be pulled in by CASCADE.
- if((await db.query("SELECT 1 FROM pg_trigger WHERE NOT tgisinternal AND tgrelid=ANY(SELECT to_regclass('public.'||unnest($1::text[]))) LIMIT 1",[legacyBusinessTables])).rowCount)blockers.push('业务表含未审核触发器，保留待核对');
+ if((await db.query("SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE NOT t.tgisinternal AND t.tgrelid=ANY(SELECT to_regclass('public.'||unnest($1::text[]))) AND NOT(t.tgrelid=to_regclass('public.summary_jobs') AND t.tgname='summary_jobs_cancelled_payload_cleanup' AND t.tgtype=23 AND p.proname='clear_cancelled_summary_payload' AND p.pronamespace='public'::regnamespace AND NOT p.prosecdef AND p.pronargs=0 AND p.prolang=(SELECT oid FROM pg_language WHERE lanname='plpgsql') AND p.prosrc=$2) LIMIT 1",[legacyBusinessTables,reviewedCancelBody])).rowCount)blockers.push('业务表含未审核触发器，保留待核对');
  const outside=(await db.query("SELECT DISTINCT conrelid::regclass::text name FROM pg_constraint WHERE contype='f' AND confrelid=ANY(SELECT to_regclass('public.'||unnest($1::text[]))) AND NOT conrelid=ANY(SELECT to_regclass('public.'||unnest($1::text[])))",[legacyBusinessTables])).rows;
  if(outside.length)blockers.push('发现清单外的数据库引用，保留待核对：'+outside.map(r=>r.name).join('、'));
  const tables=[];
