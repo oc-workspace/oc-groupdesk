@@ -214,7 +214,7 @@ test('status endpoint reports save-to-ack transitions without exposing or changi
   const pending=await request('/groups/status');
   assert.equal(pending.status,200);assert.equal(pending.response.headers.get('cache-control'),'no-store');
   const pendingRow=pending.data.find((g:any)=>g.id===selected.id);
-  assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','revision','runtime_health','runtime_health_at']);
+  assert.deepEqual(Object.keys(pendingRow).sort(),['applied_revision','bot_seen_at','enabled','id','request_status','request_status_at','revision','runtime_health','runtime_health_at']);
   assert.equal(pendingRow.revision,selected.revision);assert(pendingRow.applied_revision<selected.revision);
   assert.equal((await request('/runtime/ack','POST',{model_routing_version:1,reply_limits_version:1,reply_frequency_version:1,reply_frequency_revision:1,timeout_policy_version:3,group_id:selected.id,revision:selected.revision-1},true)).status,409);
   assert.deepEqual((await request('/groups/status')).data.find((g:any)=>g.id===selected.id),pendingRow);
