@@ -56,6 +56,12 @@ class OutcomeTests(unittest.TestCase):
                 db.execute("INSERT INTO sends VALUES('send','old',?)",(state,))
             self.assertFalse(r.finish(self.p,'old'))
         self.assertEqual(self.status(),'active')
+    def test_deliberate_silence_releases_without_a_failure_notice(self):
+        self.assertTrue(r.finish(self.p,'old','silent'))
+        self.assertEqual(self.status(),'idle_released')
+        with self.p.db() as db:
+            outcome=db.execute('SELECT stage,notice_status FROM request_outcomes').fetchone()
+            self.assertEqual(tuple(outcome),('idle_released','skipped'))
     def test_ws_delivery_in_flight_is_not_treated_as_an_empty_turn(self):
         r.stage(self.p,'old','sending')
         self.assertFalse(r.finish(self.p,'old'))

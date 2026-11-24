@@ -16,7 +16,7 @@ def stage(p, turn_id, value, reason=None):
         init(db)
         db.execute("""INSERT INTO request_outcomes(turn_id,stage,reason,updated)
             VALUES(?,?,?,?) ON CONFLICT(turn_id) DO UPDATE
-            SET stage=excluded.stage,reason=excluded.reason,updated=excluded.updated""",
+            SET stage=excluded.stage,reason=coalesce(excluded.reason,request_outcomes.reason),updated=excluded.updated""",
             (turn_id,value,reason,p.clock()))
         db.execute("DELETE FROM request_outcomes WHERE updated<?", (p.clock()-7*86400,))
 
@@ -37,11 +37,14 @@ def finish(p, turn_id, reason='model_failed'):
             return False
         if db.execute("SELECT 1 FROM attempts WHERE turn_id=? AND state='reserved'", (turn_id,)).fetchone():
             return False
-        db.execute("UPDATE turns SET status='failed',ended=? WHERE id=? AND status='active'", (p.clock(),turn_id))
-        db.execute("""INSERT INTO request_outcomes(turn_id,stage,reason,updated)
-            VALUES(?,'failed',?,?) ON CONFLICT(turn_id) DO UPDATE
-            SET stage='failed',reason=excluded.reason,updated=excluded.updated""",
-            (turn_id,reason,p.clock()))
+        state='idle_released' if reason=='silent' else 'failed'
+        notice='skipped' if state=='idle_released' else 'waiting'
+        db.execute("UPDATE turns SET status=?,ended=? WHERE id=? AND status='active'", (state,p.clock(),turn_id))
+        db.execute("""INSERT INTO request_outcomes(turn_id,stage,reason,updated,notice_status)
+            VALUES(?,?,?,?,?) ON CONFLICT(turn_id) DO UPDATE
+            SET stage=excluded.stage,reason=excluded.reason,updated=excluded.updated,
+                notice_status=excluded.notice_status""",
+            (turn_id,state,reason,p.clock(),notice))
         return True
 
 
@@ -60,7 +63,14 @@ def model_failed(p, turn_id, task, error):
 def complete_bound_turn():
     from group_guard import policy, TURN
     p=policy()
-    return finish(p,TURN.get(),'no_reply')
+    turn=TURN.get()
+    with p.db() as db:
+        init(db)
+        outcome=db.execute('SELECT reason FROM request_outcomes WHERE turn_id=?',(turn,)).fetchone()
+    # A deliberate silent/stop choice is a normal completion. Notify only
+    # when this request actually recorded a failed model attempt.
+    reason='model_failed' if outcome and outcome['reason'] else 'silent'
+    return finish(p,turn,reason)
 
 
 async def finalize(coroutine, default):
