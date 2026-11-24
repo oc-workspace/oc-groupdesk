@@ -56,6 +56,18 @@ class NativeQueueTests(unittest.TestCase):
         with self.p.db() as db:db.execute('DELETE FROM pending')
         self.assertFalse(reply_frequency.pump(self.p))
         with self.p.db() as db:self.assertEqual(db.execute('SELECT status FROM frequency_waiting WHERE seq=2').fetchone()[0],'expired')
+    def test_next_turn_waits_for_failed_runtime_cleanup_instead_of_racing_it(self):
+        import chat_reliability
+        self.ingest(1,'First question?')
+        self.now+=5
+        turn=self.p.dispatch()
+        self.assertIsNotNone(turn)
+        self.assertTrue(chat_reliability.finish(self.p,turn['id']))
+        self.ingest(2,'Another question?',member='native-B')
+        self.now+=3
+        self.assertIsNone(self.p.dispatch())
+        self.now+=8
+        self.assertIsNotNone(self.p.dispatch())
     def test_off_switch_keeps_the_configured_no_catchup_behavior(self):
         self.ingest(1,'First question?')
         self.now+=self.p.cfg['merge_window_seconds']+1
