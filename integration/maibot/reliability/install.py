@@ -34,6 +34,12 @@ def install(root):
                             gd.revision(managed),topic_refs,reply_source_seq=reply_source_seq)
                     self.count(db,'queue_full'); return 'queue_full'"""
     files[name]=replace(files[name],old,new)
+    old="        seconds=self.cfg.get(kind+'_after_turn_seconds',self.cfg['after_turn_seconds'])"
+    new="""        seconds=self.cfg.get(kind+'_after_turn_seconds',self.cfg['after_turn_seconds'])
+        import chat_reliability
+        if chat_reliability.settling(db,now):
+            return True"""
+    files[name]=replace(files[name],old,new)
     name='limits/group_guard.py'
     files[name]=replace(files[name],'        TURN.set(turn_id)\n',
         '        TURN.set(turn_id)\n        import chat_reliability\n        chat_reliability.stage(p,turn_id,task)\n')

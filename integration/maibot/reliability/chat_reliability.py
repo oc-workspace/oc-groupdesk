@@ -2,6 +2,8 @@
 import asyncio
 import logging
 
+FINALIZE_SECONDS=5
+
 
 def init(db):
     db.execute("""CREATE TABLE IF NOT EXISTS request_outcomes(
@@ -73,10 +75,17 @@ def complete_bound_turn():
     return finish(p,turn,reason)
 
 
+def settling(db, now):
+    # The failed request is released before its monitoring cleanup completes.
+    # Wait for that bounded cleanup before dispatching to the same runtime.
+    return db.execute("""SELECT 1 FROM request_outcomes o JOIN turns t ON t.id=o.turn_id
+        WHERE t.status='failed' AND t.ended>? LIMIT 1""",(now-FINALIZE_SECONDS-2,)).fetchone() is not None
+
+
 async def finalize(coroutine, default):
     """Monitoring/prompt rendering must not hold a finished turn for minutes."""
     try:
-        return await asyncio.wait_for(coroutine,timeout=5)
+        return await asyncio.wait_for(coroutine,timeout=FINALIZE_SECONDS)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
