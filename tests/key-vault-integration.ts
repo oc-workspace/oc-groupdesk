@@ -136,3 +136,49 @@ test('unpriced history is never displayed or budgeted as zero money; owner can r
  assert.equal((await req('/key-usage/'+row.id+'/reconcile','POST',{input:10,output:1,cached:0,cost:.000013,note:'Synthetic price reconciliation'},a)).status,200);
  await withBot(botA,async()=>{const r=await reserveUsage(privateAlias,'synthetic-model',{feature:'chat'},1,10);await settleUsage(r,null,false);});
 });
+
+test('Responses format recovery dispatches and bills at most two distinct requests, with cancellation respected',async()=>{
+ const created=await req('/keys','POST',{name:'Synthetic compatibility key',base_url:'https://compat.example.com/v1',client_type:'openai_responses',api_key:'synthetic-compat-key-only'},a);
+ assert.equal(created.status,201);
+ await req('/keys/'+created.data.id+'/models','POST',{model_id:'synthetic-compatible',capability:'text'},a);
+ const {UpstreamModelError}=await import('../server/model-transport.js');
+ await withBot(botA,async()=>{
+  await syncAliases();
+  const alias=(await pool.query('SELECT id FROM model_credentials WHERE vault_key_id=$1',[created.data.id])).rows[0].id;
+  const body={model:'synthetic-compatible',max_output_tokens:100,input:[{role:'system',content:'Persona rule'},{role:'user',content:[{type:'input_text',text:'Synthetic question'}]}]};
+  const before=(await controlPool.query('SELECT count(*)::int n FROM managed_model_usage WHERE key_id=$1',[created.data.id])).rows[0].n;
+  let calls=0;
+  const reply=await executeKeyCall(alias,'synthetic-compatible',{feature:'chat',groupId:group},body,1000,undefined,async(u,k,p,b,t,s,dispatch)=>{
+   await dispatch?.();calls++;
+   if(calls===1)throw new UpstreamModelError(400);
+   assert.equal(b.input.length,1);assert.equal(typeof b.input[0].content,'string');assert(b.instructions.includes('Persona rule'));
+   return {text:JSON.stringify({output:[],usage:{input_tokens:4,output_tokens:1}}),contentType:'application/json'};
+  });
+  assert(reply.text.includes('usage'));assert.equal(calls,2);
+  assert.equal((await controlPool.query('SELECT count(*)::int n FROM managed_model_usage WHERE key_id=$1',[created.data.id])).rows[0].n,before+2);
+  calls=0;
+  await assert.rejects(executeKeyCall(alias,'synthetic-compatible',{feature:'chat',groupId:group},body,1000,undefined,async(u,k,p,b,t,s,dispatch)=>{await dispatch?.();calls++;throw new UpstreamModelError(400);}),/HTTP 400/);
+  assert.equal(calls,2);
+  const controller=new AbortController();calls=0;
+  await assert.rejects(executeKeyCall(alias,'synthetic-compatible',{feature:'chat',groupId:group},body,1000,controller.signal,async(u,k,p,b,t,s,dispatch)=>{await dispatch?.();calls++;controller.abort();throw new UpstreamModelError(400);}));
+  assert.equal(calls,1);
+  calls=0;
+  await assert.rejects(executeKeyCall(alias,'synthetic-compatible',{feature:'chat',groupId:group},body,1000,undefined,async()=>{calls++;throw new UpstreamModelError(503);}),/HTTP 503/);
+  assert.equal(calls,1);
+ });
+});
+test('request progress is adapter-group scoped and never refreshes hourly availability timestamps',async()=>{
+ const external='bowxt-'+botA.replaceAll('-','')+':1';
+ const bearer='synthetic-request-status-adapter-token-long-enough';
+ await controlPool.query('INSERT INTO managed_bot_adapters(token_hash,bot_id,name,group_external_ids) VALUES($1,$2,$3,$4)',[digest(bearer),botA,'Synthetic request reporter',JSON.stringify([external])]);
+ const send=(body:any)=>fetch(base+'/api/runtime/request-status',{method:'POST',headers:{Authorization:'Bearer '+bearer,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const before=await withBot(botA,async()=>(await pool.query('SELECT runtime_health_at FROM groups WHERE id=$1',[group])).rows[0].runtime_health_at);
+ const payload={external_id:external,requests:[{id:'synthetic-task',stage:'replyer',received_at:100,updated_at:120}]};
+ assert.equal((await send(payload)).status,200);
+ assert.equal((await send({...payload,external_id:'foreign-group'})).status,403);
+ assert.equal((await send({...payload,requests:[{...payload.requests[0],text:'not permitted'}]})).status,400);
+ await withBot(botA,async()=>{
+  const row=(await pool.query('SELECT request_status,runtime_health_at,request_status_at FROM groups WHERE id=$1',[group])).rows[0];
+  assert.deepEqual(row.request_status,payload.requests);assert.equal(row.runtime_health_at,before);assert(row.request_status_at);
+ });
+});

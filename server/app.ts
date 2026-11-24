@@ -196,7 +196,7 @@ export function createApp(options:{githubRequest?:GithubRequest;modelTransport?:
     });
   });
   app.get('/api/groups/status',async(_req,res)=>{
-    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled,runtime_health,runtime_health_at FROM groups WHERE deleted_at IS NULL ORDER BY id')).rows);
+    res.json((await pool.query('SELECT id,revision,applied_revision,bot_seen_at,enabled,runtime_health,runtime_health_at,request_status,request_status_at FROM groups WHERE deleted_at IS NULL ORDER BY id')).rows);
   });
   app.post('/api/groups',async(req,res)=>{
     const body=z.object({name:text(120).min(1)}).parse(req.body),groupId=randomUUID();

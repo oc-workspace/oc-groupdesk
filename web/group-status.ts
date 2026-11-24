@@ -1,5 +1,5 @@
 export type GroupStatus={
-  id:string;revision:number;applied_revision:number;bot_seen_at:string|null;enabled:boolean;runtime_health?:import('./runtime-health').RuntimeHealth|null;runtime_health_at?:string|null
+  id:string;revision:number;applied_revision:number;bot_seen_at:string|null;enabled:boolean;runtime_health?:import('./runtime-health').RuntimeHealth|null;runtime_health_at?:string|null;request_status?:import("./runtime-health").RuntimeRequest[];request_status_at?:string|null
 };
 export type StatusMap=Record<string,GroupStatus>;
 export type Confirmation={kind:'confirmed'|'pending'|'offline'|'changed'|'checking';label:string};
@@ -7,7 +7,7 @@ export type Confirmation={kind:'confirmed'|'pending'|'offline'|'changed'|'checki
 export function mergeStatuses(previous:StatusMap,incoming:readonly GroupStatus[]):StatusMap{
   const merged={...previous};
   for(const value of incoming){
-    const next:GroupStatus={id:value.id,revision:value.revision,applied_revision:value.applied_revision,bot_seen_at:value.bot_seen_at,enabled:value.enabled,runtime_health:value.runtime_health,runtime_health_at:value.runtime_health_at};
+    const next:GroupStatus={id:value.id,revision:value.revision,applied_revision:value.applied_revision,bot_seen_at:value.bot_seen_at,enabled:value.enabled,runtime_health:value.runtime_health,runtime_health_at:value.runtime_health_at,request_status:value.request_status,request_status_at:value.request_status_at};
     const old=merged[next.id];
     if(old&&next.revision<old.revision)continue;
     if(old&&next.revision===old.revision){

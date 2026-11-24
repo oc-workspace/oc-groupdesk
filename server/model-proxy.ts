@@ -6,7 +6,8 @@ import {botStorage} from './bot-context.js';
 import {botRecord,botScope} from './bot-workspaces.js';
 import {pool,controlPool} from './db.js';
 import {requireCondition} from './security.js';
-import {modelTransport,type ModelTransport} from './model-transport.js';
+import {compactResponsesRequest,incompatibleResponsesInput} from './model-compatibility.js';
+import {modelTransport,UpstreamModelError,type ModelTransport} from './model-transport.js';
 export function upstreamUrl(base:string,protocol:string,model:string,stream=false){
  if(protocol==='gemini'){const prefix=/\/v\d+(?:alpha|beta)?\d*$/.test(new URL(base).pathname)?base:base+'/v1beta';return new URL(prefix+'/models/'+encodeURIComponent(model)+(stream?':streamGenerateContent?alt=sse':':generateContent'));}
  return new URL(base+(protocol==='openai_responses'?'/responses':'/chat/completions'));
@@ -19,11 +20,29 @@ export async function executeKeyCall(alias:string,model:string,scope:CallScope,b
  requireCondition((body.n==null||body.n===1)&&(body.generationConfig?.candidateCount==null||body.generationConfig.candidateCount===1),400,'每次仅生成一个结果');
  const bytes=Buffer.byteLength(JSON.stringify(body));requireCondition(bytes<=1024*1024,400,'模型请求过大');
  if(c.scope==='site'){const text=JSON.stringify(body);requireCondition(!/"(?:inlineData|fileData|image_url|input_image|input_audio|input_file|video_url)"/.test(text),400,'公用 Key 暂只接受可计量的文字请求；多媒体请使用私有 Key');requireCondition(!body.tools||Array.isArray(body.tools)&&body.tools.every((t:any)=>c.client_type==='gemini'?Object.keys(t).every(key=>key==='functionDeclarations')&&Array.isArray(t.functionDeclarations):t.type==='function'),400,'公用 Key 未开放服务商额外付费工具');}
- const reservation=await reserveUsage(alias,model,scope,bytes,limit);let dispatched=false;
- try{
-  const result=await transport(upstreamUrl(c.base_url,c.client_type,model,stream),openControlSecret(c.secret_ciphertext),c.client_type,body,timeout,signal,async()=>{await controlPool.query('UPDATE managed_model_usage SET dispatched=true WHERE id=$1',[reservation.id]);dispatched=true;});
-  await settleUsage(reservation,responseUsage(result.text),true);return result;
- }catch(e){await settleUsage(reservation,null,dispatched,'request_failed');throw e;}
+ const deadline=Date.now()+timeout;
+ async function call(candidate:any){
+  signal?.throwIfAborted();
+  requireCondition(Date.now()<deadline,504,'模型连接失败或超时');
+  const reservation=await reserveUsage(alias,model,scope,Buffer.byteLength(JSON.stringify(candidate)),limit);
+  let dispatched=false;
+  try{
+   const result=await transport(upstreamUrl(c.base_url,c.client_type,model,stream),openControlSecret(c.secret_ciphertext),c.client_type,candidate,Math.max(1,deadline-Date.now()),signal,async()=>{
+    await controlPool.query('UPDATE managed_model_usage SET dispatched=true WHERE id=$1',[reservation.id]);
+    dispatched=true;
+   });
+   await settleUsage(reservation,responseUsage(result.text),true);
+   return result;
+  }catch(e){await settleUsage(reservation,null,dispatched,'request_failed');throw e;}
+ }
+ try{return await call(body);}
+ catch(e){
+  const compatible=c.client_type==='openai_responses'&&incompatibleResponsesInput(body)&&e instanceof UpstreamModelError&&[400,422].includes(e.upstreamStatus)
+   ?compactResponsesRequest(body):null;
+  if(!compatible)throw e;
+  signal?.throwIfAborted();
+  return call(compatible);
+ }
 }
 const MODEL_PROXY_PERMIT_MS=300000;
 export async function proxyRoute(route:any,groupId:string,stage='chat'){
