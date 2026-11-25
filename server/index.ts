@@ -12,6 +12,6 @@ await ensureLegacyIsolation();
 for(const bot of (await controlPool.query("SELECT id FROM managed_bots WHERE deleted_at IS NULL AND database_state='ready'")).rows)await withBot(bot.id,()=>migrate({controlPlane:false,bootstrapAdmin:false}));
 await initializeUserOwners();
 await initializeKeyVault();
-const server=createApp().listen(Number(process.env.PORT||3110),'0.0.0.0',()=>console.log('GroupDesk ready on port '+(process.env.PORT||3110)));
+const server=createApp().listen(Number(process.env.PORT||3110),process.env.HOST||'0.0.0.0',()=>console.log('GroupDesk ready on port '+(process.env.PORT||3110)));
 function shutdown(){server.close(()=>pool.end().then(()=>process.exit(0)));setTimeout(()=>process.exit(1),10000).unref();}
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

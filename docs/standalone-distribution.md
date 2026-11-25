@@ -103,3 +103,15 @@ restore 只写新的空实例。支持本工具格式和维护备份 `site` 格�
 5. 仅在明确安排的切换窗口调整生产入口与运行端连接；先核对登录和原账号身份，再逐个启用机器人/后台任务。生产验证不应擅自向真实群发送测试消息。
 
 当前没有执行上述生产切换步骤。指定流程见 [开发与生产发布脚本说明](https://github.com/oc-workspace/openclaw-workspace/blob/main/openclaw-开发与生产发布脚本说明.md)，服务器副本位于 `rococo-oc-workplace:/work/oc-projects/openclaw-workspace/openclaw-开发与生产发布脚本说明.md`。
+
+## macOS 原生独立安装包（免 Docker，2026-11-23 RC1）
+
+面向不安装 Docker 的 Apple Silicon Mac（`darwin/arm64`）新增原生独立包方案，使用 `scripts/package-macos-native.py` 基于 `scripts/package-standalone.py` 干净白名单源码包构建，内置独立 Node.js 运行时与可重定位 PostgreSQL 16（已验证零外部非系统动态库引用与 ad-hoc `codesign`），配套原生管理工具 `distribution/manage-macos.py` 与说明文档 [macOS 原生发行包说明](../distribution/README-macos.md)。
+
+| 产物文件 | 大小 | SHA-256 |
+|---|---|---|
+| `groupdesk-standalone-20261123-rc1-macos-arm64.dmg` | 136,282,463 字节（约 130 MB） | `c330cf9fabdbb923613144aacc915127fd3f34a669dce2acac9f7e59c9a30db1` |
+| `groupdesk-standalone-20261123-rc1-macos-arm64.tar.gz` | 100,853,387 字节（约 96 MB） | `f417faddd18a2b059b2b48157798fefed8b8885e9013911a4b531cc0fc4d2470` |
+| `groupdesk-standalone-20261123-rc1-source.tar.gz` | 731,572 字节（约 0.70 MB） | `a4222d51e6bccdd0eab335436f2300e3dbcbbb10f3859a69667f5d54d9418f9f` |
+
+2026-11-23 在 Apple Silicon Mac（macOS 26.6.2）剥离外部 `PATH=/usr/bin:/bin` 完成实机端到端验收：空安装 8 类私有业务表为空、管理员登录、独立机器人库与群创建、Mac 接入工具下载、`.dmg` 挂载与 `codesign --verify --strict` 及优雅停止均通过（收据见 [11 月 23 日记录](progress/2026-11-23.md)）。本机未装 `gnupg`，macOS 原生加密备份/恢复往返待补测；Intel Mac、原生 Windows 与 Linux ARM 仍待分别验收。
