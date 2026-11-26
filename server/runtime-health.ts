@@ -15,7 +15,26 @@ export const runtimeHealthSchema=z.object({
  swap_mib:z.number().nonnegative().max(1000000).optional()
 }).strict();
 
+export const requestStatusSchema=z.object({
+ external_id:z.string().min(1).max(200),
+ requests:z.array(z.object({
+  id:z.string().min(1).max(100),
+  stage:z.enum(['queued','deferred','waiting_model','processing','planner','replyer','utils','fast_model','generation_retry','failed_attempt','sending','sent','failed','expired','uncertain','idle_released','paused']),
+  reason:z.string().regex(/^[A-Za-z_]{1,80}$/).nullable().optional(),
+  received_at:z.number().finite().nonnegative(),
+  updated_at:z.number().finite().nonnegative()
+ }).strict()).max(10)
+}).strict();
 export function registerRuntimeHealth(app:express.Express){
+ app.post('/api/runtime/request-status',async(req,res)=>{
+  const body=requestStatusSchema.parse(req.body);
+  requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(body.external_id),403,'此适配器未授权该群');
+  await transaction(async db=>{
+   const result=await db.query('UPDATE groups SET request_status=$1,request_status_at=now() WHERE deleted_at IS NULL AND external_id=$2',[JSON.stringify(body.requests),body.external_id]);
+   requireCondition(result.rowCount,404,'群未绑定');
+  });
+  res.json({ok:true});
+ });
  app.post('/api/runtime/health',async(req,res)=>{
   const body=runtimeHealthSchema.parse(req.body);
   requireCondition(!req.runtimeGroups||req.runtimeGroups.includes(body.external_id),403,'此适配器未授权该群');
