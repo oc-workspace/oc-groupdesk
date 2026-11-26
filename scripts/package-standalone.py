@@ -38,7 +38,12 @@ def main():
   required += ['integration/local-collector/macos-gui/'+name for name in downloads]
   if any(not (root/p).is_file() for p in required):raise ValueError('Missing runtime package dependency')
   hashes={str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(root.rglob('*')) if f.is_file()}
-  report={'format':1,'version':a.version,'private_data_included':False,'private_images_used':False,'auto_import_personas':False,'third_party_skills_bundled':False,'files':hashes}
+  provenance_path=ROOT/'distribution/BUILD-PROVENANCE.json'
+  provenance=json.loads(provenance_path.read_text()) if provenance_path.exists() else None
+  if provenance:
+   for name,expected in provenance['repair_sha256'].items():
+    if not name.startswith('integration/maibot/reliability/') or '..' in Path(name).parts or hashlib.sha256((root/name).read_bytes()).hexdigest()!=expected:raise ValueError('Production repair fingerprint mismatch')
+  report={'build_provenance':provenance,'format':1,'version':a.version,'private_data_included':False,'private_images_used':False,'auto_import_personas':False,'third_party_skills_bundled':False,'files':hashes}
   (root/'PACKAGE-MANIFEST.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
   (root/'SHA256SUMS').write_text(''.join(v+'  '+k+'\n' for k,v in hashes.items()))
   with tarfile.open(dest,'w:gz') as tar:tar.add(root,arcname=root.name)

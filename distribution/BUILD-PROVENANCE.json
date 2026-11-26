@@ -1,0 +1,13 @@
+{
+  "production_repository": "oWinnieo/oc-groupdesk",
+  "production_commit": "39454151f08d7c94b6feadcbec9a3517aa0c4b93",
+  "production_pr": 166,
+  "pr_merged": true,
+  "source_base_commit": "2d920ac",
+  "package_refresh_date": "2026-11-26",
+  "native_packaging_overlay": true,
+  "repair_sha256": {
+    "integration/maibot/reliability/chat_reliability.py": "ecfb639c0dadafba530f23c4768c05a84ee05072249fd1a62a3afef6f6c0469a",
+    "integration/maibot/reliability/install.py": "09f091bf42678747d2ca4d61512fc2be990c287c928a6767fc7e317022036c53"
+  }
+}

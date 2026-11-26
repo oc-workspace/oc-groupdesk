@@ -528,6 +528,7 @@ def main():
 
         # Write runtime manifest & top-level SHA256SUMS.
         runtime_manifest = {
+            "build_provenance": json.loads((bundle / "distribution/BUILD-PROVENANCE.json").read_text()) if (bundle / "distribution/BUILD-PROVENANCE.json").exists() else None,
             "format": 1,
             "version": a.version,
             "platform": f"darwin/{arch}",
@@ -621,6 +622,7 @@ def main():
     sums_lines.append(f"{tar_sha}  {tar_dest.name}")
     (out_dir / "SHA256SUMS").write_text("\n".join(sums_lines) + "\n")
     result = {
+        "build_provenance": runtime_manifest.get("build_provenance"),
         "version": a.version,
         "platform": f"darwin/{arch}",
         "docker_required": False,
