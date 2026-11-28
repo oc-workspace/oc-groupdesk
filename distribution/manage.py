@@ -94,7 +94,7 @@ def initialize(a):
   password=getpass.getpass('Set the first administrator password (16+ characters): ')
   if password!=getpass.getpass('Repeat password: '):fail('Passwords differ')
  if len(password)<16:fail('Administrator password requires 16+ characters')
- root.mkdir(mode=0o700);config=root/'config';config.mkdir(mode=0o700)
+ root.parent.mkdir(parents=True,exist_ok=True);root.mkdir(mode=0o700);root.chmod(0o700);config=root/'config';config.mkdir(mode=0o700)
  (root/'data/files').mkdir(parents=True,mode=0o700);(root/'data/postgres').mkdir(mode=0o700)
  pgpass=secrets.token_hex(32)
  env_write(config/'app.env',{'DATABASE_URL':'postgres://groupdesk:'+pgpass+'@postgres:5432/groupdesk','ADMIN_USERNAME':a.admin,'ADMIN_PASSWORD':password,'BOT_API_TOKEN':secrets.token_hex(32),'MODEL_ENCRYPTION_KEY':secrets.token_hex(32),'COOKIE_SECURE':str(origin.scheme=='https').lower(),'PUBLIC_ORIGIN':a.origin or 'http://localhost:'+str(a.port),'INSTANCE_LABEL':a.project,'GROUPDESK_SUMMARY_LIBRARY':'generic'})

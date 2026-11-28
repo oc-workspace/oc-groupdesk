@@ -4,7 +4,7 @@
   "production_pr": 166,
   "pr_merged": true,
   "source_base_commit": "2d920ac",
-  "package_refresh_date": "2026-11-26",
+  "package_refresh_date": "2026-11-28",
   "native_packaging_overlay": true,
   "repair_sha256": {
     "integration/maibot/reliability/chat_reliability.py": "ecfb639c0dadafba530f23c4768c05a84ee05072249fd1a62a3afef6f6c0469a",

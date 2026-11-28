@@ -579,7 +579,9 @@ def initialize(a):
     if len(password) < 16:
         fail("Administrator password requires 16+ characters")
 
+    root.parent.mkdir(parents=True, exist_ok=True)
     root.mkdir(mode=0o700)
+    root.chmod(0o700)
     config = root / "config"
     config.mkdir(mode=0o700)
     (root / "data/files").mkdir(parents=True, mode=0o700)

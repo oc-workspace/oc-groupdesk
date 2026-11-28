@@ -1,4 +1,5 @@
-import importlib.util,io,json,tarfile,tempfile,unittest
+import argparse,importlib.util,io,json,socket,tarfile,tempfile,unittest
+from unittest import mock
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,path):
@@ -33,4 +34,30 @@ class Safety(unittest.TestCase):
   self.assertGreaterEqual(manage_macos.parse_node_version('v22.13.0'),(22,13,0))
   self.assertGreaterEqual(manage_macos.parse_node_version('v24.22.3'),(22,13,0))
   self.assertLess(manage_macos.parse_node_version('v20.19.0'),(22,13,0))
+ def test_macos_init_creates_missing_parent_dirs_and_rejects_overwrite(self):
+  with tempfile.TemporaryDirectory() as temp:
+   pw=Path(temp)/'admin.pw';pw.write_text('synthetic-admin-pass-2026\n');pw.chmod(0o600)
+   target=Path(temp)/'nested/Application Support/GroupDesk/default'
+   args=argparse.Namespace(target=str(target),project='gd-macos',port=3110,pg_port=55432,origin=None,admin='admin',admin_password_file=str(pw),isolated=False,node_bin=None,postgres_bin=None)
+   with mock.patch.object(manage_macos,'find_node',return_value=(Path('/bin/true'),'v24.22.3')),mock.patch.object(manage_macos,'find_postgres',return_value={'bin':Path('/bin')}),mock.patch.object(manage_macos,'port_available',return_value=True),mock.patch.object(manage_macos,'pick_pg_port',return_value=55432):
+    manage_macos.initialize(args)
+    self.assertTrue((target/'instance.json').is_file())
+    self.assertEqual(target.stat().st_mode&0o777,0o700)
+    self.assertRaises(RuntimeError,manage_macos.initialize,args)
+ def test_linux_init_creates_missing_parent_dirs_and_rejects_overwrite(self):
+  with tempfile.TemporaryDirectory() as temp,socket.socket() as sock:
+   sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+   sock.close()
+   pw=Path(temp)/'admin.pw';pw.write_text('synthetic-admin-pass-2026\n');pw.chmod(0o600)
+   target=Path(temp)/'nested/groupdesk/default'
+   args=argparse.Namespace(target=str(target),project='gd-test',port=port,origin=None,admin='admin',admin_password_file=str(pw),image='groupdesk:test',isolated=False)
+   with mock.patch.object(manage,'check_docker',return_value=None),mock.patch.object(manage,'capture',return_value=''):
+    manage.initialize(args)
+    self.assertTrue((target/'instance.json').is_file())
+    self.assertEqual(target.stat().st_mode&0o777,0o700)
+    self.assertRaises(RuntimeError,manage.initialize,args)
+ def test_macos_launcher_reports_setup_failure_separately(self):
+  pkg_macos=module('gdpackage_macos',ROOT/'scripts/package-macos-native.py')
+  self.assertIn("if '$PY' '$MANAGE' init",pkg_macos.LAUNCHER_SCRIPT)
+  self.assertIn('初始化或启动未完成',pkg_macos.LAUNCHER_SCRIPT)
 if __name__=='__main__':unittest.main()

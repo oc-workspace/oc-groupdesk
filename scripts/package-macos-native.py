@@ -396,7 +396,7 @@ if [[ -z "$PY" ]]; then
 fi
 
 if [[ ! -f "$TARGET/instance.json" ]]; then
-  SETUP_CMD="clear; echo '=== GroupDesk macOS 原生实例首次初始化 ==='; echo '实例目录: $TARGET'; echo ''; '$PY' '$MANAGE' init --target '$TARGET' --project gd-macos --port 3110 && '$PY' '$MANAGE' up --target '$TARGET' && '$PY' '$MANAGE' open --target '$TARGET'; echo ''; echo '提示：可关闭此窗口，服务将在后台持续运行。再次双击 GroupDesk.app 可打开网页或停止服务。'"
+  SETUP_CMD="clear; echo '=== GroupDesk macOS 原生实例首次初始化 ==='; echo '实例目录: $TARGET'; echo ''; if '$PY' '$MANAGE' init --target '$TARGET' --project gd-macos --port 3110 && '$PY' '$MANAGE' up --target '$TARGET' && '$PY' '$MANAGE' open --target '$TARGET'; then echo ''; echo '初始化并启动成功！可关闭此窗口，服务将在后台持续运行。再次双击 GroupDesk.app 可打开网页或停止服务。'; else echo ''; echo '初始化或启动未完成，请查看上方错误信息后重新双击 GroupDesk.app 重试。'; fi"
   run_in_terminal "$SETUP_CMD"
   exit 0
 fi
