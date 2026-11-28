@@ -148,3 +148,15 @@ restore 只写新的空实例。支持本工具格式和维护备份 `site` 格�
 - Linux 离线包镜像实际导入校验通过。仅构建/测试隔离实例，没有切换线上站点、操作真实微信或发送群消息，也未重新恢复现有私有备份。
 
 安装包不含已有微信号、群聊记录、私有 Key 或私人 Persona。包内携带修复源码，不会自动给已存在的 MaiBot 运行目录打补丁；旧机器人运行环境升级仍应核对基线、备份并单独执行接入/升级验收。本次只完成安装包更新和开发分支提交，未合并或部署该打包分支到生产。
+
+## 2026-11-28 macOS 首次初始化修复重打包
+
+在全新 Apple Silicon Mac 实机测试 `20261126-r1` 时，定位到 `distribution/manage-macos.py`（及 `distribution/manage.py`）首次 `init` 未先创建缺失的父目录导致 `FileNotFoundError`，以及 `GroupDesk.app` 启动脚本在初始化失败后仍提示“服务将在后台持续运行”。修复提交 `71561a1c955b44cf1bff4e83d0c3731c9cbf660d`（分支 `feat/package-refresh-20261126`）保持生产 PR166 修复指纹不变，并重新构建 `0.1.0-standalone-20261128-r1` 干净源码与 Apple Silicon Mac 原生包：
+
+| 产物文件 | 字节数 | SHA-256 |
+|---|---:|---|
+| `groupdesk-standalone-20261128-r1-source.tar.gz` | 741363 | `5dd465cacbc88ea037c2f2c04f00bf348462c7e6fcf14fb838e022b7973451db` |
+| `groupdesk-standalone-20261128-r1-macos-arm64.dmg` | 137708285 | `67014ed8486f5a33088339130c7231af40619ef37a820e044ed013838b39f210` |
+| `groupdesk-standalone-20261128-r1-macos-arm64.tar.gz` | 100854435 | `f9cf91686181c509badaa3b0114c0b902c33bcab528e9eddd8f10ddd77ce3ea4` |
+
+本机交付目录：工作区 `artifacts/2026-11-28/standalone/`（Mac 包在 `macos-arm64/` 子目录）。开发构建、148 项 Node 单元、8 项打包安全/嵌套父目录回归、13 项可靠性 Python 测试，以及剥离 `PATH=/usr/bin:/bin` 后对实际 `.dmg` 的缺失嵌套父目录（含空格路径）初始化、覆盖保护、无 worker 启动、健康检查、登录、签名与 PR166 指纹校验和优雅停止均已通过（详细记录见 [11 月 28 日记录](progress/2026-11-28.md)）。
